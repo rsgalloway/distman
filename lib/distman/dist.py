@@ -371,14 +371,17 @@ class Distributor(GitRepo):
 
         # process targets listed in dist file
         for source, dest in targets:
-            util.create_dest_folder(source, dest, dryrun, yes)
+            util.create_dest_folder(dest, dryrun, yes)
 
-            # TODO: enable writing .dist file
-            # if not dryrun:
-            #     util.write_dist_info(self.name, self.author, self.path, source, dest)
-
-            # relative path to the source file
-            source_path = os.path.join(self.directory, source)
+            # write the dist info file
+            if not dryrun and not show:
+                info = {
+                    "name": self.name,
+                    "origin": self.path,
+                    "source": source,
+                    "author": self.author,
+                }
+                util.write_dist_info(dest, info)
 
             # define dist version information
             version_num = 0
@@ -415,6 +418,9 @@ class Distributor(GitRepo):
                         except Exception:
                             pass
                 continue
+
+            # relative path to the source file
+            source_path = os.path.join(self.directory, source)
 
             if version_list:
                 version_file, version_num, _ = version_list[-1]

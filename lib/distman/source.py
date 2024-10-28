@@ -173,7 +173,7 @@ class GitRepo(Source):
                 self.path = self.path[self.path.find("@") + 1 :]
 
             # change ssh style path to look like https style
-            self.path = self.path.replace(":", "/")
+            # self.path = self.path.replace(":", "/")
             self.name = self.path[self.path.rfind("/") + 1 :]
             if self.name.endswith(".git"):
                 self.name = self.name[:-4]

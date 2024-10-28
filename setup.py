@@ -40,8 +40,8 @@ with open(os.path.join(here, "README.md")) as f:
 
 setup(
     name="distman",
-    version="0.1.1",
-    description="Super simple software distribution system",
+    version="0.1.2",
+    description="Super simple file distribution",
     long_description=long_description,
     long_description_content_type="text/markdown",
     author="Ryan Galloway",
@@ -55,7 +55,7 @@ setup(
         ],
     },
     install_requires=[
-        "envstack>=0.4.2",
+        "envstack>=0.5.0",
         "GitPython==3.1.43",
     ],
     data_files=[(".", ["distman.env"])],

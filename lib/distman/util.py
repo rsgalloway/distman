@@ -161,29 +161,42 @@ def normalize_path(path):
     return path
 
 
-def write_dist_info(name, author, path, source, dest):
+def get_dist_info(dest, ext=config.DIST_INFO_EXT):
+    """Returns the dist info file path, e.g.
+
+        /path/to/desploy/prod/.foobar.py.dist
+
+    The dist info files are hidden dot files used to store distribution
+    information and tell distman if a file has been previously disted.
+
+    :param dest: destination directory.
+    :param ext: file extension.
+    """
+    folder, original_name = os.path.split(dest)
+    return os.path.join(folder, f".{original_name}{ext}")
+
+
+def write_dist_info(dest, dist_info):
     """Writes distribution information to a file.
 
     :param dest: Path to destination directory.
-    :param source: Path to source file.
+    :param dist_info: Dictionary of distribution information.
     """
-    with open(dest + config.DIST_INFO_EXT, "w") as outFile:
-        outFile.write(f"Name: {name}\n")
-        outFile.write(f"Origin: {path}\n")
-        outFile.write(f"Source: {source}\n")
-        outFile.write(f"Author: {author}\n")
+    distinfo = get_dist_info(dest=dest)
+    log.debug("Writing dist info to %s" % distinfo)
+    with open(distinfo, "w") as outFile:
+        for key, value in dist_info.items():
+            outFile.write(f"{key}: {value}\n")
 
 
-def create_dest_folder(source, dest, dryrun=False, yes=False):
+def create_dest_folder(dest, dryrun=False, yes=False):
     """Creates destination folder if it does not exist.
 
-    :param source: source file path.
     :param dest: destination file path.
     :param dryrun: dry run flag.
     :param yes: yes flag.
     :returns: True if destination folder was created.
     """
-
     dest_dir = os.path.dirname(dest)
 
     if not os.path.exists(dest_dir):
@@ -200,8 +213,9 @@ def create_dest_folder(source, dest, dryrun=False, yes=False):
         log.info("Directory not found: %s" % dest_dir)
         return False
 
-    # dist info file does not exist?
-    if not os.path.exists(dest + config.DIST_INFO_EXT):
+    # if dist info file does not exist means this is a new target
+    distinfo = get_dist_info(dest)
+    if not os.path.exists(distinfo):
         if os.path.exists(dest):
             question = (
                 "Target '%s' already exists as a %s and will "
@@ -220,7 +234,6 @@ def full_path(start, relative_path):
     :param relative_path: relative path.
     :returns: full path.
     """
-
     if not relative_path:
         raise Exception("Empty path")
 
@@ -250,7 +263,6 @@ def remove_object(path, recurse=False):
     :param path: file system path.
     :param recurse: recursively delete directory tree.
     """
-
     try:
         if os.path.isdir(path):
             if recurse:
@@ -276,7 +288,6 @@ def yesNo(question):
     :param question: question text.
     :returns: True if user answers yes.
     """
-
     while True:
         answer = input(question + " (y/n): ").lower().strip()
         if answer in ("y", "yes", "n", "no"):

@@ -108,6 +108,13 @@ $ ENV=dev distman [-d]
 This will change `prod` to `dev` in the target deplyment path. This is useful for deploying
 files or code to different development environments.
 
+## Dist Info
+
+When disting files, `distman` will create hidden dist info files that meta data about the
+source files. For example, if the source file is called `foobar.py` then the dist info file
+that will be created will be called `.foobar.py.dist`. The dist info files will be created at
+the deployment root.
+
 ## Config
 
 Most congifation is done in the `distman.env` [envstack](https://github.com/rsgalloway/envstack) file.
