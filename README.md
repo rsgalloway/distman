@@ -98,12 +98,23 @@ To override the root folder, set the `$ROOT` env var, or update the `distman.env
 $ ROOT=/var/tmp/tools distman [-d]
 ```
 
+By default, `distman` dists to a prod folder under `$ROOT`. This can be changed at any time
+using `$ENV` or updating or creating a new `distman.env` envstack file:
+
+```bash
+$ ENV=dev distman [-d]
+```
+
+This will change `prod` to `dev` in the target deplyment path. This is useful for deploying
+files or code to different development environments.
+
 ## Config
 
 Most congifation is done in the `distman.env` [envstack](https://github.com/rsgalloway/envstack) file.
 
 Default config settings are in the config.py module. The following environment variables are supported:
 
-| Variable            | Description |
-|---------------------|-------------|
-| $ROOT               | root directory to distrute files |
+| Variable    | Description |
+|-------------|-------------|
+| $ENV        | target environment (e.g. prod or dev) |
+| $ROOT       | root directory to distrute files |
