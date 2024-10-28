@@ -1,0 +1,14 @@
+{
+    "version": "1",
+    "author": "ryan@rsg.io",
+    "targets": {
+        "env": {
+            "source": "distman.env",
+            "destination": "{DEPLOY_ROOT}/env/distman.env"
+        },
+        "lib": {
+            "source": "lib/distman",
+            "destination": "{DEPLOY_ROOT}/lib/python/distman"
+        }
+    }
+}
