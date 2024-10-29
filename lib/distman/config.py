@@ -67,6 +67,7 @@ IGNORABLE = [
     ".env",
     ".venv",
     "*.bup",
+    "*.egg",
     "*.swp",
     "*.temp*",
     "*.tmp",

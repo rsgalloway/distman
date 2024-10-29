@@ -144,7 +144,10 @@ class Distributor(GitRepo):
         all_files = self.get_files(source)
 
         for filepath in all_files:
-            target = os.path.join(dest, filepath[len(source) + 1 :])
+            if source == ".":
+                target = os.path.join(dest, filepath)
+            else:
+                target = os.path.join(dest, filepath[len(source) + 1 :])
             self.__copy_file(filepath, target)
 
     def __copy_object(self, source, dest):
@@ -420,7 +423,10 @@ class Distributor(GitRepo):
                 continue
 
             # relative path to the source file
-            source_path = os.path.join(self.directory, source)
+            if source == ".":
+                source_path = self.directory
+            else:
+                source_path = os.path.join(self.directory, source)
 
             if version_list:
                 version_file, version_num, _ = version_list[-1]
@@ -731,7 +737,6 @@ class Distributor(GitRepo):
                         log.info("Deleting: %s" % verFile)
                         if not dryrun:
                             util.remove_object(verFile, recurse=True)
-
 
         if not any_found:
             log.info("No targets found to delete")

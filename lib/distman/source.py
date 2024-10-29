@@ -124,28 +124,27 @@ class GitRepo(Source):
         """
         from pathlib import Path
 
-        if start and os.path.exists(start):
-            start = os.path.relpath(start)
+        repo_root = Path(self.repo.working_tree_dir).resolve()
 
-        paths = []
-        tree = self.repo.tree()
+        # resolve the start directory relative to the repo root
+        start_path = (repo_root / start).resolve()
+        if not start_path.is_dir():
+            raise ValueError(
+                f"Start directory '{start}' does not exist or is not a directory."
+            )
 
-        def list_paths(root_tree, path=Path(".")):
-            for blob in root_tree.blobs:
-                yield path / blob.name
-            for tree in root_tree.trees:
-                yield from list_paths(tree, path / tree.name)
+        # get the list of tracked files and filter by start_dir
+        tracked_files = []
+        for item in self.repo.tree().traverse():
+            item_path = repo_root / item.path
+            if item_path.is_file() and start_path in item_path.parents:
+                # append relative path from the repo root
+                tracked_files.append(str(item_path.relative_to(repo_root)))
 
-        for path in list_paths(tree):
-            if start and not str(path).startswith(start):
-                continue
-            if path not in paths:
-                paths.append(str(path))
-
-        return paths
+        return tracked_files
 
     def get_path(self):
-        """Get the git repo path."""
+        """Get the git repo path for the dist info file."""
         if self.repo and self.repo.remotes:
             if "origin" in [remote.name for remote in self.repo.remotes]:
                 return self.repo.remotes.origin.url
