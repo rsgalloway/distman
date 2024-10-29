@@ -714,22 +714,24 @@ class Distributor(GitRepo):
                 )
                 if yes or dryrun or util.yesNo(question):
                     any_found = True
+                    distinfo = util.get_dist_info(dest=dest)
                     if os.path.lexists(dest):
                         log.info("Deleting: %s" % dest)
                         if not dryrun:
                             util.remove_object(dest)
                     else:
                         log.info("Missing: %s" % dest)
-                    if os.path.lexists(dest + config.DIST_INFO_EXT):
-                        log.info("Deleting: %s" % dest + config.DIST_INFO_EXT)
+                    if os.path.lexists(distinfo):
+                        log.info("Deleting: %s" % distinfo)
                         if not dryrun:
-                            os.remove(dest + config.DIST_INFO_EXT)
+                            os.remove(distinfo)
                     else:
-                        log.info("Missing: %s" % dest + config.DIST_INFO_EXT)
+                        log.info("Missing: %s" % distinfo)
                     for verFile, _, _ in version_list:
                         log.info("Deleting: %s" % verFile)
                         if not dryrun:
                             util.remove_object(verFile, recurse=True)
+
 
         if not any_found:
             log.info("No targets found to delete")
