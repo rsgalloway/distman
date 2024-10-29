@@ -495,6 +495,9 @@ class Distributor(GitRepo):
                         % (source, "d" if isdir else "f", version_dest)
                     )
 
+        if self.repo:
+            self.repo.close()
+
         return True
 
     def reset_file_version(self, target, dryrun=False):
