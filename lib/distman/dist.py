@@ -208,14 +208,14 @@ class Distributor(GitRepo):
         return True
 
     @staticmethod
-    def __link_object(target, link, actualTarget):
-        """Creates symbolic link to file or directory.
+    def __link_object(target, link, actual_target):
+        """Creates symbolic link to a file or directory.
 
         :param target: Path to target file or directory.
         :param link: Path to symbolic link.
-        :param actualTarget: Path to actual target file or directory.
+        :param actual_target: Path to actual target file or directory.
         """
-        isdir = os.path.isdir(actualTarget)
+        isdir = os.path.isdir(actual_target)
         try:
             os.symlink(target, link, target_is_directory=isdir)
 
