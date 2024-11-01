@@ -124,4 +124,4 @@ Default config settings are in the config.py module. The following environment v
 | Variable    | Description |
 |-------------|-------------|
 | $ENV        | target environment (e.g. prod or dev) |
-| $ROOT       | root directory to distrute files |
+| $ROOT       | root directory to distribute files |
