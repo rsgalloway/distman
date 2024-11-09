@@ -259,15 +259,28 @@ class Distributor(GitRepo):
         if self.repo:
             try:
                 repo_files = [f for f in self.get_repo_files(start)]
+                tracked_dirs = [os.path.dirname(f) for f in repo_files]
+                untracked_files = [f for f in all_files if f not in repo_files]
+                untracked_dirs = [
+                    os.path.dirname(f)
+                    for f in untracked_files
+                    if os.path.dirname(f) not in tracked_dirs
+                ]
+                untracked_files = [
+                    f
+                    for f in untracked_files
+                    if os.path.dirname(f) not in untracked_dirs
+                ]
+
+                if untracked_files or untracked_dirs:
+                    log.warning("Untracked files:")
+                    for f in untracked_files:
+                        log.warning("  %s" % f)
+                    for d in untracked_dirs:
+                        log.warning("  %s/" % d)
+
             except Exception as e:
                 log.warning("Failed to get files from repo: %s" % str(e))
-
-            untracked_files = [f for f in all_files if f not in repo_files]
-
-            if untracked_files:
-                log.warning("Untracked files:")
-                for file in untracked_files:
-                    log.warning(file)
 
         return all_files
 
