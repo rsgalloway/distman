@@ -158,8 +158,10 @@ class Distributor(GitRepo):
         """
         if os.path.isfile(source):
             self.__copy_file(source, dest)
-            return
-        self.__copy_directory(source, dest)
+        elif os.path.isdir(source):
+            self.__copy_directory(source, dest)
+        else:
+            raise Exception("Source '%s' not found" % source)
 
     def __compare_files(self, filePathA, filePathB):
         """Compares two files, ignoring end of lines in text files.
@@ -251,12 +253,23 @@ class Distributor(GitRepo):
         :param start: Starting directory.
         :return: List of relative file paths.
         """
+        all_files = [f for f in util.walk(start)]
+        repo_files = []
+
         if self.repo:
             try:
-                return [f for f in self.get_repo_files(start)]
+                repo_files = [f for f in self.get_repo_files(start)]
             except Exception as e:
-                log.warning("Failed to get files from git: %s" % str(e))
-        return [f for f in util.walk(start)]
+                log.warning("Failed to get files from repo: %s" % str(e))
+
+            untracked_files = [f for f in all_files if f not in repo_files]
+
+            if untracked_files:
+                log.warning("Untracked files:")
+                for file in untracked_files:
+                    log.warning(file)
+
+        return all_files
 
     def dist(
         self,
