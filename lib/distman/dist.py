@@ -34,6 +34,7 @@ Contains file distribution classes and functions.
 """
 
 import filecmp
+import fnmatch
 import os
 import shutil
 import time
@@ -295,7 +296,7 @@ class Distributor(GitRepo):
     ):
         """Performs the file distribution.
 
-        :param target: target name in dist file.
+        :param target: optionally match specific targets.
         :param show: Show file versions.
         :param force: Force distribution.
         :param yes: Assume yes to all questions.
@@ -333,8 +334,8 @@ class Distributor(GitRepo):
                 self.root = None
                 return False
 
-            # are we looking for a specific target?
-            if target and target != target_name:
+            # optionally match on specific targets
+            if target and not fnmatch.fnmatch(target_name, target):
                 continue
 
             try:

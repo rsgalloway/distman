@@ -65,7 +65,7 @@ def parse_args():
         "-t",
         "--target",
         metavar="TARGET",
-        help="The source TARGET defined in the dist file",
+        help="The source TARGET in the dist file (supports wildcards)",
     )
     parser.add_argument(
         "-s",
