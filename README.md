@@ -121,7 +121,8 @@ Most congifation is done in the `distman.env` [envstack](https://github.com/rsga
 
 Default config settings are in the config.py module. The following environment variables are supported:
 
-| Variable    | Description |
-|-------------|-------------|
-| $ENV        | target environment (e.g. prod or dev) |
-| $ROOT       | root directory to distribute files |
+| Variable     | Description |
+|--------------|-------------|
+| $DEPLOY_ROOT | file deployment root directory |
+| $ENV         | target environment (e.g. prod or dev) |
+| $ROOT        | dist root directory |
