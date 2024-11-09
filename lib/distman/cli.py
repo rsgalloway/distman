@@ -122,7 +122,7 @@ def parse_args():
         "-v",
         "--version",
         action="version",
-        version="%(prog)s {version}".format(version=__version__),
+        version=f"distman {__version__}",
     )
 
     args = parser.parse_args()
