@@ -118,7 +118,8 @@ class Distributor(GitRepo):
             return commitB.upper().startswith(commitA.upper())
 
     def __copy_file(self, source, dest):
-        """Copies a file. Converts line endings to linux LF.
+        """Copies a file, and converts line endings to linux LF, preserving
+        original source file mode.
 
         :param source: Path to source file.
         :param dest: Path to destination file.
@@ -131,9 +132,13 @@ class Distributor(GitRepo):
                 for line in infile:
                     text = line.rstrip("\r\n")
                     outfile.write((text + "\n").encode("UTF-8"))
-
+            mode = os.stat(source).st_mode
+            os.chmod(dest, mode)
         except UnicodeDecodeError:
-            shutil.copyfile(source, dest)
+            shutil.copy2(source, dest)
+        except Exception as e:
+            log.warning("File copy error: %s" % str(e))
+            shutil.copy2(source, dest)
 
     def __copy_directory(self, source, dest):
         """Recursively copies a directory (ignores hidden files).
