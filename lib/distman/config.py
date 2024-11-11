@@ -43,11 +43,11 @@ DEFAULT_ENV = {
     "ENV": "prod",
     "HOME": os.getenv("HOME"),
     "ROOT": {
-        "darwin": "{HOME}/Library/Application Support",
-        "linux": "{HOME}/.local",
-        "windows": "C:\\ProgramData",
-    }.get(PLATFORM, "./distman/{ENV}"),
-    "DEPLOY_ROOT": "{ROOT}/distman/{ENV}",
+        "darwin": "{HOME}/Library/Application Support/pipe",
+        "linux": "{HOME}/.local/pipe",
+        "windows": "C:\\ProgramData\\pipe",
+    }.get(PLATFORM, "./pipe/{ENV}"),
+    "DEPLOY_ROOT": "{ROOT}/{ENV}",
 }
 
 # dist file settings
