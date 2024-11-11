@@ -132,13 +132,13 @@ class Distributor(GitRepo):
                 for line in infile:
                     text = line.rstrip("\r\n")
                     outfile.write((text + "\n").encode("UTF-8"))
-            mode = os.stat(source).st_mode
-            os.chmod(dest, mode)
         except UnicodeDecodeError:
             shutil.copy2(source, dest)
         except Exception as e:
-            log.warning("File copy error: %s" % str(e))
-            shutil.copy2(source, dest)
+            log.error("File copy error: %s" % str(e))
+        finally:
+            mode = os.stat(source).st_mode
+            os.chmod(dest, mode)
 
     def __copy_directory(self, source, dest):
         """Recursively copies a directory (ignores hidden files).
