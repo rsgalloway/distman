@@ -40,13 +40,30 @@ with open(os.path.join(here, "README.md")) as f:
 
 setup(
     name="distman",
-    version="0.2.0",
+    version="0.2.1",
     description="Super simple file distribution",
     long_description=long_description,
     long_description_content_type="text/markdown",
     author="Ryan Galloway",
     author_email="ryan@rsgalloway.com",
     url="http://github.com/rsgalloway/distman",
+    license="BSD 3-Clause License",
+    classifiers=[
+        # How mature is this project? Common values are
+        #   3 - Alpha
+        #   4 - Beta
+        #   5 - Production/Stable
+        "Development Status :: 4 - Beta",
+        "Intended Audience :: Developers",
+        "Topic :: Software Development :: Libraries",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.6",
+        "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+    ],
     package_dir={"": "lib"},
     packages=find_packages("lib"),
     entry_points={
@@ -55,9 +72,10 @@ setup(
         ],
     },
     install_requires=[
-        "envstack>=0.6.1",
+        "envstack>=0.6.2",
         "GitPython==3.1.43",
     ],
+    python_requires=">=3.6",
     data_files=[(".", ["stack.env", "dist.json"])],
     zip_safe=False,
 )
