@@ -12,12 +12,12 @@ The easiest way to install:
 $ pip install distman
 ```
 
-Alternatively,
+Alternatively, use distman to dist to a deployment area using options defined
+in the `dist.json` and example `stack.env` files:
 
 ```bash
-$ git clone https://github.com/rsgalloway/distman
-$ cd distman
-$ python setup.py install
+$ cp example_stack.env stack.env
+$ distman [-d]
 ```
 
 Files and directories can be distributed from any folder or git repo containing
@@ -63,15 +63,15 @@ version number is incremented and the link is updated.
 
 ## Usage
 
-To dist files defined in the dist.json file (use -d for dryrun):
+To dist files defined in a `dist.json` file (remove -d when ready):
 
 ```bash
-$ distman [-d]
+$ distman -d
 ```
 
-This will dist files to the `$DEPLOY_ROOT` folder defined in the `stack.env`
-[envstack](https://github.com/rsgalloway/envstack) file and might look something
-like this using default values:
+This will dist files to the `$DEPLOY_ROOT` folder defined in the example
+`stack.env` [envstack](https://github.com/rsgalloway/envstack) file and might
+look something like this using default values:
 
 ```
 $HOME/.local/pipe/prod/
@@ -100,8 +100,8 @@ env stack file:
 $ ROOT=/var/tmp/pipe distman [-d]
 ```
 
-By default, `distman` dists to a prod folder under `$DEPLOYROOT`. This can be
-changed at any time using `$ENV` or updating or creating a new `stack.env`
+By default, `distman` dists to a prod folder under `$DEPLOY_ROOT`. This can be
+changed at any time using `$ENV` or updating or modifying the `stack.env`
 envstack file:
 
 ```bash

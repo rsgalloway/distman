@@ -266,17 +266,21 @@ class Distributor(GitRepo):
             try:
                 repo_files = [f for f in self.get_repo_files(start)]
                 tracked_dirs = [os.path.dirname(f) for f in repo_files]
-                untracked_files = [f for f in all_files if f not in repo_files]
-                untracked_dirs = [
-                    os.path.dirname(f)
-                    for f in untracked_files
-                    if os.path.dirname(f) not in tracked_dirs
-                ]
-                untracked_files = [
-                    f
-                    for f in untracked_files
-                    if os.path.dirname(f) not in untracked_dirs
-                ]
+                untracked_files = set([f for f in all_files if f not in repo_files])
+                untracked_dirs = set(
+                    [
+                        os.path.dirname(f)
+                        for f in untracked_files
+                        if os.path.dirname(f) not in tracked_dirs
+                    ]
+                )
+                untracked_files = set(
+                    [
+                        f
+                        for f in untracked_files
+                        if os.path.dirname(f) not in untracked_dirs
+                    ]
+                )
 
                 if untracked_files or untracked_dirs:
                     log.warning("Untracked files:")
