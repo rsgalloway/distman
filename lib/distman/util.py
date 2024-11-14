@@ -142,6 +142,11 @@ def is_ignorable(filepath):
     return re.search(IGNORABLE_PATHS, filepath) is not None
 
 
+def get_root_dir(path):
+    """Returns the root directory of a path."""
+    return os.path.dirname(path).split(os.path.sep)[0]
+
+
 def normalize_path(path):
     """Normalizes paths by changing separators to forward slashes and removing
     trailing slashes.
