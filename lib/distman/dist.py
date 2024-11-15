@@ -545,7 +545,10 @@ class Distributor(GitRepo):
                     )
 
         if self.repo:
-            self.repo.close()
+            try:
+                self.repo.close()
+            except:
+                pass
 
         return True
 

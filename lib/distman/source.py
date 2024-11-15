@@ -181,16 +181,16 @@ class GitRepo(Source):
             branch = self.repo.active_branch
             self.branch_name = branch.name
             if branch.name not in config.MAIN_BRANCHES:
-                log.warning("WARNING: Not on master branch")
+                log.warning("Warning: Not on master branch")
 
         except git.InvalidGitRepositoryError:
-            log.warning("Not in a git repository directory")
+            log.warning("Warning: Not in a git repository")
 
         except (AttributeError, TypeError) as e:
-            log.warning("WARNING: %s", str(e))
+            log.warning("Warning: %s", str(e))
 
         except Exception as e:
-            log.warning("ERROR: error reading git repo\n%s", str(e))
+            log.warning("Error reading git repo: %s", str(e))
 
         log.info("Name: %s" % self.name)
         log.info("Path: %s" % self.path)
