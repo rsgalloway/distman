@@ -465,6 +465,12 @@ class Distributor(GitRepo):
                             pass
                 continue
 
+            # relative path to the source file
+            if source == ".":
+                source_path = self.directory
+            else:
+                source_path = util.normalize_path(os.path.join(self.directory, source))
+
             if version_list:
                 version_file, version_num, _ = version_list[-1]
                 if version_file and self.__compare_objects(source_path, version_file):
