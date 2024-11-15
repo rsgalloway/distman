@@ -226,30 +226,37 @@ class GitRepo(Source):
 
         return False
 
-    def git_changed_files(self):
+    def git_changed_files(self, include_untracked=True):
         """Returns list of changed files (in staging or untracked).
 
+        :param include_untracked: Include untracked files.
         :return: List of changed files.
         """
         if not self.repo:
             return []
 
-        # get list of changed files
-        changed_files = [
-            os.path.abspath(self.directory + os.path.sep + item.a_path)
-            for item in self.repo.index.diff(None)
-        ]
+        try:
+            # get list of changed files
+            changed_files = [
+                os.path.join(self.directory, item.a_path)
+                for item in self.repo.index.diff(None)
+            ]
 
-        # get list of staged files
-        changed_files += [
-            os.path.abspath(self.directory + os.path.sep + item.a_path)
-            for item in self.repo.index.diff("HEAD")
-        ]
+            # get list of staged files
+            changed_files += [
+                os.path.join(self.directory, item.a_path)
+                for item in self.repo.index.diff("HEAD")
+            ]
 
-        # get list of untracked files
-        changed_files += [
-            os.path.abspath(self.directory + os.path.sep + item)
-            for item in self.repo.untracked_files
-        ]
+            # get list of untracked files
+            if include_untracked:
+                changed_files += [
+                    os.path.join(self.directory, item)
+                    for item in self.repo.untracked_files
+                ]
 
-        return changed_files
+            return [util.normalize_path(f) for f in changed_files]
+
+        except Exception as e:
+            log.error("Error getting changed files: %s", str(e))
+            return []
