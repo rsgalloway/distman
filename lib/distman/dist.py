@@ -259,7 +259,15 @@ class Distributor(GitRepo):
         :param start: Starting directory.
         :return: List of relative file paths.
         """
-        all_files = [f for f in util.walk(start)]
+        return [f for f in util.walk(start)]
+
+    def get_untracked_files(self, start):
+        """Returns a list of untracked files and directories.
+
+        :param start: Starting directory.
+        :return: List of relative file paths.
+        """
+        all_files = self.get_files(start)
         repo_files = []
 
         if self.repo:
@@ -282,17 +290,10 @@ class Distributor(GitRepo):
                     ]
                 )
 
-                if untracked_files or untracked_dirs:
-                    log.warning("Untracked files:")
-                    for f in untracked_files:
-                        log.warning("  %s" % f)
-                    for d in untracked_dirs:
-                        log.warning("  %s/" % d)
-
             except Exception as e:
                 log.warning("Failed to get files from repo: %s" % str(e))
 
-        return all_files
+        return untracked_files, untracked_dirs
 
     def dist(
         self,
