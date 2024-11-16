@@ -35,11 +35,22 @@ Contains source file distribution classes and functions.
 
 import json
 import os
+from pathlib import Path
 
 import git
 
 from distman import config, util
 from distman.logger import log
+
+
+def requires_git(func):
+    """Decorator to read info from a git repo."""
+
+    def wrapper(self, *args, **kwargs):
+        self.read_git_info()
+        return func(self, *args, **kwargs)
+
+    return wrapper
 
 
 class Source(object):
@@ -116,14 +127,13 @@ class GitRepo(Source):
         self.repo = None
         self.short_head = ""
 
-    def get_repo_files(self, start=None):
+    @requires_git
+    def get_repo_files(self, start="."):
         """Generator that yields relative file paths tracked by this git repo.
 
         :param start: Starting directory.
         :return: List of relative file paths.
         """
-        from pathlib import Path
-
         repo_root = Path(self.repo.working_tree_dir).resolve()
 
         # resolve the start directory relative to the repo root
@@ -142,6 +152,31 @@ class GitRepo(Source):
                 tracked_files.append(str(item_path.relative_to(repo_root)))
 
         return tracked_files
+
+    @requires_git
+    def get_untracked_files(self, start=".", include_ignored=True):
+        """Returns a list of all untracked files in the current directory, and
+        their root directories, because the dist file may contain untracked
+        files or directories (such as build products).
+
+        :param start: Starting directory (default ".").
+        :param include_ignored: Include git ignored files (defauylt True).
+        :return: Tuple of untracked files and directories (files, dirs).
+        """
+        untracked_files = []
+        untracked_dirs = []
+
+        all_files = [util.normalize_path(f) for f in util.walk(start)]
+
+        if include_ignored:
+            repo_files = [util.normalize_path(f) for f in self.get_repo_files(start)]
+            untracked_files = [f for f in all_files if f not in repo_files]
+        else:
+            untracked_files = [f for f in self.repo.untracked_files]
+
+        untracked_dirs = util.get_common_root_dirs(untracked_files)
+
+        return untracked_files, untracked_dirs
 
     def get_path(self):
         """Get the git repo path for the dist info file."""
@@ -200,6 +235,7 @@ class GitRepo(Source):
 
         return True
 
+    @requires_git
     def is_git_behind(self):
         """Checks for upstream commits on the repo."""
         if not self.branch_name:
@@ -226,8 +262,10 @@ class GitRepo(Source):
 
         return False
 
+    @requires_git
     def git_changed_files(self, include_untracked=True):
         """Returns list of changed files (in staging or untracked).
+        Untracked files exclude ignored files by .gitignore files.
 
         :param include_untracked: Include untracked files.
         :return: List of changed files.
@@ -248,7 +286,7 @@ class GitRepo(Source):
                 for item in self.repo.index.diff("HEAD")
             ]
 
-            # get list of untracked files
+            # get list of untracked files (excluding ignored)
             if include_untracked:
                 changed_files += [
                     os.path.join(self.directory, item)
