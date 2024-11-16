@@ -38,6 +38,7 @@ import fnmatch
 import os
 import re
 import shutil
+from collections import defaultdict
 
 from distman import config
 from distman.logger import log
@@ -142,9 +143,39 @@ def is_ignorable(filepath):
     return re.search(IGNORABLE_PATHS, filepath) is not None
 
 
+def get_root_dir(path):
+    """Returns the root directory of a path."""
+    return os.path.dirname(path).split(os.path.sep)[0]
+
+
+def get_common_root_dirs(filepaths):
+    """Returns a list of common root directories for a list of file paths.
+
+    :param filepaths: list of file paths.
+    :returns: list of common root directories.
+    """
+
+    path_components = [normalize_path(path).split(os.sep) for path in filepaths]
+
+    # group files by their top-level directory
+    directory_tree = defaultdict(list)
+    for components in path_components:
+        root = components[0]  # Top-level directory
+        directory_tree[root].append(components)
+
+    common_directories = set()
+
+    # find common subdirectories within each top-level directory group
+    for root, paths in directory_tree.items():
+        if len(paths) > 1:
+            common_prefix = os.path.join(*os.path.commonprefix(paths))
+            common_directories.add(common_prefix)
+
+    return list(common_directories)
+
+
 def normalize_path(path):
-    """Normalizes paths by changing separators to forward slashes and removing
-    trailing slashes.
+    """Normalizes a path by removing leading "./" and calling os.path.normpath.
 
     :param path: file system path.
     :returns: normalized path.
@@ -152,12 +183,23 @@ def normalize_path(path):
 
     if not path:
         return path
+    path = sanitize_path(path)
+    return os.path.normpath(path.lstrip("./"))
 
+
+def sanitize_path(path):
+    """Sanitizes a path by changing separators to forward slashes and removing
+    trailing slashes.
+
+    :param path: file system path.
+    :returns: sanitized path.
+    """
+
+    if not path:
+        return path
     path = path.replace("\\", "/")
-
     if path[-1] == "/":
         path = path[:-1]
-
     return path
 
 

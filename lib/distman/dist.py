@@ -259,40 +259,7 @@ class Distributor(GitRepo):
         :param start: Starting directory.
         :return: List of relative file paths.
         """
-        all_files = [f for f in util.walk(start)]
-        repo_files = []
-
-        if self.repo:
-            try:
-                repo_files = [f for f in self.get_repo_files(start)]
-                tracked_dirs = [os.path.dirname(f) for f in repo_files]
-                untracked_files = set([f for f in all_files if f not in repo_files])
-                untracked_dirs = set(
-                    [
-                        os.path.dirname(f)
-                        for f in untracked_files
-                        if os.path.dirname(f) not in tracked_dirs
-                    ]
-                )
-                untracked_files = set(
-                    [
-                        f
-                        for f in untracked_files
-                        if os.path.dirname(f) not in untracked_dirs
-                    ]
-                )
-
-                if untracked_files or untracked_dirs:
-                    log.warning("Untracked files:")
-                    for f in untracked_files:
-                        log.warning("  %s" % f)
-                    for d in untracked_dirs:
-                        log.warning("  %s/" % d)
-
-            except Exception as e:
-                log.warning("Failed to get files from repo: %s" % str(e))
-
-        return all_files
+        return [f for f in util.walk(start)]
 
     def dist(
         self,
@@ -314,7 +281,7 @@ class Distributor(GitRepo):
         :return: True if successful.
         """
         if self.root is None:
-            log.error("dist file not found or invalid")
+            log.error("%s not found or invalid" % config.DIST_FILE)
             return False
 
         if not self.read_git_info():
@@ -326,10 +293,10 @@ class Distributor(GitRepo):
             return False
 
         changed_files = self.git_changed_files()
-        if config.DIST_FILE in changed_files:
-            log.info(
-                "WARNING: %s should be checked into git repository!" % config.DIST_FILE
-            )
+        changed_dirs = util.get_common_root_dirs(changed_files)
+
+        if changed_files and (config.DIST_FILE in changed_files):
+            log.warning("Uncommitted changes in %s" % config.DIST_FILE)
 
         targets = []
         for target_name, target_dict in targets_node.items():
@@ -348,15 +315,21 @@ class Distributor(GitRepo):
                 continue
 
             try:
-                dest = util.normalize_path(self.__replace_vars(dest))
+                dest = util.sanitize_path(self.__replace_vars(dest))
             except Exception as e:
                 log.info(
                     "%s in <%s> for %s" % (str(e), config.TAG_DESTPATH, target_name)
                 )
                 return False
 
+            # relative path to the source file
+            if source == ".":
+                source_path = self.directory
+            else:
+                source_path = util.normalize_path(os.path.join(self.directory, source))
+
             # make sure file exists
-            if not os.path.exists(self.directory + os.path.sep + source):
+            if not os.path.exists(source_path):
                 log.info(
                     "Target %s: Source '%s' does not exist" % (target_name, source)
                 )
@@ -366,8 +339,8 @@ class Distributor(GitRepo):
             if (
                 not show
                 and not force
-                and os.path.abspath(self.directory + os.path.sep + source)
-            ) in changed_files:
+                and (source_path in changed_files or source_path in changed_dirs)
+            ):
                 log.info(
                     "Target %s: Source '%s' has uncommitted changes.  "
                     "Commit the changes or use --force." % (target_name, source)
@@ -462,7 +435,7 @@ class Distributor(GitRepo):
             if source == ".":
                 source_path = self.directory
             else:
-                source_path = os.path.join(self.directory, source)
+                source_path = util.normalize_path(os.path.join(self.directory, source))
 
             if version_list:
                 version_file, version_num, _ = version_list[-1]
@@ -538,7 +511,10 @@ class Distributor(GitRepo):
                     )
 
         if self.repo:
-            self.repo.close()
+            try:
+                self.repo.close()
+            except:
+                pass
 
         return True
 
@@ -566,7 +542,7 @@ class Distributor(GitRepo):
                 continue
             source = util.normalize_path(target_dict.get(config.TAG_SOURCEPATH))
             try:
-                dest = util.normalize_path(
+                dest = util.sanitize_path(
                     self.__replace_vars(target_dict.get(config.TAG_DESTPATH))
                 )
             except Exception as e:
@@ -636,7 +612,7 @@ class Distributor(GitRepo):
 
             source = util.normalize_path(target_dict.get(config.TAG_SOURCEPATH))
             try:
-                dest = util.normalize_path(
+                dest = util.sanitize_path(
                     self.__replace_vars(target_dict.get(config.TAG_DESTPATH))
                 )
             except Exception as e:
@@ -739,7 +715,7 @@ class Distributor(GitRepo):
 
                 source = util.normalize_path(target_dict.get(config.TAG_SOURCEPATH))
                 try:
-                    dest = util.normalize_path(
+                    dest = util.sanitize_path(
                         self.__replace_vars(target_dict.get(config.TAG_DESTPATH))
                     )
                 except Exception as e:
