@@ -47,7 +47,8 @@ def requires_git(func):
     """Decorator to read info from a git repo."""
 
     def wrapper(self, *args, **kwargs):
-        self.read_git_info()
+        if not self.repo:
+            self.read_git_info()
         return func(self, *args, **kwargs)
 
     return wrapper
