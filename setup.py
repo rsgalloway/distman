@@ -76,6 +76,5 @@ setup(
         "GitPython==3.1.43",
     ],
     python_requires=">=3.8",
-    data_files=[(".", ["example_stack.env", "dist.json"])],
     zip_safe=False,
 )
