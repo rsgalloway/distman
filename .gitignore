@@ -12,4 +12,3 @@ pipe/
 venv*/
 .vscode/
 *.egg-info/
-stack.env

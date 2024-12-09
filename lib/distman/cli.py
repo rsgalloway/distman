@@ -108,6 +108,11 @@ def parse_args():
         help="Force action, e.g. disting uncommitted file changes",
     )
     parser.add_argument(
+        "--version-only",
+        action="store_true",
+        help="Distribute files only, do not create links",
+    )
+    parser.add_argument(
         "-d",
         "--dryrun",
         action="store_true",
@@ -212,6 +217,7 @@ def main():
         force=args.force,
         yes=args.yes,
         dryrun=args.dryrun,
+        versiononly=args.version_only,
         verbose=args.verbose,
     ):
         return 0

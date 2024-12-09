@@ -268,6 +268,7 @@ class Distributor(GitRepo):
         force=False,
         yes=False,
         dryrun=False,
+        versiononly=False,
         verbose=False,
     ):
         """Performs the file distribution.
@@ -277,6 +278,7 @@ class Distributor(GitRepo):
         :param force: Force distribution.
         :param yes: Assume yes to all questions.
         :param dryrun: Perform dry run.
+        :param versiononly: Distribute files only, do not create links.
         :param verbose: Show more information.
         :return: True if successful.
         """
@@ -496,9 +498,9 @@ class Distributor(GitRepo):
             if not dryrun and os.path.lexists(dest):
                 util.remove_object(dest)
             # create the new symbolic link
-            if dryrun:
+            if dryrun and not versiononly:
                 log.info("Updated: %s => %s" % (source, version_dest))
-            else:
+            elif not versiononly:
                 isdir = self.__link_object(
                     config.DIR_VERSIONS + os.path.sep + os.path.basename(version_dest),
                     dest,

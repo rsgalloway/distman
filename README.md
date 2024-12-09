@@ -9,14 +9,13 @@ Distributes files and directories to versioned destinations defined in
 The easiest way to install:
 
 ```bash
-$ pip install distman
+$ pip install -U distman
 ```
 
 Alternatively, use distman to dist to a deployment area using options defined
-in the `dist.json` and example `stack.env` files:
+in the `dist.json` and `distman.env` environment stack files:
 
 ```bash
-$ cp example_stack.env stack.env
 $ distman [-d]
 ```
 
@@ -50,11 +49,11 @@ targets as you need.
 See the `dist.json` file in this repo for an example.
 
 Target paths can include environment variables, such as those defined in the
-`stack.env` envstack file, where variables are defined with curly brackets only,
-e.g.:
+`distman.env` envstack file, where variables are defined with curly brackets
+only, e.g.:
 
 ```bash
-"{DEPLOY_ROOT}/lib/python/pipe"
+"{DEPLOY_ROOT}/lib/python/distman"
 ```
 
 When files are distributed (or disted), they are copied to a `versions` folder
@@ -69,12 +68,12 @@ To dist files defined in a `dist.json` file (remove -d when ready):
 $ distman -d
 ```
 
-This will dist files to the `$DEPLOY_ROOT` folder defined in the example
-`stack.env` [envstack](https://github.com/rsgalloway/envstack) file and might
-look something like this using default values:
+This will dist files to the `${DEPLOY_ROOT}` folder defined in the provided
+`distman.env` [envstack](https://github.com/rsgalloway/envstack) file and might
+look something like this when disted:
 
 ```
-$HOME/.local/pipe/prod/
+${DEPLOY_ROOT}
 ├── bin
 │   ├── distman -> versions/distman.0.c73fe42
 │   └── versions
@@ -93,15 +92,15 @@ $HOME/.local/pipe/prod/
                 └── util.py
 ```
 
-To override the root folder, set the `$ROOT` env var, or update the `stack.env`
-env stack file:
+To override the deployment folder, update the `distman.env` environment stack
+file then re-dist:
 
 ```bash
-$ ROOT=/var/tmp/pipe distman [-d]
+$ distman [-d]
 ```
 
-By default, `distman` dists to a prod folder under `$DEPLOY_ROOT`. This can be
-changed at any time using `$ENV` or updating or modifying the `stack.env`
+By default, `distman` dists to a prod folder under `${DEPLOY_ROOT}`. This can be
+changed at any time using `${ENV}` or updating or modifying the `distman.env`
 envstack file:
 
 ```bash
@@ -120,7 +119,7 @@ The dist info files will be created at the deployment root.
 
 ## Config
 
-Most congifation is done in the `stack.env`
+Most configuration is done in the `distman.env`
 [envstack](https://github.com/rsgalloway/envstack) file.
 
 Default config settings are in the config.py module. The following environment
