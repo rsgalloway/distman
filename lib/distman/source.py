@@ -47,7 +47,7 @@ def requires_git(func):
     """Decorator to read info from a git repo."""
 
     def wrapper(self, *args, **kwargs):
-        if not self.repo:
+        if self.repo is None:
             self.read_git_info()
         return func(self, *args, **kwargs)
 
@@ -221,6 +221,7 @@ class GitRepo(Source):
 
         except git.InvalidGitRepositoryError:
             log.warning("Warning: Not in a git repository")
+            self.repo = False
 
         except (AttributeError, TypeError) as e:
             log.warning("Warning: %s", str(e))
@@ -230,7 +231,8 @@ class GitRepo(Source):
 
         log.info("Name: %s" % self.name)
         log.info("Path: %s" % self.path)
-        if self.branch_name:
+
+        if self.repo and self.branch_name:
             log.info("Branch: %s" % self.branch_name)
             log.info("Head: %s (%s)" % (self.head, self.short_head))
 
