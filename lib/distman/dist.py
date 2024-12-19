@@ -226,18 +226,25 @@ class Distributor(GitRepo):
         :param target: Path to target file or directory.
         :param link: Path to symbolic link.
         :param actual_target: Path to actual target file or directory.
+        :returns: True if linking was successful.
         """
-        isdir = os.path.isdir(actual_target)
+        if not os.path.exists(actual_target):
+            log.warning("Target '%s' not found" % actual_target)
+
+        target_type = util.get_path_type(actual_target)[0]
+
         try:
+            isdir = os.path.isdir(actual_target)
             os.symlink(target, link, target_is_directory=isdir)
 
         except OSError as e:
             log.error(
-                "Failed to create %s symoblic link '%s => %s': %s"
-                % ("directory" if isdir else "file", link, target, str(e))
+                "Failed to create symoblic link '%s =%s> %s': %s"
+                % (link, target_type, target, str(e))
             )
-            return None
-        return isdir
+            return False
+
+        return True
 
     @staticmethod
     def __replace_vars(pathstr):
@@ -446,8 +453,12 @@ class Distributor(GitRepo):
             if version_list:
                 version_file, version_num, _ = version_list[-1]
                 if version_file and self.__compare_objects(source_path, version_file):
+                    target_type = util.get_path_type(source_path)[0]
                     if os.path.exists(dest) and os.path.lexists(dest):
-                        log.info("Unchanged: %s => %s" % (source, version_file))
+                        log.info(
+                            "Unchanged: %s =%s> %s"
+                            % (source, target_type, version_file)
+                        )
                     else:
                         question = (
                             "Target %s: link '%s' missing or broken,"
@@ -455,25 +466,33 @@ class Distributor(GitRepo):
                         )
                         if yes or util.yesNo(question):
                             if dryrun:
-                                log.info("Fixed: %s => %s" % (source, version_file))
+                                log.info(
+                                    "Fixed: %s =%s> %s"
+                                    % (source, target_type, version_file)
+                                )
                             else:
                                 if os.path.lexists(dest):
                                     util.remove_object(dest)
-                                isdir = self.__link_object(
+                                link_created = self.__link_object(
                                     config.DIR_VERSIONS
                                     + os.path.sep
                                     + os.path.basename(version_file),
                                     dest,
                                     version_file,
                                 )
-                                if isdir is not None:
+                                if link_created:
                                     log.info(
                                         "Fixed: %s =%s> %s"
                                         % (
                                             source,
-                                            "d" if isdir else "f",
+                                            target_type,
                                             version_file,
                                         )
+                                    )
+                                else:
+                                    log.warning(
+                                        "Failed to fix: %s =%s> %s"
+                                        % (source, target_type, dest)
                                     )
                     continue
 
@@ -501,20 +520,22 @@ class Distributor(GitRepo):
             # delete existing symbolic link if it exists
             if not dryrun and os.path.lexists(dest):
                 util.remove_object(dest)
+            target_type = util.get_path_type(source)[0]
             # create the new symbolic link
             if dryrun and not versiononly:
-                log.info("Updated: %s => %s" % (source, version_dest))
+                log.info("Updated: %s =%s> %s" % (source, target_type, version_dest))
             elif not versiononly:
-                isdir = self.__link_object(
+                link_created = self.__link_object(
                     config.DIR_VERSIONS + os.path.sep + os.path.basename(version_dest),
                     dest,
                     version_dest,
                 )
-                if isdir is not None:
+                if link_created:
                     log.info(
-                        "Updated: %s =%s> %s"
-                        % (source, "d" if isdir else "f", version_dest)
+                        "Updated: %s =%s> %s" % (source, target_type, version_dest)
                     )
+                else:
+                    log.warning("Failed to update: %s => %s" % (source, dest))
 
         if self.repo:
             try:
@@ -572,19 +593,18 @@ class Distributor(GitRepo):
                 # remove existing symbolic link
                 if not dryrun and os.path.lexists(dest):
                     util.remove_object(dest)
+                target_type = util.get_path_type(verfile)[0]
                 # create new link to point to requested file
                 if dryrun:
-                    log.info("%s => %s" % (source, verfile))
+                    log.info("%s =%s> %s" % (source, target_type, verfile))
                 else:
-                    isdir = self.__link_object(
+                    link_created = self.__link_object(
                         config.DIR_VERSIONS + os.path.sep + os.path.basename(verfile),
                         dest,
                         verfile,
                     )
-                    if isdir is not None:
-                        log.info(
-                            "%s =%s> %s" % (source, "d" if isdir else "f", verfile)
-                        )
+                    if link_created:
+                        log.info("%s =%s> %s" % (source, target_type, verfile))
 
         if not any_found:
             log.info("No targets found to reset")
@@ -659,21 +679,20 @@ class Distributor(GitRepo):
                     # remove existing symbolic link
                     if not dryrun and os.path.lexists(dest):
                         util.remove_object(dest)
+                    target_type = util.get_path_type(verfile)[0]
                     # create new symbolic link to point to requested versioned file
                     if dryrun:
-                        log.info("%s => %s" % (source, verfile))
+                        log.info("%s =%s> %s" % (source, target_type, verfile))
                     else:
-                        isdir = self.__link_object(
+                        link_created = self.__link_object(
                             config.DIR_VERSIONS
                             + os.path.sep
                             + os.path.basename(verfile),
                             dest,
                             verfile,
                         )
-                        if isdir is not None:
-                            log.info(
-                                "%s =%s> %s" % (source, "d" if isdir else "f", verfile)
-                            )
+                        if link_created:
+                            log.info("%s =%s> %s" % (source, target_type, verfile))
                     break
 
             if not any_found_this_target:

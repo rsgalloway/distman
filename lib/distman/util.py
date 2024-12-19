@@ -174,6 +174,26 @@ def get_common_root_dirs(filepaths):
     return list(common_directories)
 
 
+def get_path_type(path):
+    """Returns the short name of the path type: 'file', 'directory', 'link',
+    or 'null' if path does not exist.
+
+    :param path: file system path.
+    :returns: name of path type as a string.
+    """
+
+    if os.path.islink(path):
+        target_type = "link"
+    elif os.path.isdir(path):
+        target_type = "directory"
+    elif os.path.isfile(path):
+        target_type = "file"
+    else:
+        target_type = "null"
+
+    return target_type
+
+
 def normalize_path(path):
     """Normalizes a path by removing leading "./" and calling os.path.normpath.
 
