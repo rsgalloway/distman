@@ -157,12 +157,16 @@ class Distributor(GitRepo):
             self.__copy_file(filepath, target)
 
     def __copy_object(self, source, dest):
-        """Copies a file or directory recursively (ignores hidden files).
+        """Copies, or links, a file or directory recursively (ignores hidden
+        files).
 
-        :param source: Path to source file or directory.
+        :param source: Path to source file, link or directory.
         :param dest: Path to destination file or directory.
         """
-        if os.path.isfile(source):
+        if os.path.islink(source):
+            link_target = os.readlink(source)
+            self.__link_object(link_target, dest, link_target)
+        elif os.path.isfile(source):
             self.__copy_file(source, dest)
         elif os.path.isdir(source):
             self.__copy_directory(source, dest)
