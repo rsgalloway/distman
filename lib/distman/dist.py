@@ -118,27 +118,35 @@ class Distributor(GitRepo):
             return commitB.upper().startswith(commitA.upper())
 
     def __copy_file(self, source, dest):
-        """Copies a file, and converts line endings to linux LF, preserving
+        """Copies a file or link. Converts line endings to linux LF, preserving
         original source file mode.
 
-        :param source: Path to source file.
-        :param dest: Path to destination file.
+        :param source: Path to source file or link.
+        :param dest: Path to destination.
         """
         try:
             destdir = os.path.dirname(dest)
             if not os.path.isdir(destdir):
                 os.makedirs(destdir)
-            with open(source, "r") as infile, open(dest, "wb") as outfile:
-                for line in infile:
-                    text = line.rstrip("\r\n")
-                    outfile.write((text + "\n").encode("UTF-8"))
+            # copy link
+            if os.path.islink(source):
+                linkto = os.readlink(source)
+                os.symlink(linkto, dest)
+            # copy file, converting line endings to LF
+            else:
+                with open(source, "r") as infile, open(dest, "wb") as outfile:
+                    for line in infile:
+                        text = line.rstrip("\r\n")
+                        outfile.write((text + "\n").encode("UTF-8"))
         except UnicodeDecodeError:
             shutil.copy2(source, dest)
         except Exception as e:
             log.error("File copy error: %s" % str(e))
         finally:
-            mode = os.stat(source).st_mode
-            os.chmod(dest, mode)
+            # preserve original file mode if not a link
+            if not os.path.islink(source):
+                mode = os.stat(source).st_mode
+                os.chmod(dest, mode)
 
     def __copy_directory(self, source, dest):
         """Recursively copies a directory (ignores hidden files).
