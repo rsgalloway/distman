@@ -19,8 +19,8 @@ in the `dist.json` and `distman.env` environment stack files:
 $ distman [-d]
 ```
 
-Files and directories can be distributed from any folder or git repo containing
-a `dist.json` file.
+Files, directories and links can be distributed from any folder or git repo
+containing a `dist.json` file.
 
 ## Quickstart
 
@@ -41,16 +41,16 @@ The basic format of the `dist.json` file is:
 }
 ```
 
-where `<source-path>` is the relative path to the source file or directory,
-and `<target-path>` is the target destination path, and `<target>` is a named
-target label to use when running `distman` commands. You can define as many
-targets as you need.
+where `<source-path>` is the relative path to the source file, directory or
+link, and `<target-path>` is the target destination path, and `<target>` is a
+named target label to use when running `distman` commands. You can define as
+many targets as you need.
 
 See the `dist.json` file in this repo for an example.
 
 Target paths can include environment variables, such as those defined in the
-`distman.env` envstack file, where variables are defined with curly brackets
-only, e.g.:
+`distman.env` envstack file, where variables in paths are defined with curly
+brackets only, e.g.:
 
 ```bash
 "{DEPLOY_ROOT}/lib/python/distman"
