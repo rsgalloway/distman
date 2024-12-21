@@ -83,39 +83,39 @@ class Distributor(GitRepo):
             ):
                 # parse the number from the rest of the file name
                 info = f[file_name_length + 1 :]
-                dotPos = info.find(".")
-                if -1 != dotPos:
-                    ver = int(info[:dotPos])
+                dot_pos = info.find(".")
+                if -1 != dot_pos:
+                    ver = int(info[:dot_pos])
                 else:
                     ver = int(info)
                 commit = ""
-                if -1 != dotPos:
+                if -1 != dot_pos:
                     # trim potential remaining dotted portions
-                    dotPos2 = info.find(".", dotPos + 1)
-                    if -1 == dotPos2:
-                        commit = info[dotPos + 1 :]
+                    dot_pos2 = info.find(".", dot_pos + 1)
+                    if -1 == dot_pos2:
+                        commit = info[dot_pos + 1 :]
                     else:
-                        commit = info[dotPos + 1 : dotPos2]
+                        commit = info[dot_pos + 1 : dot_pos2]
                     # trim '-forced' if present
-                    dashPos = commit.find("-")
-                    if -1 != dashPos:
-                        commit = commit[:dashPos]
+                    dash_pos = commit.find("-")
+                    if -1 != dash_pos:
+                        commit = commit[:dash_pos]
                 version_list.append((filedir + "/" + f, ver, commit))
 
         return sorted(version_list, key=lambda tup: tup[1])
 
     @staticmethod
-    def __hashes_equal(commitA, commitB):
+    def __hashes_equal(hash_str_a, hash_str_b):
         """Compares two hash strings regardless of length or case
 
-        :param commitA: First hash string.
-        :param commitB: Second hash string.
+        :param hash_str_a: First hash string.
+        :param hash_str_b: Second hash string.
         :return: True if hashes are equal.
         """
-        if len(commitA) > len(commitB):
-            return commitA.upper().startswith(commitB.upper())
+        if len(hash_str_a) > len(hash_str_b):
+            return hash_str_a.upper().startswith(hash_str_b.upper())
         else:
-            return commitB.upper().startswith(commitA.upper())
+            return hash_str_b.upper().startswith(hash_str_a.upper())
 
     def __copy_file(self, source, dest):
         """Copies a file or link. Converts line endings to linux LF, preserving
@@ -224,21 +224,21 @@ class Distributor(GitRepo):
         except FileNotFoundError:
             return False
 
-    def __compare_objects(self, objectA, objectB):
+    def __compare_objects(self, path1, path2):
         """Compares two files or two directories.
 
-        :param objectA: Path to first file or directory.
-        :param objectB: Path to second file or directory.
+        :param path1: Path to first file or directory.
+        :param path2: Path to second file or directory.
         :return: True if objects are equal.
         """
-        if os.path.isfile(objectA) and os.path.isfile(objectB):
-            return self.__compare_files(objectA, objectB)
+        if os.path.isfile(path1) and os.path.isfile(path2):
+            return self.__compare_files(path1, path2)
 
-        objectA = os.path.relpath(objectA)
-        all_files = self.get_files(objectA)
+        path1 = os.path.relpath(path1)
+        all_files = self.get_files(path1)
 
         for filepath in all_files:
-            destPath = os.path.join(objectB, filepath[len(objectA) + 1 :])
+            destPath = os.path.join(path2, filepath[len(path1) + 1 :])
             if not self.__compare_files(filepath, destPath):
                 return False
 
