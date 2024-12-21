@@ -59,69 +59,69 @@ def parse_args():
         metavar="LOCATION",
         nargs="?",
         default=".",
-        help="The directory containing dist file. Default is current directory",
+        help="directory containing dist file. Default is current directory",
     )
     parser.add_argument(
         "-t",
         "--target",
         metavar="TARGET",
-        help="The source TARGET in the dist file (supports wildcards)",
+        help="source TARGET in the dist file (supports wildcards)",
     )
     parser.add_argument(
         "-s",
         "--show",
         action="store_true",
-        help="Show current distributed versions only",
+        help="show current distributed versions only",
     )
     parser.add_argument(
         "-c",
         "--commit",
         metavar="HASH",
-        help="Change TARGET version number to point to commit HASH",
+        help="change TARGET version number to point to commit HASH",
     )
     parser.add_argument(
         "-n",
         "--number",
         metavar="NUMBER",
-        help="Change TARGET version number to point to NUMBER",
+        help="change TARGET version number to point to NUMBER",
     )
     parser.add_argument(
         "--reset",
         action="store_true",
-        help="Reset version for TARGET to point to latest version",
+        help="reset version for TARGET to point to latest version",
     )
     parser.add_argument(
         "--delete",
         action="store_true",
-        help="Delete dist TARGET from deployment folder.",
+        help="delete dist TARGET from deployment folder.",
     )
     parser.add_argument(
         "-y",
         "--yes",
         action="store_true",
-        help="Answer yes to all questions, skipping user interaction",
+        help="answer yes to all questions, skipping user interaction",
     )
     parser.add_argument(
         "-f",
         "--force",
         action="store_true",
-        help="Force action, e.g. disting uncommitted file changes",
+        help="force action, e.g. disting uncommitted file changes",
     )
     parser.add_argument(
         "--version-only",
         action="store_true",
-        help="Distribute files only, do not create links",
+        help="distribute files only, do not create links",
     )
     parser.add_argument(
         "-d",
         "--dryrun",
         action="store_true",
-        help="Do a dry run, no actions will be performed",
+        help="do a dry run, no actions will be performed",
     )
     parser.add_argument(
         "--verbose",
         action="store_true",
-        help="Show verbose information",
+        help="show verbose information",
     )
     parser.add_argument(
         "-v",

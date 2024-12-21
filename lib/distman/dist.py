@@ -83,62 +83,73 @@ class Distributor(GitRepo):
             ):
                 # parse the number from the rest of the file name
                 info = f[file_name_length + 1 :]
-                dotPos = info.find(".")
-                if -1 != dotPos:
-                    ver = int(info[:dotPos])
+                dot_pos = info.find(".")
+                if -1 != dot_pos:
+                    ver = int(info[:dot_pos])
                 else:
                     ver = int(info)
                 commit = ""
-                if -1 != dotPos:
+                if -1 != dot_pos:
                     # trim potential remaining dotted portions
-                    dotPos2 = info.find(".", dotPos + 1)
-                    if -1 == dotPos2:
-                        commit = info[dotPos + 1 :]
+                    dot_pos2 = info.find(".", dot_pos + 1)
+                    if -1 == dot_pos2:
+                        commit = info[dot_pos + 1 :]
                     else:
-                        commit = info[dotPos + 1 : dotPos2]
+                        commit = info[dot_pos + 1 : dot_pos2]
                     # trim '-forced' if present
-                    dashPos = commit.find("-")
-                    if -1 != dashPos:
-                        commit = commit[:dashPos]
+                    dash_pos = commit.find("-")
+                    if -1 != dash_pos:
+                        commit = commit[:dash_pos]
                 version_list.append((filedir + "/" + f, ver, commit))
 
         return sorted(version_list, key=lambda tup: tup[1])
 
     @staticmethod
-    def __hashes_equal(commitA, commitB):
+    def __hashes_equal(hash_str_a, hash_str_b):
         """Compares two hash strings regardless of length or case
 
-        :param commitA: First hash string.
-        :param commitB: Second hash string.
+        :param hash_str_a: First hash string.
+        :param hash_str_b: Second hash string.
         :return: True if hashes are equal.
         """
-        if len(commitA) > len(commitB):
-            return commitA.upper().startswith(commitB.upper())
+        if len(hash_str_a) > len(hash_str_b):
+            return hash_str_a.upper().startswith(hash_str_b.upper())
         else:
-            return commitB.upper().startswith(commitA.upper())
+            return hash_str_b.upper().startswith(hash_str_a.upper())
 
     def __copy_file(self, source, dest):
-        """Copies a file, and converts line endings to linux LF, preserving
+        """Copies a file or link. Converts line endings to linux LF, preserving
         original source file mode.
 
-        :param source: Path to source file.
-        :param dest: Path to destination file.
+        :param source: Path to source file or link.
+        :param dest: Path to destination.
         """
         try:
             destdir = os.path.dirname(dest)
             if not os.path.isdir(destdir):
                 os.makedirs(destdir)
-            with open(source, "r") as infile, open(dest, "wb") as outfile:
-                for line in infile:
-                    text = line.rstrip("\r\n")
-                    outfile.write((text + "\n").encode("UTF-8"))
+            # copy link
+            if os.path.islink(source):
+                linkto = os.readlink(source)
+                try:
+                    os.symlink(linkto, dest, target_is_directory=os.path.isdir(linkto))
+                except OSError as e:
+                    log.error("Failed to create symbolic link: %s" % str(e))
+            # copy file, converting line endings to LF
+            else:
+                with open(source, "r") as infile, open(dest, "wb") as outfile:
+                    for line in infile:
+                        text = line.rstrip("\r\n")
+                        outfile.write((text + "\n").encode("UTF-8"))
         except UnicodeDecodeError:
             shutil.copy2(source, dest)
         except Exception as e:
             log.error("File copy error: %s" % str(e))
         finally:
-            mode = os.stat(source).st_mode
-            os.chmod(dest, mode)
+            # preserve original file mode if not a link
+            if not os.path.islink(source):
+                mode = os.stat(source).st_mode
+                os.chmod(dest, mode)
 
     def __copy_directory(self, source, dest):
         """Recursively copies a directory (ignores hidden files).
@@ -173,47 +184,61 @@ class Distributor(GitRepo):
         else:
             raise Exception("Source '%s' not found" % source)
 
-    def __compare_files(self, filePathA, filePathB):
-        """Compares two files, ignoring end of lines in text files.
+    def __compare_files(self, source, target):
+        """Compares two files, ignoring end of lines in text files. Checks for
+        file mode changes, file content changes and link changes.
 
-        :param filePathA: Path to first file.
-        :param filePathB: Path to second file.
-        :return: True if files are equal.
+        :param source: Path to source file.
+        :param target: Path to target file.
+        :return: True if files or links are the same.
         """
         try:
-            with open(filePathA, "r") as file1, open(filePathB, "r") as file2:
-                while True:
-                    line1 = next(file1, None)
-                    line2 = next(file2, None)
-                    # if either file is finished return true
-                    if line1 is None or line2 is None:
-                        return line1 is None and line2 is None
-                    # compare lines regardless of EOL
-                    if line1.rstrip("\r\n") != line2.rstrip("\r\n"):
-                        return False
-
+            # compare links
+            if os.path.islink(source):
+                if os.path.islink(target):
+                    return os.readlink(source) == os.readlink(target)
+                else:
+                    return False
+            # compare files
+            else:
+                # file mode must match
+                if os.stat(source).st_mode != os.stat(target).st_mode:
+                    return False
+                # file contents must match
+                with open(source, "r") as file1, open(target, "r") as file2:
+                    while True:
+                        line1 = next(file1, None)
+                        line2 = next(file2, None)
+                        # if either file is finished return true
+                        if line1 is None or line2 is None:
+                            return line1 is None and line2 is None
+                        # compare lines regardless of EOL
+                        if line1.rstrip("\r\n") != line2.rstrip("\r\n"):
+                            return False
         # do binary comparison if there are invalid characters
         except UnicodeDecodeError:
-            return filecmp.cmp(filePathA, filePathB, shallow=False)
-
+            return filecmp.cmp(source, target, shallow=False)
+        except IsADirectoryError as err:
+            log.error("Cannot compare source: %s" % err)
+            return False
         except FileNotFoundError:
             return False
 
-    def __compare_objects(self, objectA, objectB):
+    def __compare_objects(self, path1, path2):
         """Compares two files or two directories.
 
-        :param objectA: Path to first file or directory.
-        :param objectB: Path to second file or directory.
+        :param path1: Path to first file or directory.
+        :param path2: Path to second file or directory.
         :return: True if objects are equal.
         """
-        if os.path.isfile(objectA) and os.path.isfile(objectB):
-            return self.__compare_files(objectA, objectB)
+        if os.path.isfile(path1) and os.path.isfile(path2):
+            return self.__compare_files(path1, path2)
 
-        objectA = os.path.relpath(objectA)
-        all_files = self.get_files(objectA)
+        path1 = os.path.relpath(path1)
+        all_files = self.get_files(path1)
 
         for filepath in all_files:
-            destPath = os.path.join(objectB, filepath[len(objectA) + 1 :])
+            destPath = os.path.join(path2, filepath[len(path1) + 1 :])
             if not self.__compare_files(filepath, destPath):
                 return False
 

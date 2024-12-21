@@ -358,21 +358,33 @@ def yesNo(question):
             print("You must answer yes or no.")
 
 
-def walk(path, exclude_ignorables=True):
+def walk(path, exclude_ignorables=True, followlinks=False):
     """Generator that yields relative file paths that are not ignorable.
+    Will include nested directories and symbolic links to directories:
+
+        target/
+            |- subdir
+            |   `- file.txt
+            |- file-link -> /link/to/file.txt
+            |- folder-link -> /link/to/folder/
+            `- file.txt
 
     :param path: file system path.
     :param exclude_ignorables: exclude ignorable files.
+    :param followlinks: follow symbolic links.
     :returns: generator of file paths.
     """
     if not is_ignorable(path) and os.path.isfile(path):
         yield path
-    for dirname, dirs, files in os.walk(path, topdown=True):
+    for dirname, dirs, files in os.walk(path, topdown=True, followlinks=followlinks):
         if exclude_ignorables and is_ignorable(dirname):
             continue
         for d in dirs:
             if exclude_ignorables and is_ignorable(d):
                 dirs.remove(d)
+            # include symlinks to directories
+            elif os.path.islink(os.path.join(dirname, d)):
+                yield os.path.join(dirname, d)
         for name in files:
             if not is_ignorable(name):
                 yield os.path.join(dirname, name)
