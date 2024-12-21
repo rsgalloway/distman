@@ -131,7 +131,10 @@ class Distributor(GitRepo):
             # copy link
             if os.path.islink(source):
                 linkto = os.readlink(source)
-                os.symlink(linkto, dest)
+                try:
+                    os.symlink(linkto, dest, target_is_directory=os.path.isdir(linkto))
+                except OSError as e:
+                    log.error("Failed to create symbolic link: %s" % str(e))
             # copy file, converting line endings to LF
             else:
                 with open(source, "r") as infile, open(dest, "wb") as outfile:
@@ -181,29 +184,38 @@ class Distributor(GitRepo):
         else:
             raise Exception("Source '%s' not found" % source)
 
-    def __compare_files(self, filePathA, filePathB):
+    def __compare_files(self, source, target):
         """Compares two files, ignoring end of lines in text files.
 
-        :param filePathA: Path to first file.
-        :param filePathB: Path to second file.
-        :return: True if files are equal.
+        :param source: Path to source file.
+        :param target: Path to target file.
+        :return: True if files or links are the same.
         """
         try:
-            with open(filePathA, "r") as file1, open(filePathB, "r") as file2:
-                while True:
-                    line1 = next(file1, None)
-                    line2 = next(file2, None)
-                    # if either file is finished return true
-                    if line1 is None or line2 is None:
-                        return line1 is None and line2 is None
-                    # compare lines regardless of EOL
-                    if line1.rstrip("\r\n") != line2.rstrip("\r\n"):
-                        return False
-
+            # compare links
+            if os.path.islink(source):
+                if os.path.islink(target):
+                    return os.readlink(source) == os.readlink(target)
+                else:
+                    return False
+            # compare files
+            else:
+                with open(source, "r") as file1, open(target, "r") as file2:
+                    while True:
+                        line1 = next(file1, None)
+                        line2 = next(file2, None)
+                        # if either file is finished return true
+                        if line1 is None or line2 is None:
+                            return line1 is None and line2 is None
+                        # compare lines regardless of EOL
+                        if line1.rstrip("\r\n") != line2.rstrip("\r\n"):
+                            return False
         # do binary comparison if there are invalid characters
         except UnicodeDecodeError:
-            return filecmp.cmp(filePathA, filePathB, shallow=False)
-
+            return filecmp.cmp(source, target, shallow=False)
+        except IsADirectoryError as err:
+            log.error("Cannot compare source: %s" % err)
+            return False
         except FileNotFoundError:
             return False
 
