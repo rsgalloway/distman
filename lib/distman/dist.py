@@ -185,7 +185,8 @@ class Distributor(GitRepo):
             raise Exception("Source '%s' not found" % source)
 
     def __compare_files(self, source, target):
-        """Compares two files, ignoring end of lines in text files.
+        """Compares two files, ignoring end of lines in text files. Checks for
+        file mode changes, file content changes and link changes.
 
         :param source: Path to source file.
         :param target: Path to target file.
@@ -200,6 +201,10 @@ class Distributor(GitRepo):
                     return False
             # compare files
             else:
+                # file mode must match
+                if os.stat(source).st_mode != os.stat(target).st_mode:
+                    return False
+                # file contents must match
                 with open(source, "r") as file1, open(target, "r") as file2:
                     while True:
                         line1 = next(file1, None)
