@@ -264,15 +264,14 @@ class GitRepo(Source):
             log.error(
                 "Git error checking remote branch: %s "
                 "Push branch to origin or use --force.",
-                str(err)
+                str(err),
             )
             return True
 
         except Exception as err:
             log.error(
-                "Unexpected error checking remote branch: %s"
-                "Try using --force.",
-                str(err)
+                "Unexpected error checking remote branch: %s" "Try using --force.",
+                str(err),
             )
             return True
 
