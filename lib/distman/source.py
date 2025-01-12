@@ -38,6 +38,7 @@ import os
 from pathlib import Path
 
 import git
+from git.exc import GitCommandError
 
 from distman import config, util
 from distman.logger import log
@@ -259,10 +260,19 @@ class GitRepo(Source):
                 )
                 return True
 
+        except GitCommandError as err:
+            log.error(
+                "Git error checking remote branch: %s "
+                "Push branch to origin or use --force.",
+                str(err)
+            )
+            return True
+
         except Exception as err:
             log.error(
-                "Error checking remote branch. "
-                "Push branch to origin or use --force."
+                "Unexpected error checking remote branch: %s"
+                "Try using --force.",
+                str(err)
             )
             return True
 
