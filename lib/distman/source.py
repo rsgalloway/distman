@@ -260,7 +260,10 @@ class GitRepo(Source):
                 return True
 
         except Exception as err:
-            log.error("Error checking remote branch: %s", str(err))
+            log.error(
+                "Error checking remote branch. "
+                "Push branch to origin or use --force."
+            )
             return True
 
         return False
