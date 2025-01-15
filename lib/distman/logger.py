@@ -106,7 +106,7 @@ def setup_file_handler(
             del log.handlers[log.handlers.index(h)]
 
     os.makedirs(logdir, exist_ok=True)
-    log_file = os.path.join(logdir, "distman.log")
+    log_file = os.path.join(logdir, "distman", "distman.log")
 
     handler = UserRotatingFileHandler(
         log_file, maxBytes=maxBytes, backupCount=backupCount
