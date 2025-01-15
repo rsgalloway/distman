@@ -57,7 +57,10 @@ DIST_INFO_EXT = ".dist"
 DIR_VERSIONS = "versions"
 
 # logging settings
+LOG_DIR = os.getenv("LOG_DIR", os.path.expanduser("~/log"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+LOG_MAX_BYTES = 1_000_000
+LOG_BACKUP_COUNT = 5
 DRYRUN_MESSAGE = "NOTICE: Dry run (no changes will be made)"
 
 # ignorable files and directories

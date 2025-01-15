@@ -42,9 +42,7 @@ import os
 import sys
 
 from distman import Distributor, config, util
-from distman.logger import setup_stream_handler
-
-setup_stream_handler()
+from distman.logger import setup_file_handler, setup_stream_handler
 
 
 def parse_args():
@@ -138,6 +136,10 @@ def main():
     """Main thread."""
 
     args = parse_args()
+
+    # setup logging
+    setup_file_handler(dryrun=args.dryrun)
+    setup_stream_handler()
 
     if not os.path.isdir(args.location):
         print("%s is not a directory" % args.location)
