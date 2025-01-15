@@ -39,7 +39,7 @@ from logging.handlers import RotatingFileHandler
 
 from distman import config
 
-log = logging.Logger("distman")
+log = logging.Logger(config.LOG_NAME)
 log.setLevel(config.LOG_LEVEL)
 log.addHandler(logging.NullHandler())
 
@@ -106,7 +106,7 @@ def setup_file_handler(
             del log.handlers[log.handlers.index(h)]
 
     os.makedirs(logdir, exist_ok=True)
-    log_file = os.path.join(logdir, "distman", "distman.log")
+    log_file = os.path.join(logdir, "distman.log")
 
     handler = UserRotatingFileHandler(
         log_file, maxBytes=maxBytes, backupCount=backupCount

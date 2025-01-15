@@ -57,7 +57,8 @@ DIST_INFO_EXT = ".dist"
 DIR_VERSIONS = "versions"
 
 # logging settings
-LOG_DIR = os.getenv("LOG_DIR", os.path.expanduser("~/log"))
+LOG_NAME = "distman"
+LOG_DIR = os.getenv("LOG_DIR", os.path.expanduser("~/log/distman"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_MAX_BYTES = 1_000_000
 LOG_BACKUP_COUNT = 5
