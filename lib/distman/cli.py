@@ -137,16 +137,18 @@ def main():
 
     args = parse_args()
 
+    # set up logging handlers
     setup_logging(dryrun=args.dryrun)
 
+    # validate arguments
     if not os.path.isdir(args.location):
         print("%s is not a directory" % args.location)
         return 1
-
     if sum([bool(args.commit), bool(args.number), bool(args.reset)]) > 1:
         print("--commit,--number and --reset are mutually exclusive")
         return 1
 
+    # create distributor object
     distributor = Distributor()
 
     # process the requested location
@@ -166,6 +168,7 @@ def main():
         if not util.check_symlinks():
             return 1
 
+    # change target version
     if args.number or args.commit or args.reset:
         if args.reset:
             if distributor.reset_file_version(
@@ -202,7 +205,7 @@ def main():
                 return 0
             target_version = 0
 
-        # file version change
+        # do target version change
         if distributor.change_file_version(
             target_file, target_commit, target_version, dryrun=args.dryrun
         ):
@@ -211,16 +214,21 @@ def main():
             return 1
 
     # do file distribution
-    if distributor.dist(
-        target=args.target,
-        show=args.show,
-        force=args.force,
-        yes=args.yes,
-        dryrun=args.dryrun,
-        versiononly=args.version_only,
-        verbose=args.verbose,
-    ):
-        return 0
+    try:
+        if distributor.dist(
+            target=args.target,
+            show=args.show,
+            force=args.force,
+            yes=args.yes,
+            dryrun=args.dryrun,
+            versiononly=args.version_only,
+            verbose=args.verbose,
+        ):
+            return 0
+
+    except KeyboardInterrupt:
+        print("Stopping dist...")
+        return 2
 
     return 1
 
