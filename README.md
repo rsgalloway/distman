@@ -129,4 +129,6 @@ variables are supported:
 |--------------|-------------|
 | $DEPLOY_ROOT | file deployment root directory |
 | $ENV         | target environment (e.g. prod or dev) |
+| $LOG_DIR     | directory to write log files |
+| $LOG_LEVEL   | logging level to use (DEBUG, INFO, etc) |
 | $ROOT        | dist root directory |
