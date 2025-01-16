@@ -137,11 +137,7 @@ def main():
 
     args = parse_args()
 
-    # setup logging handlers
     setup_stream_handler()
-
-    if not args.dryrun:
-        setup_file_handler()
 
     if not os.path.isdir(args.location):
         print("%s is not a directory" % args.location)

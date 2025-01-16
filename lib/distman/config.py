@@ -71,6 +71,10 @@ IGNORABLE = [
     ".env",
     ".venv",
     "*.bup",
+    "*.dist-info",
+    "*.egg-info",
+    "*.pyc",
+    "*.pyo",
     "*.swp",
     "*.temp*",
     "*.tmp",
@@ -79,6 +83,7 @@ IGNORABLE = [
     "__pycache__",
     "Thumbs.db",
     ".DS_Store",
+    ".vscode",
 ]
 
 # git repo settings

@@ -40,7 +40,7 @@ import shutil
 import time
 
 from distman import config, util
-from distman.logger import log
+from distman.logger import log, setup_file_handler
 from distman.source import GitRepo
 
 
@@ -318,6 +318,12 @@ class Distributor(GitRepo):
         :param verbose: Show more information.
         :return: True if successful.
         """
+        if not dryrun:
+            try:
+                setup_file_handler()
+            except Exception as err:
+                log.warning("Error: %s" % str(err))
+
         if self.root is None:
             log.error("%s not found or invalid" % config.DIST_FILE)
             return False
