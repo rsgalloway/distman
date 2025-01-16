@@ -33,21 +33,107 @@ __doc__ = """
 Contains logging functions and classes.
 """
 
+import os
 import logging
+from logging.handlers import RotatingFileHandler
 
-from distman.config import LOG_LEVEL
+from distman import config
 
-log = logging.Logger("distman")
-log.setLevel(LOG_LEVEL)
+log = logging.Logger(config.LOG_NAME)
+log.setLevel(config.LOG_LEVEL)
 log.addHandler(logging.NullHandler())
 
 
-def setup_stream_handler():
+class DryRunFilter(logging.Filter):
+    """Filter that removes log records when in dry run mode."""
+
+    def __init__(self, dryrun):
+        super().__init__()
+        self.dryrun = dryrun
+
+    def filter(self, record):
+        return not self.dryrun
+
+
+class UserFilter(logging.Filter):
+    """Adds the username to the log record."""
+
+    def filter(self, record):
+        try:
+            record.username = os.getlogin()
+        except Exception:
+            import getpass
+
+            record.username = getpass.getuser()
+        return True
+
+
+class UserRotatingFileHandler(RotatingFileHandler):
+    """Rotating file handler that adds the username to the log record."""
+
+    def __init__(
+        self, filename, mode="a", maxBytes=0, backupCount=0, encoding=None, delay=False
+    ):
+        super().__init__(filename, mode, maxBytes, backupCount, encoding, delay)
+        self.addFilter(UserFilter())
+
+
+def setup_stream_handler(level=config.LOG_LEVEL):
     """Adds a new stdout stream handler."""
     for h in log.handlers:
         if h.name == log.name and "StreamHandler" in str(h):
             del log.handlers[log.handlers.index(h)]
-    stream_hanlder = logging.StreamHandler()
-    stream_hanlder.set_name(log.name)
-    stream_hanlder.setFormatter(logging.Formatter("%(message)s"))
-    log.addHandler(stream_hanlder)
+
+    handler = logging.StreamHandler()
+    handler.set_name(log.name)
+    handler.setLevel(level)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+
+    log.addHandler(handler)
+    return handler
+
+
+def setup_file_handler(
+    maxBytes=config.LOG_MAX_BYTES,
+    backupCount=config.LOG_BACKUP_COUNT,
+    level=config.LOG_LEVEL,
+    logdir=config.LOG_DIR,
+    dryrun=False,
+):
+    """Adds a new rotating file handler."""
+    for h in log.handlers:
+        if h.name == log.name and "RotatingFileHandler" in str(h):
+            del log.handlers[log.handlers.index(h)]
+
+    os.makedirs(logdir, exist_ok=True)
+    log_file = os.path.join(logdir, "distman.log")
+
+    handler = UserRotatingFileHandler(
+        log_file, maxBytes=maxBytes, backupCount=backupCount
+    )
+    handler.setLevel(level)
+
+    formatter = logging.Formatter(
+        "%(asctime)s - %(username)s - %(levelname)s - %(message)s"
+    )
+    handler.setFormatter(formatter)
+
+    # add dry run filter
+    handler.addFilter(DryRunFilter(dryrun))
+
+    log.addHandler(handler)
+    return handler
+
+
+def setup_logging(dryrun=False):
+    """Setup log handlers.
+
+    :param dryrun: dry run flag
+    """
+    setup_stream_handler()
+
+    if not dryrun:
+        try:
+            setup_file_handler()
+        except Exception as err:
+            print("Error: %s" % str(err))

@@ -40,7 +40,7 @@ import shutil
 import time
 
 from distman import config, util
-from distman.logger import log
+from distman.logger import log, setup_file_handler
 from distman.source import GitRepo
 
 
