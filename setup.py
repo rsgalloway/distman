@@ -72,7 +72,7 @@ setup(
         ],
     },
     install_requires=[
-        "envstack==0.7.3",
+        "envstack==0.7.4",
         "GitPython==3.1.43",
     ],
     python_requires=">=3.8",
