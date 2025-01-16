@@ -123,3 +123,17 @@ def setup_file_handler(
 
     log.addHandler(handler)
     return handler
+
+
+def setup_logging(dryrun=False):
+    """Setup log handlers.
+
+    :param dryrun: dry run flag
+    """
+    setup_stream_handler()
+
+    if not dryrun:
+        try:
+            setup_file_handler()
+        except Exception as err:
+            print("Error: %s" % str(err))
