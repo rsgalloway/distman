@@ -40,7 +40,27 @@ from logging.handlers import RotatingFileHandler
 from distman import config
 
 log = logging.Logger(config.LOG_NAME)
-log.setLevel(config.LOG_LEVEL)
+
+# fix for ValueErrors raised by python's logging module
+LOG_LEVEL_MAP = {
+    0: "NOTSET",
+    10: "DEBUG",
+    20: "INFO",
+    30: "WARNING",
+    40: "ERROR",
+    50: "CRITICAL",
+}
+VALID_LOG_LEVELS = LOG_LEVEL_MAP.values()
+
+LOG_LEVEL = config.LOG_LEVEL
+if isinstance(LOG_LEVEL, int):
+    LOG_LEVEL = LOG_LEVEL_MAP.get(LOG_LEVEL, config.LOG_LEVEL_DEFAULT)
+elif isinstance(LOG_LEVEL, str) and LOG_LEVEL.isdigit():
+    LOG_LEVEL = LOG_LEVEL_MAP.get(int(LOG_LEVEL), config.LOG_LEVEL_DEFAULT)
+elif LOG_LEVEL not in VALID_LOG_LEVELS:
+    LOG_LEVEL = config.LOG_LEVEL_DEFAULT
+
+log.setLevel(LOG_LEVEL)
 log.addHandler(logging.NullHandler())
 
 
@@ -78,7 +98,7 @@ class UserRotatingFileHandler(RotatingFileHandler):
         self.addFilter(UserFilter())
 
 
-def setup_stream_handler(level=config.LOG_LEVEL):
+def setup_stream_handler(level=LOG_LEVEL):
     """Adds a new stdout stream handler."""
     for h in log.handlers:
         if h.name == log.name and "StreamHandler" in str(h):
@@ -96,7 +116,7 @@ def setup_stream_handler(level=config.LOG_LEVEL):
 def setup_file_handler(
     maxBytes=config.LOG_MAX_BYTES,
     backupCount=config.LOG_BACKUP_COUNT,
-    level=config.LOG_LEVEL,
+    level=LOG_LEVEL,
     logdir=config.LOG_DIR,
     dryrun=False,
 ):
