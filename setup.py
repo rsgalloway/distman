@@ -40,7 +40,7 @@ with open(os.path.join(here, "README.md")) as f:
 
 setup(
     name="distman",
-    version="0.3.6",
+    version="0.4.0",
     description="Super simple file distribution",
     long_description=long_description,
     long_description_content_type="text/markdown",
