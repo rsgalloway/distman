@@ -157,7 +157,13 @@ def main():
 
     # remove target(s), symlink privs not needed
     if args.delete:
-        if distributor.delete_target(args.target, yes=args.yes, dryrun=args.dryrun):
+        if distributor.delete_target(
+            target=args.target,
+            target_version=args.number,
+            target_commit=args.commit,
+            yes=args.yes,
+            dryrun=args.dryrun,
+        ):
             return 0
         else:
             return 1
