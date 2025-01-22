@@ -40,7 +40,7 @@ import shutil
 import time
 
 from distman import config, util
-from distman.logger import log, setup_file_handler
+from distman.logger import log
 from distman.source import GitRepo
 
 
@@ -636,7 +636,13 @@ class Distributor(GitRepo):
 
         return any_found
 
-    def change_file_version(self, target, target_commit, target_version, dryrun=False):
+    def change_file_version(
+        self,
+        target,
+        target_commit,
+        target_version,
+        dryrun=False,
+    ):
         """Changes the symbolic link of a versioned file to point to a different file.
 
         :param target: target name in dist file.
@@ -737,11 +743,20 @@ class Distributor(GitRepo):
 
         return any_found
 
-    def delete_target(self, target, yes=False, dryrun=False):
+    def delete_target(
+        self,
+        target,
+        target_version=None,
+        target_commit=None,
+        yes=False,
+        dryrun=False,
+    ):
         """Delete a target's destination files. Deletes symlink, .dist and version
         files/directories.
 
         :param target: target name in dist file.
+        :param target_version: The version number to delete.
+        :param target_commit: The commit hash to delete.
         :param yes: Answer yes to all questions.
         :param dryrun: Perform dry run.
         :return: True on success, False on failure.
@@ -773,7 +788,21 @@ class Distributor(GitRepo):
                         "%s in <%s> for %s" % (str(e), config.TAG_DESTPATH, target_name)
                     )
                     return False
+
                 version_list = self.__get_file_versions(dest)
+
+                # filter version list by version number or commit hash
+                if version_list and target_version:
+                    version_list = [
+                        x for x in version_list if x[1] == int(target_version)
+                    ]
+                elif version_list and target_commit:
+                    version_list = [
+                        x
+                        for x in version_list
+                        if self.__hashes_equal(target_commit, x[2])
+                    ]
+
                 question = "Delete target '%s' (%s => %s) and %d versions?" % (
                     target_name,
                     source,
@@ -783,18 +812,35 @@ class Distributor(GitRepo):
                 if yes or dryrun or util.yesNo(question):
                     any_found = True
                     distinfo = util.get_dist_info(dest=dest)
-                    if os.path.lexists(dest):
-                        log.info("Deleting: %s" % dest)
-                        if not dryrun:
-                            util.remove_object(dest)
-                    else:
-                        log.info("Missing: %s" % dest)
-                    if os.path.lexists(distinfo):
-                        log.info("Deleting: %s" % distinfo)
-                        if not dryrun:
-                            os.remove(distinfo)
-                    else:
-                        log.info("Missing: %s" % distinfo)
+                    link_path = util.get_link_full_path(dest)
+
+                    # if target is linked to the version being deleted, skip with warning
+                    if (target_commit or target_version) and link_path in [
+                        v[0] for v in version_list
+                    ]:
+                        log.warning(
+                            """Cannot delete target '%s' because it is linked to the version being deleted"""
+                            % target_name
+                        )
+                        continue
+
+                    # delete link and dist info file
+                    if not target_version and not target_commit:
+                        if os.path.lexists(dest):
+                            log.info("Deleting: %s" % dest)
+                            if not dryrun:
+                                util.remove_object(dest)
+                        else:
+                            log.info("Missing: %s" % dest)
+
+                        if os.path.lexists(distinfo):
+                            log.info("Deleting: %s" % distinfo)
+                            if not dryrun:
+                                os.remove(distinfo)
+                        else:
+                            log.info("Missing: %s" % distinfo)
+
+                    # delete versioned files
                     for verFile, _, _ in version_list:
                         log.info("Deleting: %s" % verFile)
                         if not dryrun:

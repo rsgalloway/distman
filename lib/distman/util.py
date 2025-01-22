@@ -223,6 +223,23 @@ def sanitize_path(path):
     return path
 
 
+def get_link_full_path(link):
+    """Returns the full path of a symbolic link.
+
+    :param link: symbolic link path.
+    :returns: full path of link target.
+    """
+
+    if not os.path.islink(link):
+        return None
+
+    target = os.readlink(link)
+    if not os.path.isabs(target):
+        target = os.path.join(os.path.dirname(link), target)
+
+    return os.path.normpath(target)
+
+
 def get_dist_info(dest, ext=config.DIST_INFO_EXT):
     """Returns the dist info file path, e.g.
 
