@@ -812,11 +812,13 @@ class Distributor(GitRepo):
                 if yes or dryrun or util.yesNo(question):
                     any_found = True
                     distinfo = util.get_dist_info(dest=dest)
-
                     link_path = util.get_link_full_path(dest)
 
-                    if link_path in [v[0] for v in version_list]:
-                        log.info(
+                    # if target is linked to the version being deleted, skip with warning
+                    if (target_commit or target_version) and link_path in [
+                        v[0] for v in version_list
+                    ]:
+                        log.warning(
                             """Cannot delete target '%s' because it is linked to the version being deleted"""
                             % target_name
                         )
