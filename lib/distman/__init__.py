@@ -35,7 +35,7 @@ distman distributes files and directories to versioned destinations.
 
 __author__ = "ryan@rsgalloway.com"
 __prog__ = "distman"
-__version__ = "0.4.1"
+__version__ = "0.4.2"
 
 try:
     import envstack
