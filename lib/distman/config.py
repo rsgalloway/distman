@@ -36,18 +36,20 @@ Contains default config and settings.
 import os
 import platform
 
-PLATFORM = platform.system().lower()
-
 # default environment settings
+ENV = os.getenv("ENV", "prod")
+HOME = os.getenv("HOME", os.path.expanduser("~"))
+PLATFORM = platform.system().lower()
+ROOT = {
+    "darwin": f"{HOME}/Library/Application Support/pipe",
+    "linux": f"{HOME}/.local/pipe",
+    "windows": "C:\\ProgramData\\pipe",
+}.get(PLATFORM, f"./pipe/{ENV}")
+DEPLOY_ROOT = os.getenv("DEPLOY_ROOT", f"{ROOT}/{ENV}")
 DEFAULT_ENV = {
-    "ENV": "prod",
-    "HOME": os.getenv("HOME"),
-    "ROOT": {
-        "darwin": "{HOME}/Library/Application Support/pipe",
-        "linux": "{HOME}/.local/pipe",
-        "windows": "C:\\ProgramData\\pipe",
-    }.get(PLATFORM, "./pipe/{ENV}"),
-    "DEPLOY_ROOT": "{ROOT}/{ENV}",
+    "HOME": HOME,
+    "ROOT": ROOT,
+    "DEPLOY_ROOT": DEPLOY_ROOT,
 }
 
 # dist file settings
