@@ -195,7 +195,8 @@ def get_path_type(path):
 
 
 def normalize_path(path):
-    """Normalizes a path by removing leading "./" and calling os.path.normpath.
+    """Normalizes relative paths by removing leading "./" and calling
+    os.path.normpath.
 
     :param path: file system path.
     :returns: normalized path.
@@ -204,6 +205,9 @@ def normalize_path(path):
     if not path:
         return path
     path = sanitize_path(path)
+    # absolute paths are not normalized
+    if path.startswith("/"):
+        return path
     return os.path.normpath(path.lstrip("./"))
 
 
