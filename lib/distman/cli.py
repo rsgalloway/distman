@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright (c) 2024, Ryan Galloway (ryan@rsgalloway.com)
+# Copyright (c) 2024-2025, Ryan Galloway (ryan@rsgalloway.com)
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
@@ -57,7 +57,7 @@ def parse_args():
         metavar="LOCATION",
         nargs="?",
         default=".",
-        help="directory containing dist file. Default is current directory",
+        help="directory containing dist file (default is cwd)",
     )
     parser.add_argument(
         "-t",
@@ -91,13 +91,18 @@ def parse_args():
     parser.add_argument(
         "--delete",
         action="store_true",
-        help="delete dist TARGET from deployment folder.",
+        help="delete dist TARGET from deployment folder",
     )
     parser.add_argument(
         "-y",
         "--yes",
         action="store_true",
         help="answer yes to all questions, skipping user interaction",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="dist all files, including ignorable files",
     )
     parser.add_argument(
         "-f",
@@ -225,6 +230,7 @@ def main():
             target=args.target,
             show=args.show,
             force=args.force,
+            all=args.all,
             yes=args.yes,
             dryrun=args.dryrun,
             versiononly=args.version_only,

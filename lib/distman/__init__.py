@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright (c) 2024, Ryan Galloway (ryan@rsgalloway.com)
+# Copyright (c) 2024-2025, Ryan Galloway (ryan@rsgalloway.com)
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
@@ -35,7 +35,7 @@ distman distributes files and directories to versioned destinations.
 
 __author__ = "ryan@rsgalloway.com"
 __prog__ = "distman"
-__version__ = "0.4.2"
+__version__ = "0.4.3"
 
 try:
     import envstack

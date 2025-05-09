@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright (c) 2024, Ryan Galloway (ryan@rsgalloway.com)
+# Copyright (c) 2024-2025, Ryan Galloway (ryan@rsgalloway.com)
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
@@ -151,14 +151,15 @@ class Distributor(GitRepo):
                 mode = os.stat(source).st_mode
                 os.chmod(dest, mode)
 
-    def __copy_directory(self, source, dest):
+    def __copy_directory(self, source, dest, all_files=False):
         """Recursively copies a directory (ignores hidden files).
 
         :param source: Path to source directory.
         :param dest: Path to destination directory.
+        :param all_files: Copy all files, including hidden and ignorable files.
         """
         source = os.path.relpath(source)
-        all_files = self.get_files(source)
+        all_files = self.get_files(source, all_files=all_files)
 
         for filepath in all_files:
             if source == ".":
@@ -167,12 +168,14 @@ class Distributor(GitRepo):
                 target = os.path.join(dest, filepath[len(source) + 1 :])
             self.__copy_file(filepath, target)
 
-    def __copy_object(self, source, dest):
+    def __copy_object(self, source, dest, all_files=False):
         """Copies, or links, a file or directory recursively (ignores hidden
         files).
 
         :param source: Path to source file, link or directory.
         :param dest: Path to destination file or directory.
+        :param all_files: Copy all files in a directory, including hidden and
+            ignorable files.
         """
         if os.path.islink(source):
             link_target = os.readlink(source)
@@ -180,7 +183,7 @@ class Distributor(GitRepo):
         elif os.path.isfile(source):
             self.__copy_file(source, dest)
         elif os.path.isdir(source):
-            self.__copy_directory(source, dest)
+            self.__copy_directory(source, dest, all_files=all_files)
         else:
             raise Exception("Source '%s' not found" % source)
 
@@ -289,19 +292,22 @@ class Distributor(GitRepo):
                 raise Exception("Cannot resolve env var '%s'" % var)
             pathstr = pathstr[0:openBracket] + replacement + pathstr[closeBracket + 1 :]
 
-    def get_files(self, start):
+    def get_files(self, start, all_files=False):
         """Returns the list of files to be disted.
 
         :param start: Starting directory.
+        :param all_files: Get all files in a directory, including hidden and
+            ignorable files.
         :return: List of relative file paths.
         """
-        return [f for f in util.walk(start)]
+        return [f for f in util.walk(start, exclude_ignorables=(all_files == False))]
 
     def dist(
         self,
         target=None,
         show=False,
         force=False,
+        all=False,
         yes=False,
         dryrun=False,
         versiononly=False,
@@ -312,6 +318,7 @@ class Distributor(GitRepo):
         :param target: optionally match specific targets.
         :param show: Show file versions.
         :param force: Force distribution.
+        :param all: Distribute all files (including ignorables).
         :param yes: Assume yes to all questions.
         :param dryrun: Perform dry run.
         :param versiononly: Distribute files only, do not create links.
@@ -541,7 +548,7 @@ class Distributor(GitRepo):
             #     version_dest += "." + self.branch_name
             # copy the file/directory to the versioned location
             if not dryrun:
-                self.__copy_object(source_path, version_dest)
+                self.__copy_object(source_path, version_dest, all_files=all)
             # delete existing symbolic link if it exists
             if not dryrun and os.path.lexists(dest):
                 util.remove_object(dest)

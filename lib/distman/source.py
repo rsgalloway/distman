@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright (c) 2024, Ryan Galloway (ryan@rsgalloway.com)
+# Copyright (c) 2024-2025, Ryan Galloway (ryan@rsgalloway.com)
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
@@ -162,7 +162,7 @@ class GitRepo(Source):
         files or directories (such as build products).
 
         :param start: Starting directory (default ".").
-        :param include_ignored: Include git ignored files (defauylt True).
+        :param include_ignored: Include git ignored files.
         :return: Tuple of untracked files and directories (files, dirs).
         """
         untracked_files = []

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright (c) 2024, Ryan Galloway (ryan@rsgalloway.com)
+# Copyright (c) 2024-2025, Ryan Galloway (ryan@rsgalloway.com)
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
@@ -74,9 +74,13 @@ IGNORABLE = [
     ".env",
     ".venv",
     "*.bup",
-    #"*.dist-info",
-    #"*.egg-info",
+    "*.bak",
+    "*.orig",
+    "*.lock",
+    # "*.dist-info",  # required by importlib-metadata
+    # "*.egg-info",  # required by setuptools
     "*.pyc",
+    "*.pyd",
     "*.pyo",
     "*.swp",
     "*.temp*",
@@ -86,6 +90,7 @@ IGNORABLE = [
     "__pycache__",
     "Thumbs.db",
     ".DS_Store",
+    ".idea",
     ".vscode",
 ]
 
