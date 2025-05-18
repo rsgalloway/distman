@@ -35,9 +35,11 @@ Contains file distribution classes and functions.
 
 import filecmp
 import fnmatch
+import glob
 import os
 import shutil
 import time
+import re
 
 from distman import config, util
 from distman.logger import log
@@ -359,57 +361,99 @@ class Distributor(GitRepo):
             if target and not fnmatch.fnmatch(target_name, target):
                 continue
 
-            try:
-                dest = util.sanitize_path(self.__replace_vars(dest))
-            except Exception as e:
-                log.info(
-                    "%s in <%s> for %s" % (str(e), config.TAG_DESTPATH, target_name)
-                )
-                return False
-
-            # relative path to the source file
-            if source == ".":
-                source_path = self.directory
+            # Wildcard support: expand sources if '*' in source
+            if '*' in source:
+                # Only support a single wildcard for now
+                pattern = os.path.join(self.directory, source)
+                matches = glob.glob(pattern)
+                wildcard_regex = re.escape(source).replace(r'\*', r'([^/]+)')
+                wildcard_re = re.compile('^' + wildcard_regex + '$')
+                for match in matches:
+                    # Extract the wildcard part
+                    rel_match = os.path.relpath(match, self.directory)
+                    m = wildcard_re.match(rel_match)
+                    if not m:
+                        continue
+                    wildcard_val = m.group(1) if m.groups() else ''
+                    # Substitute {1} in dest
+                    try:
+                        dest_expanded = dest.replace('{1}', wildcard_val)
+                        dest_expanded = util.sanitize_path(self.__replace_vars(dest_expanded))
+                    except Exception as e:
+                        log.info(
+                            "%s in <%s> for %s" % (str(e), config.TAG_DESTPATH, target_name)
+                        )
+                        return False
+                    # create destination directory if it does not exist (or exit)
+                    dest_dir = os.path.dirname(dest_expanded)
+                    if not show and not dryrun and not os.path.exists(dest_dir):
+                        question = (
+                            "Target %s: Destination directory '%s' does not "
+                            "exist, create it now?" % (target_name, dest_dir)
+                        )
+                        if not yes and not util.yesNo(question):
+                            return False
+                        try:
+                            os.makedirs(dest_dir)
+                        except Exception as e:
+                            log.info(
+                                "ERROR: Failed to create directory '%s': %s"
+                                % (dest_dir, str(e))
+                            )
+                            return False
+                    targets.append((rel_match, dest_expanded))
             else:
-                source_path = util.normalize_path(os.path.join(self.directory, source))
-
-            # make sure file exists
-            if not os.path.exists(source_path):
-                log.info(
-                    "Target %s: Source '%s' does not exist" % (target_name, source)
-                )
-                return False
-
-            # check if file has uncommitted changes
-            if (
-                not show
-                and not force
-                and (source_path in changed_files or source_path in changed_dirs)
-            ):
-                log.info(
-                    "Target %s: Source '%s' has uncommitted changes.  "
-                    "Commit the changes or use --force." % (target_name, source)
-                )
-                return False
-
-            # create destination directory if it does not exist (or exit)
-            dest_dir = os.path.dirname(dest)
-            if not show and not dryrun and not os.path.exists(dest_dir):
-                question = (
-                    "Target %s: Destination directory '%s' does not "
-                    "exist, create it now?" % (target_name, dest_dir)
-                )
-                if not yes and not util.yesNo(question):
-                    return False
                 try:
-                    os.makedirs(dest_dir)
+                    dest = util.sanitize_path(self.__replace_vars(dest))
                 except Exception as e:
                     log.info(
-                        "ERROR: Failed to create directory '%s': %s"
-                        % (dest_dir, str(e))
+                        "%s in <%s> for %s" % (str(e), config.TAG_DESTPATH, target_name)
                     )
                     return False
-            targets.append((source, dest))
+
+                # relative path to the source file
+                if source == ".":
+                    source_path = self.directory
+                else:
+                    source_path = util.normalize_path(os.path.join(self.directory, source))
+
+                # make sure file exists
+                if not os.path.exists(source_path):
+                    log.info(
+                        "Target %s: Source '%s' does not exist" % (target_name, source)
+                    )
+                    return False
+
+                # check if file has uncommitted changes
+                if (
+                    not show
+                    and not force
+                    and (source_path in changed_files or source_path in changed_dirs)
+                ):
+                    log.info(
+                        "Target %s: Source '%s' has uncommitted changes.  "
+                        "Commit the changes or use --force." % (target_name, source)
+                    )
+                    return False
+
+                # create destination directory if it does not exist (or exit)
+                dest_dir = os.path.dirname(dest)
+                if not show and not dryrun and not os.path.exists(dest_dir):
+                    question = (
+                        "Target %s: Destination directory '%s' does not "
+                        "exist, create it now?" % (target_name, dest_dir)
+                    )
+                    if not yes and not util.yesNo(question):
+                        return False
+                    try:
+                        os.makedirs(dest_dir)
+                    except Exception as e:
+                        log.info(
+                            "ERROR: Failed to create directory '%s': %s"
+                            % (dest_dir, str(e))
+                        )
+                        return False
+                targets.append((source, dest))
 
         if not targets:
             if target:
