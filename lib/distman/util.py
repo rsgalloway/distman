@@ -35,6 +35,7 @@ Contains utility functions and classes.
 
 import ctypes
 import fnmatch
+import glob
 import os
 import re
 import shutil
@@ -308,6 +309,41 @@ def create_dest_folder(dest, dryrun=False, yes=False):
             if not yes and not yesNo(question):
                 return False
         log.info("Initializing: %s" % dest)
+
+
+def expand_wildcard_entry(source_pattern: str, destination_template: str):
+    """Expands a wildcard entry in the form of a glob pattern to a list of
+    tuples of source and destination paths. Supports only `*`, not `**` or ?.
+
+        build/* -> {DEPLOY_ROOT}/lib/python/%1
+
+    :param source_pattern: glob pattern for source files.
+    :param destination_template: template for destination paths.
+    :returns: list of tuples of source and destination paths.
+    """
+
+    # convert source glob to regex for extracting capture groups
+    regex_pattern = re.escape(source_pattern)
+    regex_pattern = regex_pattern.replace(r"\*", r"([^/]+)")
+    regex_pattern = "^" + regex_pattern + "$"
+
+    # expand the glob
+    matched_paths = glob.glob(source_pattern)
+    results = []
+
+    for path in matched_paths:
+        m = re.match(regex_pattern, path)
+        if not m:
+            continue
+
+        # replace %1, %2, etc., with matched groups
+        dest = destination_template
+        for i, group in enumerate(m.groups(), start=1):
+            dest = dest.replace(f"%{i}", group)
+
+        results.append((path, dest))
+
+    return results
 
 
 def full_path(start, relative_path):
