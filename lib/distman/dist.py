@@ -362,26 +362,29 @@ class Distributor(GitRepo):
                 continue
 
             # Wildcard support: expand sources if '*' in source
-            if '*' in source:
+            if "*" in source:
                 # Only support a single wildcard for now
                 pattern = os.path.join(self.directory, source)
                 matches = glob.glob(pattern)
-                wildcard_regex = re.escape(source).replace(r'\*', r'([^/]+)')
-                wildcard_re = re.compile('^' + wildcard_regex + '$')
+                wildcard_regex = re.escape(source).replace(r"\*", r"([^/]+)")
+                wildcard_re = re.compile("^" + wildcard_regex + "$")
                 for match in matches:
                     # Extract the wildcard part
                     rel_match = os.path.relpath(match, self.directory)
                     m = wildcard_re.match(rel_match)
                     if not m:
                         continue
-                    wildcard_val = m.group(1) if m.groups() else ''
+                    wildcard_val = m.group(1) if m.groups() else ""
                     # Substitute {1} in dest
                     try:
-                        dest_expanded = dest.replace('{1}', wildcard_val)
-                        dest_expanded = util.sanitize_path(self.__replace_vars(dest_expanded))
+                        dest_expanded = dest.replace("{1}", wildcard_val)
+                        dest_expanded = util.sanitize_path(
+                            self.__replace_vars(dest_expanded)
+                        )
                     except Exception as e:
                         log.info(
-                            "%s in <%s> for %s" % (str(e), config.TAG_DESTPATH, target_name)
+                            "%s in <%s> for %s"
+                            % (str(e), config.TAG_DESTPATH, target_name)
                         )
                         return False
                     # create destination directory if it does not exist (or exit)
@@ -415,7 +418,9 @@ class Distributor(GitRepo):
                 if source == ".":
                     source_path = self.directory
                 else:
-                    source_path = util.normalize_path(os.path.join(self.directory, source))
+                    source_path = util.normalize_path(
+                        os.path.join(self.directory, source)
+                    )
 
                 # make sure file exists
                 if not os.path.exists(source_path):

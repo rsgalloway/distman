@@ -191,12 +191,8 @@ def main():
                 return 1
 
         elif args.number:
-            if not args.target:
-                print("No target specified to change version")
-                return 2
-            else:
-                target_file = args.target
-                target_version = args.number
+            target_file = args.target
+            target_version = args.number
             try:
                 target_version = int(target_version)
             except Exception:
@@ -205,15 +201,11 @@ def main():
             target_commit = ""
 
         else:
-            if not args.target:
-                print("No target specified to change version")
-                return 2
-            else:
-                target_file = args.target
-                target_commit = args.commit
+            target_file = args.target
+            target_commit = args.commit
             if len(target_commit) < config.LEN_MINHASH:
                 print("Hashes must be at least %d characters" % config.LEN_MINHASH)
-                return 0
+                return 2
             target_version = 0
 
         # do target version change
