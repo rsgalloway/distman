@@ -58,14 +58,14 @@ class Distributor(GitRepo):
 
     def dist(
         self,
-        target=None,
-        show=False,
-        force=False,
-        all=False,
-        yes=False,
-        dryrun=False,
-        versiononly=False,
-        verbose=False,
+        target: str = None,
+        show: bool = False,
+        force: bool = False,
+        all: bool = False,
+        yes: bool = False,
+        dryrun: bool = False,
+        versiononly: bool = False,
+        verbose: bool = False,
     ):
         """Performs the file distribution.
 
@@ -339,7 +339,7 @@ class Distributor(GitRepo):
 
         return True
 
-    def reset_file_version(self, target, dryrun=False):
+    def reset_file_version(self, target: str, dryrun: bool = False):
         """Resets the symbolic link of a versioned file to point to the latest.
 
         :param target: target name in dist file.
@@ -407,10 +407,10 @@ class Distributor(GitRepo):
 
     def change_file_version(
         self,
-        target,
-        target_commit,
-        target_version,
-        dryrun=False,
+        target: str,
+        target_commit: str = None,
+        target_version: str = None,
+        dryrun: bool = False,
     ):
         """Changes the symbolic link of a versioned file to point to a different file.
 
@@ -514,11 +514,11 @@ class Distributor(GitRepo):
 
     def delete_target(
         self,
-        target,
-        target_version=None,
-        target_commit=None,
-        yes=False,
-        dryrun=False,
+        target: str,
+        target_version: str = None,
+        target_commit: str = None,
+        yes: bool = False,
+        dryrun: bool = False,
     ):
         """Delete a target's destination files. Deletes symlink, .dist and version
         files/directories.
