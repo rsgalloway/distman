@@ -33,10 +33,8 @@ __doc__ = """
 Contains file distribution classes and functions.
 """
 
-import filecmp
 import fnmatch
 import os
-import shutil
 import time
 
 from distman import config, util
@@ -57,250 +55,6 @@ class Distributor(GitRepo):
         os_symlink = getattr(os, "symlink", None)
         if not callable(os_symlink):
             util.add_symlink_support()
-
-    @staticmethod
-    def __get_file_versions(target):
-        """Find the highest numeric version number for a file.
-
-        :param target: Path to file to check.
-        :return: List of tuples with version number and file.
-        """
-        filedir = os.path.dirname(target) + "/" + config.DIR_VERSIONS
-        if not os.path.exists(filedir):
-            return []
-
-        filename = os.path.basename(target)
-        version_list = []
-
-        for f in os.listdir(filedir):
-            file_name_length = len(filename)
-            # get files that match <target>.<version>.<commit>
-            if (
-                f.startswith(filename)
-                and len(f) > file_name_length + 1
-                and f[file_name_length] == "."
-                and str(f[file_name_length + 1]).isnumeric()
-            ):
-                # parse the number from the rest of the file name
-                info = f[file_name_length + 1 :]
-                dot_pos = info.find(".")
-                if -1 != dot_pos:
-                    ver = int(info[:dot_pos])
-                else:
-                    ver = int(info)
-                commit = ""
-                if -1 != dot_pos:
-                    # trim potential remaining dotted portions
-                    dot_pos2 = info.find(".", dot_pos + 1)
-                    if -1 == dot_pos2:
-                        commit = info[dot_pos + 1 :]
-                    else:
-                        commit = info[dot_pos + 1 : dot_pos2]
-                    # trim '-forced' if present
-                    dash_pos = commit.find("-")
-                    if -1 != dash_pos:
-                        commit = commit[:dash_pos]
-                version_list.append((filedir + "/" + f, ver, commit))
-
-        return sorted(version_list, key=lambda tup: tup[1])
-
-    @staticmethod
-    def __hashes_equal(hash_str_a, hash_str_b):
-        """Compares two hash strings regardless of length or case
-
-        :param hash_str_a: First hash string.
-        :param hash_str_b: Second hash string.
-        :return: True if hashes are equal.
-        """
-        if len(hash_str_a) > len(hash_str_b):
-            return hash_str_a.upper().startswith(hash_str_b.upper())
-        else:
-            return hash_str_b.upper().startswith(hash_str_a.upper())
-
-    def __copy_file(self, source, dest):
-        """Copies a file or link. Converts line endings to linux LF, preserving
-        original source file mode.
-
-        :param source: Path to source file or link.
-        :param dest: Path to destination.
-        """
-        try:
-            destdir = os.path.dirname(dest)
-            if not os.path.isdir(destdir):
-                os.makedirs(destdir)
-            # copy link
-            if os.path.islink(source):
-                linkto = os.readlink(source)
-                try:
-                    os.symlink(linkto, dest, target_is_directory=os.path.isdir(linkto))
-                except OSError as e:
-                    log.error("Failed to create symbolic link: %s" % str(e))
-            # copy file, converting line endings to LF
-            else:
-                with open(source, "r") as infile, open(dest, "wb") as outfile:
-                    for line in infile:
-                        text = line.rstrip("\r\n")
-                        outfile.write((text + "\n").encode("UTF-8"))
-        except UnicodeDecodeError:
-            shutil.copy2(source, dest)
-        except Exception as e:
-            log.error("File copy error: %s" % str(e))
-        finally:
-            # preserve original file mode if not a link
-            if not os.path.islink(source):
-                mode = os.stat(source).st_mode
-                os.chmod(dest, mode)
-
-    def __copy_directory(self, source, dest, all_files=False):
-        """Recursively copies a directory (ignores hidden files).
-
-        :param source: Path to source directory.
-        :param dest: Path to destination directory.
-        :param all_files: Copy all files, including hidden and ignorable files.
-        """
-        source = os.path.relpath(source)
-        all_files = self.get_files(source, all_files=all_files)
-
-        for filepath in all_files:
-            if source == ".":
-                target = os.path.join(dest, filepath)
-            else:
-                target = os.path.join(dest, filepath[len(source) + 1 :])
-            self.__copy_file(filepath, target)
-
-    def __copy_object(self, source, dest, all_files=False):
-        """Copies, or links, a file or directory recursively (ignores hidden
-        files).
-
-        :param source: Path to source file, link or directory.
-        :param dest: Path to destination file or directory.
-        :param all_files: Copy all files in a directory, including hidden and
-            ignorable files.
-        """
-        if os.path.islink(source):
-            link_target = os.readlink(source)
-            self.__link_object(link_target, dest, link_target)
-        elif os.path.isfile(source):
-            self.__copy_file(source, dest)
-        elif os.path.isdir(source):
-            self.__copy_directory(source, dest, all_files=all_files)
-        else:
-            raise Exception("Source '%s' not found" % source)
-
-    def __compare_files(self, source, target):
-        """Compares two files, ignoring end of lines in text files. Checks for
-        file mode changes, file content changes and link changes.
-
-        :param source: Path to source file.
-        :param target: Path to target file.
-        :return: True if files or links are the same.
-        """
-        try:
-            # compare links
-            if os.path.islink(source):
-                if os.path.islink(target):
-                    return os.readlink(source) == os.readlink(target)
-                else:
-                    return False
-            # compare files
-            else:
-                # file mode must match
-                if os.stat(source).st_mode != os.stat(target).st_mode:
-                    return False
-                # file contents must match
-                with open(source, "r") as file1, open(target, "r") as file2:
-                    while True:
-                        line1 = next(file1, None)
-                        line2 = next(file2, None)
-                        # if either file is finished return true
-                        if line1 is None or line2 is None:
-                            return line1 is None and line2 is None
-                        # compare lines regardless of EOL
-                        if line1.rstrip("\r\n") != line2.rstrip("\r\n"):
-                            return False
-        # do binary comparison if there are invalid characters
-        except UnicodeDecodeError:
-            return filecmp.cmp(source, target, shallow=False)
-        except IsADirectoryError as err:
-            log.error("Cannot compare source: %s" % err)
-            return False
-        except FileNotFoundError:
-            return False
-
-    def __compare_objects(self, path1, path2):
-        """Compares two files or two directories.
-
-        :param path1: Path to first file or directory.
-        :param path2: Path to second file or directory.
-        :return: True if objects are equal.
-        """
-        if os.path.isfile(path1) and os.path.isfile(path2):
-            return self.__compare_files(path1, path2)
-
-        path1 = os.path.relpath(path1)
-        all_files = self.get_files(path1)
-
-        for filepath in all_files:
-            destPath = os.path.join(path2, filepath[len(path1) + 1 :])
-            if not self.__compare_files(filepath, destPath):
-                return False
-
-        return True
-
-    @staticmethod
-    def __link_object(target, link, actual_target):
-        """Creates symbolic link to a file or directory.
-
-        :param target: Path to target file or directory.
-        :param link: Path to symbolic link.
-        :param actual_target: Path to actual target file or directory.
-        :returns: True if linking was successful.
-        """
-        if not os.path.exists(actual_target):
-            log.warning("Target '%s' not found" % actual_target)
-
-        target_type = util.get_path_type(actual_target)[0]
-
-        try:
-            isdir = os.path.isdir(actual_target)
-            os.symlink(target, link, target_is_directory=isdir)
-
-        except OSError as e:
-            log.error(
-                "Failed to create symoblic link '%s =%s> %s': %s"
-                % (link, target_type, target, str(e))
-            )
-            return False
-
-        return True
-
-    @staticmethod
-    def __replace_vars(pathstr):
-        """Replaces tokens in string with environment variable or config default.
-
-        :param pathstr: Path string with tokens.
-        :return: Path string with tokens replaced.
-        """
-        while True:
-            openBracket = pathstr.find(config.PATH_TOKEN_OPEN)
-            closeBracket = pathstr.find(config.PATH_TOKEN_CLOSE)
-            if -1 == openBracket or closeBracket <= openBracket:
-                return pathstr
-            var = pathstr[openBracket + 1 : closeBracket].upper()
-            replacement = os.getenv(var, config.DEFAULT_ENV.get(var))
-            if not replacement:
-                raise Exception("Cannot resolve env var '%s'" % var)
-            pathstr = pathstr[0:openBracket] + replacement + pathstr[closeBracket + 1 :]
-
-    def get_files(self, start, all_files=False):
-        """Returns the list of files to be disted.
-
-        :param start: Starting directory.
-        :param all_files: Get all files in a directory, including hidden and
-            ignorable files.
-        :return: List of relative file paths.
-        """
-        return [f for f in util.walk(start, exclude_ignorables=(all_files == False))]
 
     def dist(
         self,
@@ -362,11 +116,11 @@ class Distributor(GitRepo):
             # wildcard support: expand sources if '*' in source
             if "*" in source:
                 for source_path, dest_path in util.expand_wildcard_entry(source, dest):
-                    dest = util.sanitize_path(self.__replace_vars(dest_path))
+                    dest = util.sanitize_path(util.replace_vars(dest_path))
                     targets.append((source_path, dest))
             else:
                 try:
-                    dest = util.sanitize_path(self.__replace_vars(dest))
+                    dest = util.sanitize_path(util.replace_vars(dest))
                 except Exception as e:
                     log.info(
                         "%s in <%s> for %s" % (str(e), config.TAG_DESTPATH, target_name)
@@ -451,7 +205,7 @@ class Distributor(GitRepo):
             # define dist version information
             version_num = 0
             version_file = ""
-            version_list = self.__get_file_versions(dest)
+            version_list = util.get_file_versions(dest)
 
             # TODO: make show a separate method
             if show:
@@ -492,7 +246,7 @@ class Distributor(GitRepo):
 
             if version_list:
                 version_file, version_num, _ = version_list[-1]
-                if version_file and self.__compare_objects(source_path, version_file):
+                if version_file and util.compare_objects(source_path, version_file):
                     target_type = util.get_path_type(source_path)[0]
                     if os.path.exists(dest) and os.path.lexists(dest):
                         log.info(
@@ -513,7 +267,7 @@ class Distributor(GitRepo):
                             else:
                                 if os.path.lexists(dest):
                                     util.remove_object(dest)
-                                link_created = self.__link_object(
+                                link_created = util.link_object(
                                     config.DIR_VERSIONS
                                     + os.path.sep
                                     + os.path.basename(version_file),
@@ -556,7 +310,7 @@ class Distributor(GitRepo):
             #     version_dest += "." + self.branch_name
             # copy the file/directory to the versioned location
             if not dryrun:
-                self.__copy_object(source_path, version_dest, all_files=all)
+                util.copy_object(source_path, version_dest, all_files=all)
             # delete existing symbolic link if it exists
             if not dryrun and os.path.lexists(dest):
                 util.remove_object(dest)
@@ -565,7 +319,7 @@ class Distributor(GitRepo):
             if dryrun and not versiononly:
                 log.info("Updated: %s =%s> %s" % (source, target_type, version_dest))
             elif not versiononly:
-                link_created = self.__link_object(
+                link_created = util.link_object(
                     config.DIR_VERSIONS + os.path.sep + os.path.basename(version_dest),
                     dest,
                     version_dest,
@@ -610,7 +364,7 @@ class Distributor(GitRepo):
             source = util.normalize_path(target_dict.get(config.TAG_SOURCEPATH))
             try:
                 dest = util.sanitize_path(
-                    self.__replace_vars(target_dict.get(config.TAG_DESTPATH))
+                    util.replace_vars(target_dict.get(config.TAG_DESTPATH))
                 )
             except Exception as e:
                 log.info(
@@ -622,7 +376,7 @@ class Distributor(GitRepo):
                 continue
 
             any_found = True
-            version_list = self.__get_file_versions(dest)
+            version_list = util.get_file_versions(dest)
             if not version_list:
                 log.info(
                     "Target %s: No versioned files found for '%s'"
@@ -638,7 +392,7 @@ class Distributor(GitRepo):
                 if dryrun:
                     log.info("%s =%s> %s" % (source, target_type, verfile))
                 else:
-                    link_created = self.__link_object(
+                    link_created = util.link_object(
                         config.DIR_VERSIONS + os.path.sep + os.path.basename(verfile),
                         dest,
                         verfile,
@@ -685,7 +439,7 @@ class Distributor(GitRepo):
             source = util.normalize_path(target_dict.get(config.TAG_SOURCEPATH))
             try:
                 dest = util.sanitize_path(
-                    self.__replace_vars(target_dict.get(config.TAG_DESTPATH))
+                    util.replace_vars(target_dict.get(config.TAG_DESTPATH))
                 )
             except Exception as e:
                 log.error(
@@ -696,7 +450,7 @@ class Distributor(GitRepo):
             if target and target != target_name:
                 continue
 
-            version_list = self.__get_file_versions(dest)
+            version_list = util.get_file_versions(dest)
             if not version_list:
                 log.info(
                     "Target %s: No versioned files found for '%s'"
@@ -717,7 +471,7 @@ class Distributor(GitRepo):
 
             for verfile, vernum, vercommit in version_list:
                 if (not target_commit and vernum == target_version) or (
-                    target_commit and self.__hashes_equal(target_commit, vercommit)
+                    target_commit and util.hashes_equal(target_commit, vercommit)
                 ):
                     # found matching versioned target
                     any_found = True
@@ -730,7 +484,7 @@ class Distributor(GitRepo):
                     if dryrun:
                         log.info("%s =%s> %s" % (source, target_type, verfile))
                     else:
-                        link_created = self.__link_object(
+                        link_created = util.link_object(
                             config.DIR_VERSIONS
                             + os.path.sep
                             + os.path.basename(verfile),
@@ -796,7 +550,7 @@ class Distributor(GitRepo):
                 source = util.normalize_path(target_dict.get(config.TAG_SOURCEPATH))
                 try:
                     dest = util.sanitize_path(
-                        self.__replace_vars(target_dict.get(config.TAG_DESTPATH))
+                        util.replace_vars(target_dict.get(config.TAG_DESTPATH))
                     )
                 except Exception as e:
                     log.info(
@@ -804,7 +558,7 @@ class Distributor(GitRepo):
                     )
                     return False
 
-                version_list = self.__get_file_versions(dest)
+                version_list = util.get_file_versions(dest)
 
                 # filter version list by version number or commit hash
                 if version_list and target_version:
@@ -815,7 +569,7 @@ class Distributor(GitRepo):
                     version_list = [
                         x
                         for x in version_list
-                        if self.__hashes_equal(target_commit, x[2])
+                        if util.hashes_equal(target_commit, x[2])
                     ]
 
                 question = "Delete target '%s' (%s => %s) and %d versions?" % (
