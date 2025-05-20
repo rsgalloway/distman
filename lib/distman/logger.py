@@ -67,18 +67,31 @@ log.addHandler(logging.NullHandler())
 class DryRunFilter(logging.Filter):
     """Filter that removes log records when in dry run mode."""
 
-    def __init__(self, dryrun):
+    def __init__(self, dryrun: bool = False):
+        """Initialize the filter.
+
+        :param dryrun: dry run flag.
+        """
         super().__init__()
         self.dryrun = dryrun
 
-    def filter(self, record):
+    def filter(self, record: logging.LogRecord):
+        """Filter the log record.
+        :param record: log record.
+        :return: True if the record should be logged, False otherwise.
+        """
         return not self.dryrun
 
 
 class UserFilter(logging.Filter):
     """Adds the username to the log record."""
 
-    def filter(self, record):
+    def filter(self, record: logging.LogRecord):
+        """Add the username to the log record.
+
+        :param record: log record.
+        :return: True if the username was added, False otherwise.
+        """
         try:
             record.username = os.getlogin()
         except Exception:
@@ -92,14 +105,33 @@ class UserRotatingFileHandler(RotatingFileHandler):
     """Rotating file handler that adds the username to the log record."""
 
     def __init__(
-        self, filename, mode="a", maxBytes=0, backupCount=0, encoding=None, delay=False
+        self,
+        filename: str,
+        mode: str = "a",
+        maxBytes: int = 0,
+        backupCount: int = 0,
+        encoding: str = None,
+        delay: bool = False,
     ):
+        """Initialize the rotating file handler.
+
+        :param filename: name of the log file.
+        :param mode: file open mode.
+        :param maxBytes: max bytes per file.
+        :param backupCount: number of backup files.
+        :param encoding: file encoding.
+        :param delay: delay flag.
+        """
         super().__init__(filename, mode, maxBytes, backupCount, encoding, delay)
         self.addFilter(UserFilter())
 
 
-def setup_stream_handler(level=LOG_LEVEL):
-    """Adds a new stdout stream handler."""
+def setup_stream_handler(level: int = LOG_LEVEL):
+    """Adds a new stdout stream handler.
+
+    :param level: log level.
+    :return: handler.
+    """
     for h in log.handlers:
         if h.name == log.name and "StreamHandler" in str(h):
             del log.handlers[log.handlers.index(h)]
@@ -114,13 +146,21 @@ def setup_stream_handler(level=LOG_LEVEL):
 
 
 def setup_file_handler(
-    maxBytes=config.LOG_MAX_BYTES,
-    backupCount=config.LOG_BACKUP_COUNT,
-    level=LOG_LEVEL,
-    logdir=config.LOG_DIR,
-    dryrun=False,
+    maxBytes: int = config.LOG_MAX_BYTES,
+    backupCount: int = config.LOG_BACKUP_COUNT,
+    level: int = LOG_LEVEL,
+    logdir: str = config.LOG_DIR,
+    dryrun: bool = False,
 ):
-    """Adds a new rotating file handler."""
+    """Adds a new rotating file handler.
+
+    :param maxBytes: max bytes per file.
+    :param backupCount: number of backup files.
+    :param level: log level.
+    :param logdir: directory to store the log files.
+    :param dryrun: dry run flag.
+    :return: handler.
+    """
     for h in log.handlers:
         if h.name == log.name and "RotatingFileHandler" in str(h):
             del log.handlers[log.handlers.index(h)]
@@ -145,7 +185,7 @@ def setup_file_handler(
     return handler
 
 
-def setup_logging(dryrun=False):
+def setup_logging(dryrun: bool = False):
     """Setup log handlers.
 
     :param dryrun: dry run flag
