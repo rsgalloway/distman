@@ -35,11 +35,9 @@ Contains file distribution classes and functions.
 
 import filecmp
 import fnmatch
-import glob
 import os
 import shutil
 import time
-import re
 
 from distman import config, util
 from distman.logger import log
