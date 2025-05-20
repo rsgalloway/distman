@@ -40,6 +40,7 @@ import os
 import re
 import shutil
 from collections import defaultdict
+from typing import List
 
 from distman import config
 from distman.logger import log
@@ -101,7 +102,7 @@ def get_user():
     return os.getenv("USER", os.getenv("USERNAME", "unknown"))
 
 
-def has_hidden_attr(filepath):
+def has_hidden_attr(filepath: str):
     """Checks if file has hidden file attribute (windows only).
 
     :param filepath: file system path.
@@ -119,7 +120,7 @@ def has_hidden_attr(filepath):
     return result
 
 
-def is_file_hidden(filepath):
+def is_file_hidden(filepath: str):
     """Cross platform check if file is hidden. Checks if file name begins
     with period or has hidden attribute.
 
@@ -130,7 +131,7 @@ def is_file_hidden(filepath):
     return name.startswith(".") or has_hidden_attr(filepath)
 
 
-def is_ignorable(filepath):
+def is_ignorable(filepath: str):
     """Returns True if path is ignorable. Checks path against patterns
     in the ignorables list, as well as dot files.
 
@@ -144,12 +145,12 @@ def is_ignorable(filepath):
     return re.search(IGNORABLE_PATHS, filepath) is not None
 
 
-def get_root_dir(path):
+def get_root_dir(path: str):
     """Returns the root directory of a path."""
     return os.path.dirname(path).split(os.path.sep)[0]
 
 
-def get_common_root_dirs(filepaths):
+def get_common_root_dirs(filepaths: List[str]):
     """Returns a list of common root directories for a list of file paths.
 
     :param filepaths: list of file paths.
@@ -175,7 +176,7 @@ def get_common_root_dirs(filepaths):
     return list(common_directories)
 
 
-def get_path_type(path):
+def get_path_type(path: str):
     """Returns the short name of the path type: 'file', 'directory', 'link',
     or 'null' if path does not exist.
 
@@ -195,7 +196,7 @@ def get_path_type(path):
     return target_type
 
 
-def normalize_path(path):
+def normalize_path(path: str):
     """Normalizes relative paths by removing leading "./" and calling
     os.path.normpath.
 
@@ -205,14 +206,17 @@ def normalize_path(path):
 
     if not path:
         return path
+
     path = sanitize_path(path)
+
     # absolute paths are not normalized
     if path.startswith("/"):
         return path
+
     return os.path.normpath(path.lstrip("./"))
 
 
-def sanitize_path(path):
+def sanitize_path(path: str):
     """Sanitizes a path by changing separators to forward slashes and removing
     trailing slashes.
 
@@ -222,13 +226,16 @@ def sanitize_path(path):
 
     if not path:
         return path
+
     path = path.replace("\\", "/")
+
     if path[-1] == "/":
         path = path[:-1]
+
     return path
 
 
-def get_link_full_path(link):
+def get_link_full_path(link: str):
     """Returns the full path of a symbolic link.
 
     :param link: symbolic link path.
@@ -236,7 +243,7 @@ def get_link_full_path(link):
     """
 
     if not os.path.islink(link):
-        return None
+        return ""
 
     target = os.readlink(link)
     if not os.path.isabs(target):
@@ -245,7 +252,7 @@ def get_link_full_path(link):
     return os.path.normpath(target)
 
 
-def get_dist_info(dest, ext=config.DIST_INFO_EXT):
+def get_dist_info(dest: str, ext: str = config.DIST_INFO_EXT):
     """Returns the dist info file path, e.g.
 
         /path/to/desploy/prod/.foobar.py.dist
@@ -255,12 +262,13 @@ def get_dist_info(dest, ext=config.DIST_INFO_EXT):
 
     :param dest: destination directory.
     :param ext: file extension.
+    :return: file path for dist info.
     """
     folder, original_name = os.path.split(dest)
     return os.path.join(folder, f".{original_name}{ext}")
 
 
-def write_dist_info(dest, dist_info):
+def write_dist_info(dest: str, dist_info: dict):
     """Writes distribution information to a file.
 
     :param dest: Path to destination directory.
@@ -273,7 +281,7 @@ def write_dist_info(dest, dist_info):
             outFile.write(f"{key}: {value}\n")
 
 
-def create_dest_folder(dest, dryrun=False, yes=False):
+def create_dest_folder(dest: str, dryrun: bool = False, yes: bool = False):
     """Creates destination folder if it does not exist.
 
     :param dest: destination file path.
@@ -346,7 +354,7 @@ def expand_wildcard_entry(source_pattern: str, destination_template: str):
     return results
 
 
-def full_path(start, relative_path):
+def full_path(start: str, relative_path: str):
     """Returns the full path from a relative path.
 
     :param start: starting directory.
@@ -376,7 +384,7 @@ def full_path(start, relative_path):
     return os.path.abspath(start + os.path.sep + relative_path)
 
 
-def remove_object(path, recurse=False):
+def remove_object(path: str, recurse: bool = False):
     """Deletes a file or directory tree.
 
     :param path: file system path.
@@ -401,7 +409,7 @@ def remove_object(path, recurse=False):
             log.error("Error removing '%s': %s" % (path, str(e)))
 
 
-def yesNo(question):
+def yesNo(question: str):
     """Displays question text to user and reads yes/no input.
 
     :param question: question text.
@@ -415,7 +423,7 @@ def yesNo(question):
             print("You must answer yes or no.")
 
 
-def walk(path, exclude_ignorables=True, followlinks=False):
+def walk(path: str, exclude_ignorables: bool = True, followlinks: bool = False):
     """Generator that yields relative file paths that are not ignorable.
     Will include nested directories and symbolic links to directories:
 
