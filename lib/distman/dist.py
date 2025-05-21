@@ -372,7 +372,8 @@ class Distributor(GitRepo):
                 )
                 return False
 
-            if target and target != target_name:
+            # optionally match on specific targets
+            if target and not fnmatch.fnmatch(target_name, target):
                 continue
 
             any_found = True
@@ -447,7 +448,8 @@ class Distributor(GitRepo):
                 )
                 return False
 
-            if target and target != target_name:
+            # optionally match on specific targets
+            if target and not fnmatch.fnmatch(target_name, target):
                 continue
 
             version_list = util.get_file_versions(dest)
@@ -544,7 +546,8 @@ class Distributor(GitRepo):
                 target_dict.get(config.TAG_SOURCEPATH) is not None
                 and target_dict.get(config.TAG_DESTPATH) is not None
             ):
-                if target and target != target_name:
+                # optionally match on specific targets
+                if target and not fnmatch.fnmatch(target_name, target):
                     continue
 
                 source = util.normalize_path(target_dict.get(config.TAG_SOURCEPATH))
