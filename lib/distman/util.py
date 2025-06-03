@@ -34,11 +34,14 @@ Contains utility functions and classes.
 """
 
 import ctypes
+import filecmp
 import fnmatch
+import glob
 import os
 import re
 import shutil
 from collections import defaultdict
+from typing import List
 
 from distman import config
 from distman.logger import log
@@ -95,12 +98,170 @@ def check_symlinks():
     return True
 
 
+def copy_file(source: str, dest: str):
+    """Copies a file or link. Converts line endings to linux LF, preserving
+    original source file mode.
+
+    :param source: Path to source file or link.
+    :param dest: Path to destination.
+    """
+    try:
+        destdir = os.path.dirname(dest)
+        if not os.path.isdir(destdir):
+            os.makedirs(destdir)
+        # copy link
+        if os.path.islink(source):
+            linkto = os.readlink(source)
+            try:
+                os.symlink(linkto, dest, target_is_directory=os.path.isdir(linkto))
+            except OSError as e:
+                log.error("Failed to create symbolic link: %s" % str(e))
+        # copy file, converting line endings to LF
+        else:
+            with open(source, "r") as infile, open(dest, "wb") as outfile:
+                for line in infile:
+                    text = line.rstrip("\r\n")
+                    outfile.write((text + "\n").encode("UTF-8"))
+    except UnicodeDecodeError:
+        shutil.copy2(source, dest)
+    except Exception as e:
+        log.error("File copy error: %s" % str(e))
+    finally:
+        # preserve original file mode if not a link
+        if not os.path.islink(source):
+            mode = os.stat(source).st_mode
+            os.chmod(dest, mode)
+
+
+def copy_directory(source: str, dest: str, all_files: bool = False):
+    """Recursively copies a directory (ignores hidden files).
+
+    :param files: List of file paths to copy.
+    :param source: Path to source directory.
+    :param dest: Path to destination directory.
+    :param all_files: Copy all files, including hidden and ignorable files.
+    """
+    source = os.path.relpath(source)
+    all_files = get_files(source, all_files=all_files)
+
+    for filepath in all_files:
+        if source == ".":
+            target = os.path.join(dest, filepath)
+        else:
+            target = os.path.join(dest, filepath[len(source) + 1 :])
+        copy_file(filepath, target)
+
+
+def copy_object(source: str, dest: str, all_files: bool = False):
+    """Copies, or links, a file or directory recursively (ignores hidden
+    files).
+
+    :param source: Path to source file, link or directory.
+    :param dest: Path to destination file or directory.
+    :param all_files: Copy all files in a directory, including hidden and
+        ignorable files.
+    """
+    if os.path.islink(source):
+        link_target = os.readlink(source)
+        link_object(link_target, dest, link_target)
+    elif os.path.isfile(source):
+        copy_file(source, dest)
+    elif os.path.isdir(source):
+        copy_directory(source, dest, all_files=all_files)
+    else:
+        raise Exception("Source '%s' not found" % source)
+
+
+def compare_files(source: str, target: str):
+    """Compares two files, ignoring end of lines in text files. Checks for
+    file mode changes, file content changes and link changes.
+
+    :param source: Path to source file.
+    :param target: Path to target file.
+    :return: True if files or links are the same.
+    """
+    try:
+        # compare links
+        if os.path.islink(source):
+            if os.path.islink(target):
+                return os.readlink(source) == os.readlink(target)
+            else:
+                return False
+        # compare files
+        else:
+            # file mode must match
+            if os.stat(source).st_mode != os.stat(target).st_mode:
+                return False
+            # file contents must match
+            with open(source, "r") as file1, open(target, "r") as file2:
+                while True:
+                    line1 = next(file1, None)
+                    line2 = next(file2, None)
+                    # if either file is finished return true
+                    if line1 is None or line2 is None:
+                        return line1 is None and line2 is None
+                    # compare lines regardless of EOL
+                    if line1.rstrip("\r\n") != line2.rstrip("\r\n"):
+                        return False
+    # do binary comparison if there are invalid characters
+    except UnicodeDecodeError:
+        return filecmp.cmp(source, target, shallow=False)
+    except IsADirectoryError as err:
+        log.error("Cannot compare source: %s" % err)
+        return False
+    except FileNotFoundError:
+        return False
+
+
+def compare_objects(path1: str, path2: str):
+    """Compares two files or two directories.
+
+    :param path1: Path to first file or directory.
+    :param path2: Path to second file or directory.
+    :return: True if objects are equal.
+    """
+    if os.path.isfile(path1) and os.path.isfile(path2):
+        return compare_files(path1, path2)
+
+    path1 = os.path.relpath(path1)
+    all_files = get_files(path1)
+
+    for filepath in all_files:
+        destPath = os.path.join(path2, filepath[len(path1) + 1 :])
+        if not compare_files(filepath, destPath):
+            return False
+
+    return True
+
+
+def find_matching_versions(source_path: str, dest: str):
+    """Finds all matching versions of a file in the destination directory,
+    sorted from oldest to newest.
+
+    :param source_path: Path to source file.
+    :param dest: Path to destination directory.
+    :return: List of tuples with version file, number and commit.
+    """
+
+    matches = []
+    version_list = get_file_versions(dest)
+
+    for version_file, version_num, version_commit in version_list:
+        if version_file and compare_objects(source_path, version_file):
+            matches.append((version_file, version_num, version_commit))
+
+    return matches
+
+
 def get_user():
-    """Returns the current user name."""
+    """Returns the current user name.
+
+    :returns: username from environment variables.
+    """
     return os.getenv("USER", os.getenv("USERNAME", "unknown"))
 
 
-def has_hidden_attr(filepath):
+def has_hidden_attr(filepath: str):
     """Checks if file has hidden file attribute (windows only).
 
     :param filepath: file system path.
@@ -118,7 +279,7 @@ def has_hidden_attr(filepath):
     return result
 
 
-def is_file_hidden(filepath):
+def is_file_hidden(filepath: str):
     """Cross platform check if file is hidden. Checks if file name begins
     with period or has hidden attribute.
 
@@ -129,7 +290,7 @@ def is_file_hidden(filepath):
     return name.startswith(".") or has_hidden_attr(filepath)
 
 
-def is_ignorable(filepath):
+def is_ignorable(filepath: str):
     """Returns True if path is ignorable. Checks path against patterns
     in the ignorables list, as well as dot files.
 
@@ -143,12 +304,12 @@ def is_ignorable(filepath):
     return re.search(IGNORABLE_PATHS, filepath) is not None
 
 
-def get_root_dir(path):
+def get_root_dir(path: str):
     """Returns the root directory of a path."""
     return os.path.dirname(path).split(os.path.sep)[0]
 
 
-def get_common_root_dirs(filepaths):
+def get_common_root_dirs(filepaths: List[str]):
     """Returns a list of common root directories for a list of file paths.
 
     :param filepaths: list of file paths.
@@ -174,7 +335,7 @@ def get_common_root_dirs(filepaths):
     return list(common_directories)
 
 
-def get_path_type(path):
+def get_path_type(path: str):
     """Returns the short name of the path type: 'file', 'directory', 'link',
     or 'null' if path does not exist.
 
@@ -194,7 +355,7 @@ def get_path_type(path):
     return target_type
 
 
-def normalize_path(path):
+def normalize_path(path: str):
     """Normalizes relative paths by removing leading "./" and calling
     os.path.normpath.
 
@@ -204,14 +365,17 @@ def normalize_path(path):
 
     if not path:
         return path
+
     path = sanitize_path(path)
+
     # absolute paths are not normalized
     if path.startswith("/"):
         return path
+
     return os.path.normpath(path.lstrip("./"))
 
 
-def sanitize_path(path):
+def sanitize_path(path: str):
     """Sanitizes a path by changing separators to forward slashes and removing
     trailing slashes.
 
@@ -221,13 +385,16 @@ def sanitize_path(path):
 
     if not path:
         return path
+
     path = path.replace("\\", "/")
+
     if path[-1] == "/":
         path = path[:-1]
+
     return path
 
 
-def get_link_full_path(link):
+def get_link_full_path(link: str):
     """Returns the full path of a symbolic link.
 
     :param link: symbolic link path.
@@ -235,7 +402,7 @@ def get_link_full_path(link):
     """
 
     if not os.path.islink(link):
-        return None
+        return ""
 
     target = os.readlink(link)
     if not os.path.isabs(target):
@@ -244,7 +411,7 @@ def get_link_full_path(link):
     return os.path.normpath(target)
 
 
-def get_dist_info(dest, ext=config.DIST_INFO_EXT):
+def get_dist_info(dest: str, ext: str = config.DIST_INFO_EXT):
     """Returns the dist info file path, e.g.
 
         /path/to/desploy/prod/.foobar.py.dist
@@ -254,12 +421,13 @@ def get_dist_info(dest, ext=config.DIST_INFO_EXT):
 
     :param dest: destination directory.
     :param ext: file extension.
+    :return: file path for dist info.
     """
     folder, original_name = os.path.split(dest)
     return os.path.join(folder, f".{original_name}{ext}")
 
 
-def write_dist_info(dest, dist_info):
+def write_dist_info(dest: str, dist_info: dict):
     """Writes distribution information to a file.
 
     :param dest: Path to destination directory.
@@ -272,12 +440,13 @@ def write_dist_info(dest, dist_info):
             outFile.write(f"{key}: {value}\n")
 
 
-def create_dest_folder(dest, dryrun=False, yes=False):
-    """Creates destination folder if it does not exist.
+def create_dest_folder(dest: str, dryrun: bool = False, yes: bool = False):
+    """Creates destination folder if it does not exist. Prompts user to
+    confirm if the folder does not exist yet.
 
     :param dest: destination file path.
     :param dryrun: dry run flag.
-    :param yes: yes flag.
+    :param yes: yes flag (skips user confirmation).
     :returns: True if destination folder was created.
     """
     dest_dir = os.path.dirname(dest)
@@ -310,7 +479,101 @@ def create_dest_folder(dest, dryrun=False, yes=False):
         log.info("Initializing: %s" % dest)
 
 
-def full_path(start, relative_path):
+def expand_wildcard_entry(source_pattern: str, destination_template: str):
+    """Expands a wildcard entry in the form of a glob pattern to a list of
+    tuples of source and destination paths. Supports only `*`, not `**` or ?.
+
+        build/* -> {DEPLOY_ROOT}/lib/python/%1
+
+    :param source_pattern: glob pattern for source files.
+    :param destination_template: template for destination paths.
+    :returns: list of tuples of source and destination paths.
+    """
+
+    # convert source glob to regex for extracting capture groups
+    regex_pattern = re.escape(source_pattern)
+    regex_pattern = regex_pattern.replace(r"\*", r"([^/]+)")
+    regex_pattern = "^" + regex_pattern + "$"
+
+    # expand the glob
+    matched_paths = glob.glob(source_pattern)
+    results = []
+
+    for path in matched_paths:
+        m = re.match(regex_pattern, path)
+        if not m:
+            continue
+
+        # replace %1, %2, etc., with matched groups
+        dest = destination_template
+        for i, group in enumerate(m.groups(), start=1):
+            dest = dest.replace(f"%{i}", group)
+
+        results.append((path, dest))
+
+    return results
+
+
+def get_file_versions(target: str):
+    """Find the highest numeric version number for a file.
+
+    :param target: Path to file to check.
+    :return: List of tuples with version number and file.
+    """
+    filedir = os.path.dirname(target) + "/" + config.DIR_VERSIONS
+    if not os.path.exists(filedir):
+        return []
+
+    filename = os.path.basename(target)
+    version_list = []
+
+    for f in os.listdir(filedir):
+        file_name_length = len(filename)
+        # get files that match <target>.<version>.<commit>
+        if (
+            f.startswith(filename)
+            and len(f) > file_name_length + 1
+            and f[file_name_length] == "."
+            and str(f[file_name_length + 1]).isnumeric()
+        ):
+            # parse the number from the rest of the file name
+            info = f[file_name_length + 1 :]
+            dot_pos = info.find(".")
+            if -1 != dot_pos:
+                ver = int(info[:dot_pos])
+            else:
+                ver = int(info)
+            commit = ""
+            if -1 != dot_pos:
+                # trim potential remaining dotted portions
+                dot_pos2 = info.find(".", dot_pos + 1)
+                if -1 == dot_pos2:
+                    commit = info[dot_pos + 1 :]
+                else:
+                    commit = info[dot_pos + 1 : dot_pos2]
+                # trim '-forced' if present
+                dash_pos = commit.find("-")
+                if -1 != dash_pos:
+                    commit = commit[:dash_pos]
+            version_list.append((filedir + "/" + f, ver, commit))
+
+    return sorted(version_list, key=lambda tup: tup[1])
+
+
+def hashes_equal(hash_str_a: str, hash_str_b: str):
+    """Compares two hash strings regardless of length or case
+
+    :param hash_str_a: First hash string.
+    :param hash_str_b: Second hash string.
+    :return: True if hashes are equal.
+    """
+    if len(hash_str_a) > len(hash_str_b):
+        return hash_str_a.upper().startswith(hash_str_b.upper())
+    else:
+        return hash_str_b.upper().startswith(hash_str_a.upper())
+
+
+def full_path(start: str, relative_path: str):
     """Returns the full path from a relative path.
 
     :param start: starting directory.
@@ -340,7 +603,34 @@ def full_path(start, relative_path):
     return os.path.abspath(start + os.path.sep + relative_path)
 
 
-def remove_object(path, recurse=False):
+def link_object(target: str, link: str, actual_target: str):
+    """Creates symbolic link to a file or directory.
+
+    :param target: Path to target file or directory.
+    :param link: Path to symbolic link.
+    :param actual_target: Path to actual target file or directory.
+    :returns: True if linking was successful.
+    """
+    if not os.path.exists(actual_target):
+        log.warning("Target '%s' not found" % actual_target)
+
+    target_type = get_path_type(actual_target)[0]
+
+    try:
+        isdir = os.path.isdir(actual_target)
+        os.symlink(target, link, target_is_directory=isdir)
+
+    except OSError as e:
+        log.error(
+            "Failed to create symoblic link '%s =%s> %s': %s"
+            % (link, target_type, target, str(e))
+        )
+        return False
+
+    return True
+
+
+def remove_object(path: str, recurse: bool = False):
     """Deletes a file or directory tree.
 
     :param path: file system path.
@@ -365,7 +655,25 @@ def remove_object(path, recurse=False):
             log.error("Error removing '%s': %s" % (path, str(e)))
 
 
-def yesNo(question):
+def replace_vars(pathstr: str):
+    """Replaces tokens in string with environment variable or config default.
+
+    :param pathstr: Path string with tokens.
+    :return: Path string with tokens replaced.
+    """
+    while True:
+        openBracket = pathstr.find(config.PATH_TOKEN_OPEN)
+        closeBracket = pathstr.find(config.PATH_TOKEN_CLOSE)
+        if -1 == openBracket or closeBracket <= openBracket:
+            return pathstr
+        var = pathstr[openBracket + 1 : closeBracket].upper()
+        replacement = os.getenv(var, config.DEFAULT_ENV.get(var))
+        if not replacement:
+            raise Exception("Cannot resolve env var '%s'" % var)
+        pathstr = pathstr[0:openBracket] + replacement + pathstr[closeBracket + 1 :]
+
+
+def yesNo(question: str):
     """Displays question text to user and reads yes/no input.
 
     :param question: question text.
@@ -379,7 +687,18 @@ def yesNo(question):
             print("You must answer yes or no.")
 
 
-def walk(path, exclude_ignorables=True, followlinks=False):
+def get_files(start: str, all_files: bool = False):
+    """Returns a list of all files found in a given starting directory.
+
+    :param start: Starting directory.
+    :param all_files: Get all files in a directory, including hidden and
+        ignorable files.
+    :return: List of relative file paths.
+    """
+    return [f for f in walk(start, exclude_ignorables=(all_files == False))]
+
+
+def walk(path: str, exclude_ignorables: bool = True, followlinks: bool = False):
     """Generator that yields relative file paths that are not ignorable.
     Will include nested directories and symbolic links to directories:
 

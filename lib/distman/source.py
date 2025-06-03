@@ -73,7 +73,7 @@ class Source(object):
             return self.root.get(config.TAG_TARGETS)
         return None
 
-    def read_dist_file(self, directory="."):
+    def read_dist_file(self, directory: str = "."):
         """Opens and parses the dist file.
 
         :param directory: Path to directory containing the dist file.
@@ -130,7 +130,7 @@ class GitRepo(Source):
         self.short_head = ""
 
     @requires_git
-    def get_repo_files(self, start="."):
+    def get_repo_files(self, start: str = "."):
         """Generator that yields relative file paths tracked by this git repo.
 
         :param start: Starting directory.
@@ -156,7 +156,7 @@ class GitRepo(Source):
         return tracked_files
 
     @requires_git
-    def get_untracked_files(self, start=".", include_ignored=True):
+    def get_untracked_files(self, start: str = ".", include_ignored: bool = True):
         """Returns a list of all untracked files in the current directory, and
         their root directories, because the dist file may contain untracked
         files or directories (such as build products).
@@ -278,7 +278,7 @@ class GitRepo(Source):
         return False
 
     @requires_git
-    def git_changed_files(self, include_untracked=True):
+    def git_changed_files(self, include_untracked: bool = True):
         """Returns list of changed files (in staging or untracked).
         Untracked files exclude ignored files by .gitignore files.
 
