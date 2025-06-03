@@ -288,6 +288,8 @@ class Distributor(GitRepo):
                                         "Failed to fix: %s =%s> %s"
                                         % (source, target_type, dest)
                                     )
+
+                    # skip to next target
                     continue
 
                 version_num += 1
