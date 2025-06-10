@@ -207,35 +207,9 @@ class Distributor(GitRepo):
             version_file = ""
             version_list = util.get_file_versions(dest)
 
-            # TODO: make show a separate method
+            # show distribution information
             if show:
-                if callable(getattr(os, "readlink", None)):
-                    if not os.path.lexists(dest):
-                        log.info("Missing: %s" % dest)
-                    else:
-                        log.info("%s => %s:" % (source, os.readlink(dest)))
-                else:
-                    log.info("%s:" % source)
-
-                for version_file, version_num, version_commit in version_list:
-                    log.info(
-                        "%s: %s - %s"
-                        % (
-                            version_num,
-                            version_file,
-                            time.ctime(os.path.getmtime(version_file)),
-                        )
-                    )
-                    if self.repo and verbose:
-                        try:
-                            commit = self.repo.commit(version_commit)
-                            log.info("    %s" % commit.message.strip())
-                            log.info(
-                                "    %s - %s"
-                                % (time.ctime(commit.committed_date), commit.author)
-                            )
-                        except Exception:
-                            pass
+                self.show_distribution_info(source, dest, version_list, verbose)
                 continue
 
             # relative path to the source file
@@ -624,3 +598,41 @@ class Distributor(GitRepo):
             log.info("No targets found to delete")
 
         return any_found
+
+    def show_distribution_info(
+        self, source: str, dest: str, version_list: list, verbose: bool
+    ):
+        """Displays distribution information for the given source and destination.
+
+        :param source: The source file or directory.
+        :param dest: The destination symbolic link.
+        :param version_list: List of versioned files.
+        :param verbose: Show detailed information about each version.
+        """
+        if callable(getattr(os, "readlink", None)):
+            if not os.path.lexists(dest):
+                log.info("Missing: %s" % dest)
+            else:
+                log.info("%s => %s:" % (source, os.readlink(dest)))
+        else:
+            log.info("%s:" % source)
+
+        for version_file, version_num, version_commit in version_list:
+            log.info(
+                "%s: %s - %s"
+                % (
+                    version_num,
+                    version_file,
+                    time.ctime(os.path.getmtime(version_file)),
+                )
+            )
+            if self.repo and verbose:
+                try:
+                    commit = self.repo.commit(version_commit)
+                    log.info("    %s" % commit.message.strip())
+                    log.info(
+                        "    %s - %s"
+                        % (time.ctime(commit.committed_date), commit.author)
+                    )
+                except Exception:
+                    pass
