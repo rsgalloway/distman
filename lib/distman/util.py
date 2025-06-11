@@ -506,10 +506,21 @@ def expand_wildcard_entry(source_pattern: str, destination_template: str):
 
         # replace %1, %2, etc., with matched groups
         dest = destination_template
+        found = False
         for i, group in enumerate(m.groups(), start=1):
-            dest = dest.replace(f"%{i}", group)
+            if f"%{i}" not in dest:
+                log.warning(
+                    f"Destination template '{destination_template}' "
+                    f"does not contain a placeholder for group {i}."
+                )
+                continue
+            else:
+                found = True
+                dest = dest.replace(f"%{i}", group)
 
-        results.append((path, dest))
+        # if no groups were found, skip this entry
+        if found:
+            results.append((path, dest))
 
     return results
 
