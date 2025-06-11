@@ -220,6 +220,9 @@ class Distributor(GitRepo):
                 source_path = util.normalize_path(os.path.join(self.directory, source))
 
             if version_list:
+                # look for matching versions
+                match = util.find_matching_versions(source_path=source_path, dest=dest)
+                # check lastest version
                 version_file, version_num, _ = version_list[-1]
                 if version_file and util.compare_objects(source_path, version_file):
                     target_type = util.get_path_type(source_path)[0]
@@ -263,6 +266,48 @@ class Distributor(GitRepo):
                                         "Failed to fix: %s =%s> %s"
                                         % (source, target_type, dest)
                                     )
+
+                    # skip to next target
+                    continue
+
+                # don't redist previously disted files
+                elif match:
+                    version_file, version_num, _ = match[0]
+                    question = (
+                        "Target: %s: Found matching version %s: %s"
+                        " update link?" % (source, version_num, version_file)
+                    )
+                    if yes or util.yesNo(question):
+                        # swing link to versioned file
+                        if dryrun:
+                            log.info(
+                                "Updated: %s =%s> %s"
+                                % (source, util.get_path_type(source)[0], version_file)
+                            )
+                        else:
+                            # remove existing symbolic link if it exists
+                            if os.path.lexists(dest):
+                                util.remove_object(dest)
+                            link_created = util.link_object(
+                                config.DIR_VERSIONS
+                                + os.path.sep
+                                + os.path.basename(version_file),
+                                dest,
+                                version_file,
+                            )
+                            if link_created:
+                                log.info(
+                                    "Updated: %s =%s> %s"
+                                    % (
+                                        source,
+                                        util.get_path_type(source)[0],
+                                        version_file,
+                                    )
+                                )
+                            else:
+                                log.warning(
+                                    "Failed to update: %s => %s" % (source, dest)
+                                )
 
                     # skip to next target
                     continue
