@@ -197,6 +197,7 @@ class Distributor(GitRepo):
                 info = {
                     "name": self.name,
                     "origin": self.path,
+                    "branch": self.branch_name,
                     "source": source,
                     "author": self.author,
                 }
