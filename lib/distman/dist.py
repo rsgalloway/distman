@@ -220,9 +220,11 @@ class Distributor(GitRepo):
                 source_path = util.normalize_path(os.path.join(self.directory, source))
 
             if version_list:
-                # look for matching versions
-                match = util.find_matching_versions(source_path=source_path, dest=dest)
-                # check lastest version
+                # look for previously disted matching versions
+                matches = util.find_matching_versions(
+                    source_path=source_path, dest=dest
+                )
+                # check lastest disted version for changes
                 version_file, version_num, _ = version_list[-1]
                 if version_file and util.compare_objects(source_path, version_file):
                     target_type = util.get_path_type(source_path)[0]
@@ -270,9 +272,9 @@ class Distributor(GitRepo):
                     # skip to next target
                     continue
 
-                # don't redist previously disted files
-                elif match:
-                    version_file, version_num, _ = match[0]
+                # do not redist previously disted versions
+                elif matches and not force:
+                    version_file, version_num, _ = matches[0]
                     question = (
                         "Target: %s: Found matching version %s: %s"
                         " update link?" % (source, version_num, version_file)
