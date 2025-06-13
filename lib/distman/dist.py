@@ -226,65 +226,30 @@ class Distributor(GitRepo):
                 )
                 # check lastest disted version for changes
                 version_file, version_num, _ = version_list[-1]
-                if version_file and util.compare_objects(source_path, version_file):
-                    target_type = util.get_path_type(source_path)[0]
-                    if os.path.exists(dest) and os.path.lexists(dest):
-                        log.info(
-                            "Unchanged: %s =%s> %s"
-                            % (source, target_type, version_file)
-                        )
-                    else:
-                        question = (
-                            "Target %s: link '%s' missing or broken,"
-                            " fix it now?" % (target_name, dest)
-                        )
-                        if yes or util.yesNo(question):
-                            if dryrun:
-                                log.info(
-                                    "Fixed: %s =%s> %s"
-                                    % (source, target_type, version_file)
-                                )
-                            else:
-                                if os.path.lexists(dest):
-                                    util.remove_object(dest)
-                                link_created = util.link_object(
-                                    config.DIR_VERSIONS
-                                    + os.path.sep
-                                    + os.path.basename(version_file),
-                                    dest,
-                                    version_file,
-                                )
-                                if link_created:
-                                    log.info(
-                                        "Fixed: %s =%s> %s"
-                                        % (
-                                            source,
-                                            target_type,
-                                            version_file,
-                                        )
-                                    )
-                                else:
-                                    log.warning(
-                                        "Failed to fix: %s =%s> %s"
-                                        % (source, target_type, dest)
-                                    )
-
-                    # skip to next target
-                    continue
 
                 # do not redist previously disted versions
-                elif matches and not force:
-                    version_file, version_num, _ = matches[0]
+                if matches and not force:
+                    version_file, version_num, _ = matches[-1]
+                    target_type = util.get_path_type(source_path)[0]
+                    # check if the link is pointing to the matching version...
+                    if os.path.islink(dest):
+                        current_link = os.readlink(dest)
+                        if version_file.endswith(current_link):
+                            log.info(
+                                "Unchanged: %s =%s> %s"
+                                % (source, target_type, version_file)
+                            )
+                            continue
                     question = (
                         "Target: %s: Found matching version %s: %s"
                         " update link?" % (source, version_num, version_file)
                     )
                     if yes or util.yesNo(question):
-                        # swing link to versioned file
+                        # swing link to matching version
                         if dryrun:
                             log.info(
                                 "Updated: %s =%s> %s"
-                                % (source, util.get_path_type(source)[0], version_file)
+                                % (source, target_type, version_file)
                             )
                         else:
                             # remove existing symbolic link if it exists
@@ -302,13 +267,14 @@ class Distributor(GitRepo):
                                     "Updated: %s =%s> %s"
                                     % (
                                         source,
-                                        util.get_path_type(source)[0],
+                                        target_type,
                                         version_file,
                                     )
                                 )
                             else:
                                 log.warning(
-                                    "Failed to update: %s => %s" % (source, dest)
+                                    "Failed to update: %s =%s> %s"
+                                    % (source, target_type, version_file)
                                 )
 
                     # skip to next target
