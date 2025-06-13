@@ -220,18 +220,19 @@ class Distributor(GitRepo):
                 source_path = util.normalize_path(os.path.join(self.directory, source))
 
             if version_list:
+                # get latest version file and number
+                version_file, version_num, _ = version_list[-1]
+
                 # look for previously disted matching versions
                 matches = util.find_matching_versions(
-                    source_path=source_path, dest=dest
+                    source_path=source_path, dest=dest, version_list=version_list
                 )
-                # check lastest disted version for changes
-                version_file, version_num, _ = version_list[-1]
 
                 # do not redist previously disted versions
                 if matches and not force:
-                    version_file, version_num, _ = matches[-1]
+                    version_file, version_num, _ = matches[-1]  # most recent match
                     target_type = util.get_path_type(source_path)[0]
-                    # check if the link is pointing to the matching version...
+                    # check if the link is pointing to the matching version
                     if os.path.islink(dest):
                         current_link = os.readlink(dest)
                         if version_file.endswith(current_link):

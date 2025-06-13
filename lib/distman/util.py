@@ -234,17 +234,22 @@ def compare_objects(path1: str, path2: str):
     return True
 
 
-def find_matching_versions(source_path: str, dest: str):
+def find_matching_versions(
+    source_path: str, dest: str, version_list: List[tuple] = None
+):
     """Finds all matching versions of a file in the destination directory,
     sorted from oldest to newest.
 
     :param source_path: Path to source file.
     :param dest: Path to destination directory.
+    :param version_list: List of tuples with version file, number and commit.
     :return: List of tuples with version file, number and commit.
     """
 
     matches = []
-    version_list = get_file_versions(dest)
+
+    if version_list is None:
+        version_list = get_file_versions(dest)
 
     for version_file, version_num, version_commit in version_list:
         if version_file and compare_objects(source_path, version_file):
