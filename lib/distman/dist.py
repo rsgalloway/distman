@@ -142,7 +142,7 @@ class Distributor(GitRepo):
                     )
                     return False
 
-                # check if file has uncommitted changes
+                # check if source has uncommitted changes
                 if (
                     not show
                     and not force

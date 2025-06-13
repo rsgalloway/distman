@@ -318,26 +318,10 @@ def get_common_root_dirs(filepaths: List[str]):
     """Returns a list of common root directories for a list of file paths.
 
     :param filepaths: list of file paths.
-    :returns: list of common root directories.
+    :returns: list of common parent directories.
     """
 
-    path_components = [normalize_path(path).split(os.sep) for path in filepaths]
-
-    # group files by their top-level directory
-    directory_tree = defaultdict(list)
-    for components in path_components:
-        root = components[0]  # Top-level directory
-        directory_tree[root].append(components)
-
-    common_directories = set()
-
-    # find common subdirectories within each top-level directory group
-    for root, paths in directory_tree.items():
-        if len(paths) > 1:
-            common_prefix = os.path.join(*os.path.commonprefix(paths))
-            common_directories.add(common_prefix)
-
-    return list(common_directories)
+    return list({os.path.dirname(path) for path in filepaths if os.path.dirname(path)})
 
 
 def get_path_type(path: str):
