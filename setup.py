@@ -57,8 +57,8 @@ setup(
         "Intended Audience :: Developers",
         "Topic :: Software Development :: Libraries",
         "Programming Language :: Python :: 3",
-        # "Programming Language :: Python :: 3.6",
-        # "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.6",
+        "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
@@ -72,9 +72,11 @@ setup(
         ],
     },
     install_requires=[
-        "envstack>=0.8.3",
         "GitPython==3.1.43",
     ],
-    python_requires=">=3.8",
+    extras_require={
+        ":python_version<'3.7'": ["dataclasses"]
+    },
+    python_requires=">=3.6",
     zip_safe=False,
 )

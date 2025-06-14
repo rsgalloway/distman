@@ -29,36 +29,113 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
-__doc__ = """
-Contains file distribution classes and functions.
-"""
-
 import fnmatch
 import os
 import time
+from dataclasses import dataclass
+from typing import Optional, Tuple, List
 
 from distman import config, util
 from distman.logger import log
 from distman.source import GitRepo
 
 
+@dataclass
+class Target:
+    """Represents a distribution target with its name, source path, and
+    destination path."""
+
+    name: str
+    source: str
+    dest: str
+
+
+def get_source_and_dest(target_dict: dict) -> Optional[Tuple[str, str]]:
+    """Resolve the source and destination paths from the target dictionary.
+
+    :param target_dict: Dictionary containing target information.
+    :return: Tuple of source and destination paths, or None if not found.
+    """
+    source = target_dict.get(config.TAG_SOURCEPATH)
+    dest = target_dict.get(config.TAG_DESTPATH)
+    if source is None or dest is None:
+        return None
+    try:
+        source = util.normalize_path(source)
+        dest = util.sanitize_path(util.replace_vars(dest))
+    except Exception as e:
+        log.error(f"Error resolving paths: {e}")
+        return None
+    return source, dest
+
+
+def confirm(prompt: str, yes: bool, dryrun: bool) -> bool:
+    """Prompt the user for confirmation.
+
+    :param prompt: The confirmation prompt message.
+    :param yes: If True, automatically confirm without prompting.
+    :param dryrun: If True, simulate the action without making changes.
+    :return: True if confirmed, False otherwise.
+    """
+    return dryrun or yes or util.yesNo(prompt)
+
+
+def update_symlink(dest: str, target: str, dryrun: bool) -> bool:
+    """Update the symbolic link at `dest` to point to `target`.
+
+    :param dest: The destination path where the symlink should be created.
+    :param target: The target path that the symlink should point to.
+    :param dryrun: If True, simulate the action without making changes.
+    :return: True if the symlink was updated or would be updated in dry run mode.
+    """
+    if os.path.lexists(dest):
+        util.remove_object(dest)
+    if dryrun:
+        log.info("Would link: %s => %s", dest, target)
+        return True
+    return util.link_object(target, dest, target)
+
+
+def get_version_dest(dest: str, version_num: int, short_head: Optional[str]) -> str:
+    """Generate the destination path for a versioned file.
+
+    :param dest: The original destination path.
+    :param version_num: The version number to append.
+    :param short_head: Optional short hash of the latest commit.
+    :return: The versioned destination path.
+    """
+    versions_dir = os.path.join(os.path.dirname(dest), config.DIR_VERSIONS)
+    os.makedirs(versions_dir, exist_ok=True)
+    version_dest = os.path.join(
+        versions_dir, os.path.basename(dest) + f".{version_num}"
+    )
+    if short_head:
+        version_dest += f".{short_head}"
+    return version_dest
+
+
+def should_skip_target(target_name: str, pattern: Optional[str]) -> bool:
+    """Check if a target should be skipped based on the provided pattern.
+
+    :param target_name: The name of the target to check.
+    :param pattern: The pattern to match against the target name.
+    :return: True if the target should be skipped, False otherwise.
+    """
+    return pattern is not None and not fnmatch.fnmatch(target_name, pattern)
+
+
 class Distributor(GitRepo):
-    """File distribution class."""
+    """Handles distribution of files based on a configuration file."""
 
     def __init__(self):
-        super(Distributor, self).__init__()
-        self.__add_symlink_support()
-
-    @staticmethod
-    def __add_symlink_support():
-        """Adds symlink support for platforms that lack it."""
-        os_symlink = getattr(os, "symlink", None)
-        if not callable(os_symlink):
+        """Initializes the Distributor class."""
+        super().__init__()
+        if not callable(getattr(os, "symlink", None)):
             util.add_symlink_support()
 
     def dist(
         self,
-        target: str = None,
+        target: Optional[str] = None,
         show: bool = False,
         force: bool = False,
         all: bool = False,
@@ -66,438 +143,317 @@ class Distributor(GitRepo):
         dryrun: bool = False,
         versiononly: bool = False,
         verbose: bool = False,
-    ):
-        """Performs the file distribution.
+    ) -> bool:
+        """Distributes files based on targets defined in the dist file.
 
-        :param target: optionally match specific targets.
-        :param show: Show file versions.
-        :param force: Force distribution.
-        :param all: Distribute all files (including ignorables).
-        :param yes: Assume yes to all questions.
-        :param dryrun: Perform dry run.
-        :param versiononly: Distribute files only, do not create links.
-        :param verbose: Show more information.
-        :return: True if successful.
+            {
+                "author": "<email>",
+                "targets": {
+                    "<target>": {
+                        "source": "<source-path>",
+                        "destination": "<target-path>"
+                    },
+                }
+            }
+
+        :param target: Optional target pattern to filter targets.
+        :param show: If True, shows distribution information without making changes.
+        :param force: If True, forces the distribution even if there are uncommitted changes.
+        :param all: If True, processes all files, ignoring changes.
+        :param yes: If True, automatically confirms prompts.
+        :param dryrun: If True, simulates the distribution without making changes.
+        :param versiononly: If True, only updates the version without changing the symlink.
+        :param verbose: If True, provides detailed output.
+        :return: True if distribution was successful, False otherwise.
         """
-        if self.root is None:
-            log.error("%s not found or invalid" % config.DIST_FILE)
+        if not self.root:
+            log.error(f"{config.DIST_FILE} not found or invalid")
             return False
 
         if not self.read_git_info():
             return False
 
         targets_node = self.get_targets()
-
-        if targets_node is None:
+        if not targets_node:
             return False
 
         changed_files = self.git_changed_files()
         changed_dirs = util.get_common_root_dirs(changed_files)
 
-        if changed_files and (config.DIST_FILE in changed_files):
-            log.warning("Uncommitted changes in %s" % config.DIST_FILE)
+        if config.DIST_FILE in changed_files:
+            log.warning(f"Uncommitted changes in {config.DIST_FILE}")
 
-        targets = []
-        for target_name, target_dict in targets_node.items():
-            source = target_dict.get(config.TAG_SOURCEPATH)
-            dest = target_dict.get(config.TAG_DESTPATH)
-            if source is None or dest is None:
-                log.info(
-                    "Target %s: Missing '%s' or '%s' tag"
-                    % (target_name, config.TAG_SOURCEPATH, config.TAG_DESTPATH)
-                )
-                self.root = None
-                return False
-
-            # optionally match on specific targets
-            if target and not fnmatch.fnmatch(target_name, target):
+        target_list: List[Target] = []
+        for name, entry in targets_node.items():
+            if should_skip_target(name, target):
                 continue
 
-            # wildcard support: expand sources if '*' in source
+            source = entry.get(config.TAG_SOURCEPATH)
+            dest = entry.get(config.TAG_DESTPATH)
+            if source is None or dest is None:
+                log.info(f"Target {name}: Missing source or dest path")
+                continue
+
+            # check for wildcard in source
             if "*" in source:
-                for source_path, dest_path in util.expand_wildcard_entry(source, dest):
-                    dest = util.sanitize_path(util.replace_vars(dest_path))
-                    targets.append((source_path, dest))
+                for src_path, dst_path in util.expand_wildcard_entry(source, dest):
+                    try:
+                        dst_resolved = util.sanitize_path(util.replace_vars(dst_path))
+                        target_list.append(Target(name, src_path, dst_resolved))
+                    except Exception as e:
+                        log.error(f"{e} resolving wildcard target {name}")
+                        return False
+
             else:
                 try:
-                    dest = util.sanitize_path(util.replace_vars(dest))
+                    dest_resolved = util.sanitize_path(util.replace_vars(dest))
                 except Exception as e:
-                    log.info(
-                        "%s in <%s> for %s" % (str(e), config.TAG_DESTPATH, target_name)
-                    )
+                    log.error(f"{e} in <dest> for {name}")
                     return False
 
-                # relative path to the source file
-                if source == ".":
-                    source_path = self.directory
-                else:
-                    source_path = util.normalize_path(
-                        os.path.join(self.directory, source)
-                    )
+                src_path = (
+                    self.directory
+                    if source == "."
+                    else util.normalize_path(os.path.join(self.directory, source))
+                )
 
-                # make sure file exists
-                if not os.path.exists(source_path):
-                    log.info(
-                        "Target %s: Source '%s' does not exist" % (target_name, source)
-                    )
+                if not os.path.exists(src_path):
+                    log.info(f"Target {name}: Source '{source}' does not exist")
                     return False
 
-                # check if source has uncommitted changes
                 if (
                     not show
                     and not force
-                    and (source_path in changed_files or source_path in changed_dirs)
+                    and (src_path in changed_files or src_path in changed_dirs)
                 ):
                     log.info(
-                        "Target %s: Source '%s' has uncommitted changes.  "
-                        "Commit the changes or use --force." % (target_name, source)
+                        f"Target {name}: Source '{source}' has uncommitted changes. Commit or use --force."
                     )
                     return False
 
-                # create destination directory if it does not exist (or exit)
-                dest_dir = os.path.dirname(dest)
-                if not show and not dryrun and not os.path.exists(dest_dir):
-                    question = (
-                        "Target %s: Destination directory '%s' does not "
-                        "exist, create it now?" % (target_name, dest_dir)
-                    )
-                    if not yes and not util.yesNo(question):
+                if (
+                    not show
+                    and not dryrun
+                    and not os.path.exists(os.path.dirname(dest_resolved))
+                ):
+                    question = f"Target {name}: Destination dir '{os.path.dirname(dest_resolved)}' doesn't exist. Create?"
+                    if not confirm(question, yes, dryrun):
                         return False
-                    try:
-                        os.makedirs(dest_dir)
-                    except Exception as e:
-                        log.info(
-                            "ERROR: Failed to create directory '%s': %s"
-                            % (dest_dir, str(e))
-                        )
-                        return False
-                targets.append((source, dest))
+                    os.makedirs(os.path.dirname(dest_resolved), exist_ok=True)
 
-        if not targets:
-            if target:
-                log.info("Target %s not found in %s", target, config.DIST_FILE)
-            else:
-                log.info("No targets found in %s", config.DIST_FILE)
-            self.root = False
+                target_list.append(Target(name, src_path, dest_resolved))
+
+        if not target_list:
+            log.info(f"No matching targets in {config.DIST_FILE}")
             return False
 
-        # check if local git repo is behind remote
         if not show and not force and self.is_git_behind():
             return False
 
         if dryrun:
             log.info(config.DRYRUN_MESSAGE)
 
-        # process targets listed in dist file
-        for source, dest in targets:
-            util.create_dest_folder(dest, dryrun, yes)
+        for t in target_list:
+            util.create_dest_folder(t.dest, dryrun, yes)
 
-            # write the dist info file
             if not dryrun and not show:
-                info = {
-                    "name": self.name,
-                    "origin": self.path,
-                    "branch": self.branch_name,
-                    "source": source,
-                    "author": self.author,
-                }
-                util.write_dist_info(dest, info)
+                util.write_dist_info(
+                    t.dest,
+                    {
+                        "name": self.name,
+                        "origin": self.path,
+                        "branch": self.branch_name,
+                        "source": t.source,
+                        "author": self.author,
+                    },
+                )
 
-            # define dist version information
-            version_num = 0
-            version_file = ""
-            version_list = util.get_file_versions(dest)
-
-            # show distribution information
+            version_list = util.get_file_versions(t.dest)
             if show:
-                self.show_distribution_info(source, dest, version_list, verbose)
+                self.show_distribution_info(t.source, t.dest, version_list, verbose)
                 continue
 
-            # relative path to the source file
-            if source == ".":
-                source_path = self.directory
-            else:
-                source_path = util.normalize_path(os.path.join(self.directory, source))
+            source_path = t.source
+            version_num = version_list[-1][1] + 1 if version_list else 0
 
-            if version_list:
-                # get latest version file and number
-                version_file, version_num, _ = version_list[-1]
-
-                # look for previously disted matching versions
-                matches = util.find_matching_versions(
-                    source_path=source_path, dest=dest, version_list=version_list
-                )
-
-                # do not redist previously disted versions
-                if matches and not force:
-                    version_file, version_num, _ = matches[-1]  # most recent match
-                    target_type = util.get_path_type(source_path)[0]
-                    # check if the link is pointing to the matching version
-                    if os.path.islink(dest):
-                        current_link = os.readlink(dest)
-                        if version_file.endswith(current_link):
-                            log.info(
-                                "Unchanged: %s =%s> %s"
-                                % (source, target_type, version_file)
-                            )
-                            continue
-                    question = (
-                        "Target: %s: Found matching version %s: %s"
-                        " update link?" % (source, version_num, version_file)
-                    )
-                    if yes or util.yesNo(question):
-                        # swing link to matching version
-                        if dryrun:
-                            log.info(
-                                "Updated: %s =%s> %s"
-                                % (source, target_type, version_file)
-                            )
-                        else:
-                            # remove existing symbolic link if it exists
-                            if os.path.lexists(dest):
-                                util.remove_object(dest)
-                            link_created = util.link_object(
-                                config.DIR_VERSIONS
-                                + os.path.sep
-                                + os.path.basename(version_file),
-                                dest,
-                                version_file,
-                            )
-                            if link_created:
-                                log.info(
-                                    "Updated: %s =%s> %s"
-                                    % (
-                                        source,
-                                        target_type,
-                                        version_file,
-                                    )
-                                )
-                            else:
-                                log.warning(
-                                    "Failed to update: %s =%s> %s"
-                                    % (source, target_type, version_file)
-                                )
-
-                    # skip to next target
+            matches = util.find_matching_versions(source_path, t.dest, version_list)
+            if matches and not force:
+                match_file, match_num, _ = matches[-1]
+                if os.path.islink(t.dest) and os.readlink(t.dest).endswith(
+                    os.path.basename(match_file)
+                ):
+                    log.info(f"Unchanged: {t.source} => {match_file}")
+                    continue
+                if confirm(
+                    f"Target: {t.source}: Found match {match_num}: {match_file}. Update link?",
+                    yes,
+                    dryrun,
+                ):
+                    update_symlink(t.dest, match_file, dryrun)
+                    log.info(f"Updated: {t.source} => {match_file}")
                     continue
 
-                version_num += 1
+            version_dest = get_version_dest(t.dest, version_num, self.short_head)
 
-            # copy source file to the versioned destination
-            versions_dir = os.path.dirname(dest) + "/" + config.DIR_VERSIONS
-            if not dryrun and not os.path.exists(versions_dir):
-                os.mkdir(versions_dir)
-            version_dest = (
-                versions_dir + "/" + os.path.basename(dest) + "." + str(version_num)
-            )
-            if self.short_head:
-                version_dest += "." + self.short_head
-                # note in file name if forced (not synced with current head)
-                # if force:
-                #     version_dest += "-forced"
-            # note in file name if not on a main/master branch
-            # FIXME: breaks if there is a / in the branch name (replace special chars)
-            # if self.branch_name and self.branch_name not in config.MAIN_BRANCHES:
-            #     version_dest += "." + self.branch_name
-            # copy the file/directory to the versioned location
             if not dryrun:
                 util.copy_object(source_path, version_dest, all_files=all)
-            # delete existing symbolic link if it exists
-            if not dryrun and os.path.lexists(dest):
-                util.remove_object(dest)
-            target_type = util.get_path_type(source)[0]
-            # create the new symbolic link
-            if dryrun and not versiononly:
-                log.info("Updated: %s =%s> %s" % (source, target_type, version_dest))
+                if not versiononly:
+                    update_symlink(t.dest, version_dest, dryrun)
+                    log.info(f"Updated: {t.source} => {version_dest}")
             elif not versiononly:
-                link_created = util.link_object(
-                    config.DIR_VERSIONS + os.path.sep + os.path.basename(version_dest),
-                    dest,
-                    version_dest,
-                )
-                if link_created:
-                    log.info(
-                        "Updated: %s =%s> %s" % (source, target_type, version_dest)
-                    )
-                else:
-                    log.warning("Failed to update: %s => %s" % (source, dest))
+                log.info(f"Would update: {t.source} => {version_dest}")
 
         if self.repo:
             try:
                 self.repo.close()
-            except:
+            except Exception:
                 pass
 
         return True
 
-    def reset_file_version(self, target: str, dryrun: bool = False):
-        """Resets the symbolic link of a versioned file to point to the latest.
+    def reset_file_version(self, target: str, dryrun: bool = False) -> bool:
+        """Reset the file version for the specified target.
 
-        :param target: target name in dist file.
-        :param dryrun: Perform dry run.
-        :return: True on success, False on failure.
+        :param target: The target pattern to filter targets.
+        :param dryrun: If True, simulates the reset without making changes.
+        :return: True if any targets were reset, False otherwise.
         """
         targets_node = self.get_targets()
-
-        if targets_node is None:
+        if not targets_node:
             return False
-
         if dryrun:
             log.info(config.DRYRUN_MESSAGE)
-
         any_found = False
         for target_name, target_dict in targets_node.items():
-            if (
-                target_dict.get(config.TAG_SOURCEPATH) is None
-                or target_dict.get(config.TAG_DESTPATH) is None
-            ):
+            if should_skip_target(target_name, target):
                 continue
-            source = util.normalize_path(target_dict.get(config.TAG_SOURCEPATH))
-            try:
-                dest = util.sanitize_path(
-                    util.replace_vars(target_dict.get(config.TAG_DESTPATH))
-                )
-            except Exception as e:
-                log.info(
-                    "%s in <%s> for %s" % (str(e), config.TAG_DESTPATH, target_name)
-                )
-                return False
-
-            # optionally match on specific targets
-            if target and not fnmatch.fnmatch(target_name, target):
+            pair = get_source_and_dest(target_dict)
+            if not pair:
                 continue
-
+            source, dest = pair
             any_found = True
             version_list = util.get_file_versions(dest)
             if not version_list:
                 log.info(
-                    "Target %s: No versioned files found for '%s'"
-                    % (target_name, source)
+                    f"Target {target_name}: No versioned files found for '{source}'"
                 )
+                continue
+            latest_ver = version_list[-1][0]
+            target_type = util.get_path_type(latest_ver)[0]
+            if dryrun:
+                log.info(f"{source} ={target_type}> {latest_ver}")
             else:
-                verfile = version_list[-1][0]
-                # remove existing symbolic link
-                if not dryrun and os.path.lexists(dest):
-                    util.remove_object(dest)
-                target_type = util.get_path_type(verfile)[0]
-                # create new link to point to requested file
-                if dryrun:
-                    log.info("%s =%s> %s" % (source, target_type, verfile))
-                else:
-                    link_created = util.link_object(
-                        config.DIR_VERSIONS + os.path.sep + os.path.basename(verfile),
-                        dest,
-                        verfile,
-                    )
-                    if link_created:
-                        log.info("%s =%s> %s" % (source, target_type, verfile))
-
+                update_symlink(dest, latest_ver, dryrun)
+                log.info(f"{source} ={target_type}> {latest_ver}")
         if not any_found:
             log.info("No targets found to reset")
-
         return any_found
+
+    def show_distribution_info(
+        self,
+        source: str,
+        dest: str,
+        version_list: List[Tuple[str, int, str]],
+        verbose: bool,
+    ) -> None:
+        """Display distribution information for a target.
+
+        :param source: The source path of the target.
+        :param dest: The destination path of the target.
+        :param version_list: List of versioned files with their metadata.
+        :param verbose: If True, shows detailed commit information.
+        :return: None
+        """
+        if callable(getattr(os, "readlink", None)):
+            if not os.path.lexists(dest):
+                log.info(f"Missing: {dest}")
+            else:
+                log.info(f"{source} => {os.readlink(dest)}:")
+        else:
+            log.info(f"{source}:")
+        for version_file, version_num, version_commit in version_list:
+            log.info(
+                f"{version_num}: {version_file} - {time.ctime(os.path.getmtime(version_file))}"
+            )
+            if self.repo and verbose:
+                try:
+                    commit = self.repo.commit(version_commit)
+                    log.info(f"    {commit.message.strip()}")
+                    log.info(
+                        f"    {time.ctime(commit.committed_date)} - {commit.author}"
+                    )
+                except Exception:
+                    pass
 
     def change_file_version(
         self,
         target: str,
-        target_commit: str = None,
-        target_version: str = None,
+        target_commit: Optional[str] = None,
+        target_version: Optional[int] = None,
         dryrun: bool = False,
-    ):
-        """Changes the symbolic link of a versioned file to point to a different file.
+    ) -> bool:
+        """Change the version of a file for the specified target.
 
-        :param target: target name in dist file.
-        :param target_commit: The commit hash to point to.
-        :param target_version: The version number to point to.
-        :param dryrun: Perform dry run.
-        :return: True on success, False on failure.
+        :param target: The target pattern to filter targets.
+        :param target_commit: Optional commit hash to reset to.
+        :param target_version: Optional version number to reset to.
+        :param dryrun: If True, simulates the change without making changes.
+        :return: True if any targets were changed, False otherwise.
         """
         targets_node = self.get_targets()
-
-        if targets_node is None:
+        if not targets_node:
             return False
-
         if dryrun:
             log.info(config.DRYRUN_MESSAGE)
 
         any_found = False
         for target_name, target_dict in targets_node.items():
-            if (
-                target_dict.get(config.TAG_SOURCEPATH) is None
-                or target_dict.get(config.TAG_DESTPATH) is None
-            ):
+            if should_skip_target(target_name, target):
                 continue
 
-            source = util.normalize_path(target_dict.get(config.TAG_SOURCEPATH))
-            try:
-                dest = util.sanitize_path(
-                    util.replace_vars(target_dict.get(config.TAG_DESTPATH))
-                )
-            except Exception as e:
-                log.error(
-                    "%s in <%s> for %s" % (str(e), config.TAG_DESTPATH, target_name)
-                )
-                return False
-
-            # optionally match on specific targets
-            if target and not fnmatch.fnmatch(target_name, target):
+            pair = get_source_and_dest(target_dict)
+            if not pair:
                 continue
+            source, dest = pair
 
             version_list = util.get_file_versions(dest)
             if not version_list:
                 log.info(
-                    "Target %s: No versioned files found for '%s'"
-                    % (target_name, source)
+                    f"Target {target_name}: No versioned files found for '{source}'"
                 )
                 continue
-            any_found_this_target = False
 
-            if target_version < 0:
+            if isinstance(target_version, int) and target_version < 0:
                 if abs(target_version) > len(version_list) - 1:
                     log.warning(
-                        "Requested to roll back %d versions but there "
-                        "are only %d previous versions for %s"
-                        % (abs(target_version), len(version_list) - 1, source)
+                        f"Requested to roll back {abs(target_version)} versions but only {len(version_list) - 1} exist for {source}"
                     )
                     continue
                 target_version = version_list[target_version - 1][1]
 
+            matched = False
             for verfile, vernum, vercommit in version_list:
-                if (not target_commit and vernum == target_version) or (
-                    target_commit and util.hashes_equal(target_commit, vercommit)
+                if (target_commit and util.hashes_equal(target_commit, vercommit)) or (
+                    target_version is not None and vernum == target_version
                 ):
-                    # found matching versioned target
                     any_found = True
-                    any_found_this_target = True
-                    # remove existing symbolic link
-                    if not dryrun and os.path.lexists(dest):
-                        util.remove_object(dest)
+                    matched = True
                     target_type = util.get_path_type(verfile)[0]
-                    # create new symbolic link to point to requested versioned file
                     if dryrun:
-                        log.info("%s =%s> %s" % (source, target_type, verfile))
+                        log.info(f"{source} ={target_type}> {verfile}")
                     else:
-                        link_created = util.link_object(
-                            config.DIR_VERSIONS
-                            + os.path.sep
-                            + os.path.basename(verfile),
-                            dest,
-                            verfile,
-                        )
-                        if link_created:
-                            log.info("%s =%s> %s" % (source, target_type, verfile))
+                        update_symlink(dest, verfile, dryrun)
+                        log.info(f"{source} ={target_type}> {verfile}")
                     break
 
-            if not any_found_this_target:
+            if not matched:
                 if target_commit:
                     log.info(
-                        "Target commit %s not found for target %s"
-                        % (target_commit, target_name)
+                        f"Target commit {target_commit} not found for target {target_name}"
                     )
                 else:
                     log.info(
-                        "Target version %d not found for target %s"
-                        % (target_version, target_name)
+                        f"Target version {target_version} not found for target {target_name}"
                     )
 
         if not any_found:
@@ -508,146 +464,83 @@ class Distributor(GitRepo):
     def delete_target(
         self,
         target: str,
-        target_version: str = None,
-        target_commit: str = None,
+        target_version: Optional[int] = None,
+        target_commit: Optional[str] = None,
         yes: bool = False,
         dryrun: bool = False,
-    ):
-        """Delete a target's destination files. Deletes symlink, .dist and version
-        files/directories.
+    ) -> bool:
+        """Delete the specified target and its versions.
 
-        :param target: target name in dist file.
-        :param target_version: The version number to delete.
-        :param target_commit: The commit hash to delete.
-        :param yes: Answer yes to all questions.
-        :param dryrun: Perform dry run.
-        :return: True on success, False on failure.
+        :param target: The target pattern to filter targets.
+        :param target_version: Optional version number to delete.
+        :param target_commit: Optional commit hash to delete.
+        :param yes: If True, automatically confirms prompts.
+        :param dryrun: If True, simulates the deletion without making changes.
+        :return: True if any targets were deleted, False otherwise.
         """
         targets_node = self.get_targets()
-
-        if targets_node is None:
+        if not targets_node:
             return False
-
         if dryrun:
             log.info(config.DRYRUN_MESSAGE)
 
         any_found = False
         for target_name, target_dict in targets_node.items():
-            if (
-                target_dict.get(config.TAG_SOURCEPATH) is not None
-                and target_dict.get(config.TAG_DESTPATH) is not None
-            ):
-                # optionally match on specific targets
-                if target and not fnmatch.fnmatch(target_name, target):
-                    continue
+            if should_skip_target(target_name, target):
+                continue
 
-                source = util.normalize_path(target_dict.get(config.TAG_SOURCEPATH))
-                try:
-                    dest = util.sanitize_path(
-                        util.replace_vars(target_dict.get(config.TAG_DESTPATH))
-                    )
-                except Exception as e:
-                    log.info(
-                        "%s in <%s> for %s" % (str(e), config.TAG_DESTPATH, target_name)
-                    )
-                    return False
+            pair = get_source_and_dest(target_dict)
+            if not pair:
+                continue
+            source, dest = pair
 
-                version_list = util.get_file_versions(dest)
-
-                # filter version list by version number or commit hash
-                if version_list and target_version:
+            version_list = util.get_file_versions(dest)
+            if version_list:
+                if target_version is not None:
+                    version_list = [v for v in version_list if v[1] == target_version]
+                elif target_commit:
                     version_list = [
-                        x for x in version_list if x[1] == int(target_version)
-                    ]
-                elif version_list and target_commit:
-                    version_list = [
-                        x
-                        for x in version_list
-                        if util.hashes_equal(target_commit, x[2])
+                        v
+                        for v in version_list
+                        if util.hashes_equal(target_commit, v[2])
                     ]
 
-                question = "Delete target '%s' (%s => %s) and %d versions?" % (
-                    target_name,
-                    source,
-                    dest,
-                    len(version_list),
+            question = f"Delete target '{target_name}' ({source} => {dest}) and {len(version_list)} versions?"
+            if not confirm(question, yes, dryrun):
+                continue
+
+            any_found = True
+            distinfo = util.get_dist_info(dest=dest)
+            link_path = util.get_link_full_path(dest)
+
+            if (target_commit or target_version) and link_path in [
+                v[0] for v in version_list
+            ]:
+                log.warning(
+                    f"Cannot delete target '{target_name}' because it is linked to the version being deleted"
                 )
-                if yes or dryrun or util.yesNo(question):
-                    any_found = True
-                    distinfo = util.get_dist_info(dest=dest)
-                    link_path = util.get_link_full_path(dest)
+                continue
 
-                    # if target is linked to the version being deleted, skip with warning
-                    if (target_commit or target_version) and link_path in [
-                        v[0] for v in version_list
-                    ]:
-                        log.warning(
-                            """Cannot delete target '%s' because it is linked to the version being deleted"""
-                            % target_name
-                        )
-                        continue
+            if target_commit is None and target_version is None:
+                if os.path.lexists(dest):
+                    log.info(f"Deleting: {dest}")
+                    if not dryrun:
+                        util.remove_object(dest)
+                else:
+                    log.info(f"Missing: {dest}")
+                if os.path.lexists(distinfo):
+                    log.info(f"Deleting: {distinfo}")
+                    if not dryrun:
+                        os.remove(distinfo)
+                else:
+                    log.info(f"Missing: {distinfo}")
 
-                    # delete link and dist info file
-                    if not target_version and not target_commit:
-                        if os.path.lexists(dest):
-                            log.info("Deleting: %s" % dest)
-                            if not dryrun:
-                                util.remove_object(dest)
-                        else:
-                            log.info("Missing: %s" % dest)
-
-                        if os.path.lexists(distinfo):
-                            log.info("Deleting: %s" % distinfo)
-                            if not dryrun:
-                                os.remove(distinfo)
-                        else:
-                            log.info("Missing: %s" % distinfo)
-
-                    # delete versioned files
-                    for verFile, _, _ in version_list:
-                        log.info("Deleting: %s" % verFile)
-                        if not dryrun:
-                            util.remove_object(verFile, recurse=True)
+            for verfile, _, _ in version_list:
+                log.info(f"Deleting: {verfile}")
+                if not dryrun:
+                    util.remove_object(verfile, recurse=True)
 
         if not any_found:
             log.info("No targets found to delete")
 
         return any_found
-
-    def show_distribution_info(
-        self, source: str, dest: str, version_list: list, verbose: bool
-    ):
-        """Displays distribution information for the given source and destination.
-
-        :param source: The source file or directory.
-        :param dest: The destination symbolic link.
-        :param version_list: List of versioned files.
-        :param verbose: Show detailed information about each version.
-        """
-        if callable(getattr(os, "readlink", None)):
-            if not os.path.lexists(dest):
-                log.info("Missing: %s" % dest)
-            else:
-                log.info("%s => %s:" % (source, os.readlink(dest)))
-        else:
-            log.info("%s:" % source)
-
-        for version_file, version_num, version_commit in version_list:
-            log.info(
-                "%s: %s - %s"
-                % (
-                    version_num,
-                    version_file,
-                    time.ctime(os.path.getmtime(version_file)),
-                )
-            )
-            if self.repo and verbose:
-                try:
-                    commit = self.repo.commit(version_commit)
-                    log.info("    %s" % commit.message.strip())
-                    log.info(
-                        "    %s - %s"
-                        % (time.ctime(commit.committed_date), commit.author)
-                    )
-                except Exception:
-                    pass
