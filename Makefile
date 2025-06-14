@@ -14,10 +14,10 @@
 # =============================================================================
 
 # Define the installation command
-BUILD_CMD := pip install . -t build
+BUILD_CMD := pip install -r requirements.txt -t build
 
 # Target to build for Linux
-build:
+build: clean
 	$(BUILD_CMD)
 
 # Combined target to build for both platforms
@@ -29,8 +29,13 @@ clean:
 
 # Install target to install the builds using distman
 # using --force allows uncommitted changes to be disted
-install:
+dryrun:
+	distman --force --dryrun
+
+# Install target to install the builds using distman
+# using --force allows uncommitted changes to be disted
+install: build
 	distman --force --yes
 
 # Phony targets
-.PHONY: build install clean
+.PHONY: build dryrun install clean
