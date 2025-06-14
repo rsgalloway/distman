@@ -36,6 +36,8 @@ Contains source file distribution classes and functions.
 import json
 import os
 from pathlib import Path
+from typing import Callable, List, Optional, Tuple
+from functools import wraps
 
 import git
 from git.exc import GitCommandError
@@ -44,9 +46,10 @@ from distman import config, util
 from distman.logger import log
 
 
-def requires_git(func):
-    """Decorator to read info from a git repo."""
+def requires_git(func: Callable) -> Callable:
+    """Decorator to ensure git repo info is loaded before calling the method."""
 
+    @wraps(func)
     def wrapper(self, *args, **kwargs):
         if self.repo is None:
             self.read_git_info()
@@ -56,28 +59,26 @@ def requires_git(func):
 
 
 class Source(object):
-    """File source base class."""
+    """Base class for handling dist file metadata."""
 
     def __init__(self):
-        super(Source, self).__init__()
+        """Initializes the Source object with default values."""
         self.author = os.getenv("USERNAME", os.getenv("USER", "unknown"))
-        self.changed_files = []
+        self.changed_files: List[str] = []
         self.directory = "."
         self.name = ""
         self.path = ""
         self.root = None
 
-    def get_targets(self):
-        """Returns the list of targets in the dist file."""
-        if self.root:
-            return self.root.get(config.TAG_TARGETS)
-        return None
+    def get_targets(self) -> Optional[dict]:
+        """Returns the targets defined in the dist file."""
+        return self.root.get(config.TAG_TARGETS) if self.root else None
 
-    def read_dist_file(self, directory: str = "."):
-        """Opens and parses the dist file.
+    def read_dist_file(self, directory: str = ".") -> bool:
+        """Reads the dist file from the specified directory.
 
-        :param directory: Path to directory containing the dist file.
-        :return: True if successful.
+        :param directory: Directory containing the dist file.
+        :return: True if the dist file was successfully read, False otherwise.
         """
         if not os.path.isdir(directory):
             log.info("%s is not a directory", directory)
@@ -91,38 +92,39 @@ class Source(object):
         self.directory = directory
 
         try:
-            with open(dist_file, "r") as jsonFile:
-                json_data = json.load(jsonFile)
+            with open(dist_file, "r") as json_file:
+                self.root = json.load(json_file)
         except Exception as e:
             log.error("Failed to parse dist file: %s", str(e))
             return False
 
-        self.root = json_data
         self.author = self.root.get(config.TAG_AUTHOR, util.get_user())
 
-        log.info("Author: %s" % self.author)
-        if config.TAG_VERSION in self.root:
-            self.dist_file_version = self.root[config.TAG_VERSION]
-            if int(self.dist_file_version) < config.DIST_FILE_VERSION:
-                log.warning(
-                    "WARNING: Old dist file version: %s (current %d)"
-                    % (self.dist_file_version, config.DIST_FILE_VERSION)
-                )
-            elif int(self.dist_file_version) > config.DIST_FILE_VERSION:
-                log.error(
-                    "ERROR: This dist file is newer than this script version: %s "
-                    "(currrent %d)" % (self.dist_file_version, config.DIST_FILE_VERSION)
-                )
-                self.root = None
-                return False
+        version = int(self.root.get(config.TAG_VERSION, 0))
+        if version < config.DIST_FILE_VERSION:
+            log.warning(
+                "WARNING: Old dist file version: %s (current %d)",
+                version,
+                config.DIST_FILE_VERSION,
+            )
+        elif version > config.DIST_FILE_VERSION:
+            log.error(
+                "ERROR: This dist file is newer than supported version: %s (current %d)",
+                version,
+                config.DIST_FILE_VERSION,
+            )
+            self.root = None
+            return False
 
+        log.info("Author: %s", self.author)
         return True
 
 
 class GitRepo(Source):
-    """Git repo file source base class."""
+    """Extends Source to support Git-based repositories."""
 
     def __init__(self):
+        """Initializes the GitRepo object."""
         super(GitRepo, self).__init__()
         self.branch_name = ""
         self.head = ""
@@ -130,44 +132,39 @@ class GitRepo(Source):
         self.short_head = ""
 
     @requires_git
-    def get_repo_files(self, start: str = "."):
-        """Generator that yields relative file paths tracked by this git repo.
+    def get_repo_files(self, start: str = ".") -> List[str]:
+        """Returns a list of files tracked by the git repository starting from
+        the specified directory.
 
-        :param start: Starting directory.
-        :return: List of relative file paths.
+        :param start: Directory to start searching for tracked files.
+        :return: List of tracked file paths relative to the repository root.
         """
         repo_root = Path(self.repo.working_tree_dir).resolve()
-
-        # resolve the start directory relative to the repo root
         start_path = (repo_root / start).resolve()
         if not start_path.is_dir():
             raise ValueError(
                 f"Start directory '{start}' does not exist or is not a directory."
             )
 
-        # get the list of tracked files and filter by start_dir
         tracked_files = []
         for item in self.repo.tree().traverse():
             item_path = repo_root / item.path
             if item_path.is_file() and start_path in item_path.parents:
-                # append relative path from the repo root
                 tracked_files.append(str(item_path.relative_to(repo_root)))
 
         return tracked_files
 
     @requires_git
-    def get_untracked_files(self, start: str = ".", include_ignored: bool = True):
-        """Returns a list of all untracked files in the current directory, and
-        their root directories, because the dist file may contain untracked
-        files or directories (such as build products).
+    def get_untracked_files(
+        self, start: str = ".", include_ignored: bool = True
+    ) -> Tuple[List[str], List[str]]:
+        """Returns a list of untracked files and directories in the git repository.
 
-        :param start: Starting directory (default ".").
-        :param include_ignored: Include git ignored files.
-        :return: Tuple of untracked files and directories (files, dirs).
+        :param start: Directory to start searching for untracked files.
+        :param include_ignored: If True, includes ignored files in the result.
+        :return: A tuple containing a list of untracked file paths and a list of
+            untracked directory paths.
         """
-        untracked_files = []
-        untracked_dirs = []
-
         all_files = [util.normalize_path(f) for f in util.walk(start)]
 
         if include_ignored:
@@ -177,20 +174,19 @@ class GitRepo(Source):
             untracked_files = [f for f in self.repo.untracked_files]
 
         untracked_dirs = util.get_common_root_dirs(untracked_files)
-
         return untracked_files, untracked_dirs
 
-    def get_path(self):
-        """Get the git repo path for the dist info file."""
+    def get_path(self) -> str:
+        """Returns the URL of the git repository or the current path if not a
+        git repo."""
         if self.repo and self.repo.remotes:
-            if "origin" in [remote.name for remote in self.repo.remotes]:
+            if "origin" in [r.name for r in self.repo.remotes]:
                 return self.repo.remotes.origin.url
-            else:
-                return self.repo.remotes[0].url
+            return self.repo.remotes[0].url
         return self.path
 
-    def read_git_info(self):
-        """Read git repo information."""
+    def read_git_info(self) -> bool:
+        """Reads the git repository information and initializes the object."""
         self.branch_name = ""
         self.head = ""
         self.short_head = ""
@@ -204,48 +200,39 @@ class GitRepo(Source):
             self.short_head = self.head[: config.LEN_HASH]
             self.path = self.get_path()
 
-            # remove user name and protocol from path
             if "@" in self.path:
-                self.path = self.path[self.path.find("@") + 1 :]
+                self.path = self.path.split("@", 1)[-1]
+            self.name = os.path.basename(self.path).replace(".git", "")
 
-            # change ssh style path to look like https style
-            # self.path = self.path.replace(":", "/")
-            self.name = self.path[self.path.rfind("/") + 1 :]
-            if self.name.endswith(".git"):
-                self.name = self.name[:-4]
-
-            # this will generate TypeError if detached HEAD
-            branch = self.repo.active_branch
-            self.branch_name = branch.name
-            if branch.name not in config.MAIN_BRANCHES:
-                log.warning("Warning: Not on master branch")
+            try:
+                branch = self.repo.active_branch
+                self.branch_name = branch.name
+                if self.branch_name not in config.MAIN_BRANCHES:
+                    log.warning("Warning: Not on a main branch")
+            except (TypeError, AttributeError):
+                log.warning("Warning: Detached HEAD or no active branch")
 
         except git.InvalidGitRepositoryError:
             log.warning("Warning: Not in a git repository")
-            self.repo = False
-
-        except (AttributeError, TypeError) as e:
-            log.warning("Warning: %s", str(e))
-
+            self.repo = None
         except Exception as e:
             log.warning("Error reading git repo: %s", str(e))
 
-        log.info("Name: %s" % self.name)
-        log.info("Path: %s" % self.path)
-
+        log.info("Name: %s", self.name)
+        log.info("Path: %s", self.path)
         if self.repo and self.branch_name:
-            log.info("Branch: %s" % self.branch_name)
-            log.info("Head: %s (%s)" % (self.head, self.short_head))
+            log.info("Branch: %s", self.branch_name)
+            log.info("Head: %s (%s)", self.head, self.short_head)
 
         return True
 
     @requires_git
-    def is_git_behind(self):
-        """Checks for upstream commits on the repo."""
-        if not self.branch_name:
-            return False
+    def is_git_behind(self) -> bool:
+        """Checks if the current branch is behind the remote branch.
 
-        if not self.repo.remotes:
+        :return: True if the branch is behind, False otherwise.
+        """
+        if not self.branch_name or not self.repo.remotes:
             return False
 
         try:
@@ -254,61 +241,47 @@ class GitRepo(Source):
             )
             if upstream_commits:
                 log.error(
-                    "Directory is %d commits behind remote repository. "
-                    "Run: git pull from origin first or use --force."
-                    % len(upstream_commits)
+                    "Directory is %d commits behind remote. Run 'git pull' or use --force.",
+                    len(upstream_commits),
                 )
                 return True
 
         except GitCommandError as err:
-            log.error(
-                "Git error checking remote branch: %s "
-                "Push branch to origin or use --force.",
-                str(err),
-            )
+            log.error("Git error checking remote branch: %s", str(err))
             return True
-
         except Exception as err:
-            log.error(
-                "Unexpected error checking remote branch: %s" "Try using --force.",
-                str(err),
-            )
+            log.error("Unexpected error checking remote branch: %s", str(err))
             return True
 
         return False
 
     @requires_git
-    def git_changed_files(self, include_untracked: bool = True):
-        """Returns list of changed files (in staging or untracked).
-        Untracked files exclude ignored files by .gitignore files.
+    def git_changed_files(self, include_untracked: bool = True) -> List[str]:
+        """Returns a list of changed files in the git repository.
 
-        :param include_untracked: Include untracked files.
-        :return: List of changed files.
+        :param include_untracked: If True, includes untracked files in the result.
+        :return: List of changed file paths relative to the repository root.
         """
         if not self.repo:
             return []
 
         try:
-            # get list of changed files
-            changed_files = [
+            changed = [
                 os.path.join(self.directory, item.a_path)
                 for item in self.repo.index.diff(None)
             ]
-
-            # get list of staged files
-            changed_files += [
+            staged = [
                 os.path.join(self.directory, item.a_path)
                 for item in self.repo.index.diff("HEAD")
             ]
-
-            # get list of untracked files (excluding ignored)
+            untracked = []
             if include_untracked:
-                changed_files += [
+                untracked = [
                     os.path.join(self.directory, item)
                     for item in self.repo.untracked_files
                 ]
 
-            return [util.normalize_path(f) for f in changed_files]
+            return [util.normalize_path(p) for p in (changed + staged + untracked)]
 
         except Exception as e:
             log.error("Error getting changed files: %s", str(e))
