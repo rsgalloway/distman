@@ -67,7 +67,10 @@ def add_symlink_support() -> None:
 
 
 def check_symlinks() -> bool:
-    """Checks if the system can create symbolic links."""
+    """Checks if the system can create symbolic links.
+
+    :return: True if symbolic links can be created, False otherwise.
+    """
     temp_file = tempfile.mktemp()
     link_file = tempfile.mktemp()
 
@@ -97,6 +100,7 @@ def copy_file(source: str, dest: str) -> None:
 
     :param source: Path to source file or link.
     :param dest: Path to destination.
+    :return: None
     """
     try:
         destdir = os.path.dirname(dest)
@@ -131,6 +135,7 @@ def copy_directory(source: str, dest: str, all_files: bool = False) -> None:
     :param source: Path to source directory.
     :param dest: Path to destination directory.
     :param all_files: Copy all files, including hidden and ignorable files.
+    :return: None
     """
     source = os.path.relpath(source)
     all_files = get_files(source, all_files=all_files)
@@ -149,6 +154,7 @@ def copy_object(source: str, dest: str, all_files: bool = False) -> None:
     :param dest: Path to destination file or directory.
     :param all_files: Copy all files in a directory, including hidden and
         ignorable files.
+    :return: None
     """
     if os.path.islink(source):
         link_target = os.readlink(source)
@@ -243,7 +249,7 @@ def find_matching_versions(
 def get_user() -> str:
     """Returns the current user name.
 
-    :returns: username from environment variables.
+    :return: username from environment variables.
     """
     return os.getenv("USER", os.getenv("USERNAME", "unknown"))
 
@@ -252,7 +258,7 @@ def has_hidden_attr(filepath: str) -> bool:
     """Checks if file has hidden file attribute (windows only).
 
     :param filepath: file system path.
-    :returns: True if file is hidden.
+    :return: True if file is hidden.
     """
     try:
         attrs = ctypes.windll.kernel32.GetFileAttributesW(str(filepath))
@@ -266,7 +272,7 @@ def is_file_hidden(filepath: str) -> bool:
     with period or has hidden attribute.
 
     :param filepath: file system path.
-    :returns: True if file is hidden.
+    :return: True if file is hidden.
     """
     name = os.path.basename(os.path.abspath(filepath))
     return name.startswith(".") or has_hidden_attr(filepath)
@@ -277,7 +283,7 @@ def is_ignorable(filepath: str) -> bool:
     in the ignorables list, as well as dot files.
 
     :param path: a file system path.
-    :returns: True if filepath is ignorable.
+    :return: True if filepath is ignorable.
     """
     return is_file_hidden(filepath) or bool(IGNORABLE_PATHS.search(filepath))
 
@@ -291,7 +297,7 @@ def get_common_root_dirs(filepaths: List[str]) -> List[str]:
     """Returns a list of common root directories for a list of file paths.
 
     :param filepaths: list of file paths.
-    :returns: list of common parent directories.
+    :return: list of common parent directories.
     """
     return list({os.path.dirname(path) for path in filepaths if os.path.dirname(path)})
 
@@ -301,7 +307,7 @@ def get_path_type(path: str) -> str:
     or 'null' if path does not exist.
 
     :param path: file system path.
-    :returns: name of path type as a string.
+    :return: name of path type as a string.
     """
     if os.path.islink(path):
         return "link"
@@ -317,7 +323,7 @@ def normalize_path(path: str) -> str:
     os.path.normpath.
 
     :param path: file system path.
-    :returns: normalized path.
+    :return: normalized path.
     """
     path = sanitize_path(path)
     return os.path.normpath(path.lstrip("./")) if not os.path.isabs(path) else path
@@ -337,7 +343,7 @@ def get_link_full_path(link: str) -> str:
     """Returns the full path of a symbolic link.
 
     :param link: symbolic link path.
-    :returns: full path of link target.
+    :return: full path of link target.
     """
     if not os.path.islink(link):
         return ""
@@ -368,6 +374,7 @@ def write_dist_info(dest: str, dist_info: dict) -> None:
 
     :param dest: Path to destination directory.
     :param dist_info: Dictionary of distribution information.
+    :return: None
     """
     distinfo = get_dist_info(dest=dest)
     log.debug("Writing dist info to %s" % distinfo)
@@ -383,7 +390,7 @@ def create_dest_folder(dest: str, dryrun: bool = False, yes: bool = False) -> bo
     :param dest: destination file path.
     :param dryrun: dry run flag.
     :param yes: yes flag (skips user confirmation).
-    :returns: True if destination folder was created.
+    :return: True if destination folder was created.
     """
     dest_dir = os.path.dirname(dest)
 
@@ -425,7 +432,7 @@ def expand_wildcard_entry(
 
     :param source_pattern: glob pattern for source files.
     :param destination_template: template for destination paths.
-    :returns: list of tuples of source and destination paths.
+    :return: list of tuples of source and destination paths.
     """
 
     # convert source glob to regex for extracting capture groups
@@ -528,7 +535,7 @@ def link_object(target: str, link: str, actual_target: str) -> bool:
     :param target: Path to target file or directory.
     :param link: Path to symbolic link.
     :param actual_target: Path to actual target file or directory.
-    :returns: True if linking was successful.
+    :return: True if linking was successful.
     """
     if not os.path.exists(actual_target):
         log.warning("Target '%s' not found", actual_target)
@@ -547,24 +554,18 @@ def remove_object(path: str, recurse: bool = False) -> None:
 
     :param path: file system path.
     :param recurse: recursively delete directory tree.
+    :return: None
     """
     try:
-        if os.path.isdir(path):
+        if os.path.islink(path) or os.path.isfile(path):
+            os.remove(path)
+        elif os.path.isdir(path):
             if recurse:
                 shutil.rmtree(path)
             else:
                 os.rmdir(path)
-        else:
-            os.remove(path)
-
-    except OSError:
-        try:
-            # no way to tell if a directory is a symlink:
-            # os.path.isdir() will return True
-            # try to delete as file if fails
-            os.remove(path)
-        except OSError as e:
-            log.error("Error removing '%s': %s" % (path, str(e)))
+    except Exception as e:
+        log.error("Error removing '%s': %s", path, e)
 
 
 def replace_vars(pathstr: str) -> str:
@@ -573,30 +574,39 @@ def replace_vars(pathstr: str) -> str:
     :param pathstr: Path string with tokens.
     :return: Path string with tokens replaced.
     """
+    open_token = config.PATH_TOKEN_OPEN
+    close_token = config.PATH_TOKEN_CLOSE
+
     while True:
-        openBracket = pathstr.find(config.PATH_TOKEN_OPEN)
-        closeBracket = pathstr.find(config.PATH_TOKEN_CLOSE)
-        if -1 == openBracket or closeBracket <= openBracket:
-            return pathstr
-        var = pathstr[openBracket + 1 : closeBracket].upper()
-        replacement = os.getenv(var, config.DEFAULT_ENV.get(var))
-        if not replacement:
-            raise Exception("Cannot resolve env var '%s'" % var)
-        pathstr = pathstr[0:openBracket] + replacement + pathstr[closeBracket + 1 :]
+        start = pathstr.find(open_token)
+        end = pathstr.find(close_token, start + 1)
+        if start == -1 or end == -1 or end <= start:
+            break
+
+        var = pathstr[start + 1 : end].strip().upper()
+        value = os.getenv(var, config.DEFAULT_ENV.get(var))
+        if value is None:
+            raise ValueError("Cannot resolve environment variable: %s" % var)
+
+        pathstr = pathstr[:start] + value + pathstr[end + 1 :]
+
+    return pathstr
 
 
 def yesNo(question: str) -> bool:
     """Displays question text to user and reads yes/no input.
 
     :param question: question text.
-    :returns: True if user answers yes.
+    :return: True if user answers yes.
     """
     while True:
-        answer = input(question + " (y/n): ").lower().strip()
-        if answer in ("y", "yes", "n", "no"):
-            return answer in ("y", "yes")
+        answer = input(f"{question} (y/n): ").strip().lower()
+        if answer in {"y", "yes"}:
+            return True
+        elif answer in {"n", "no"}:
+            return False
         else:
-            print("You must answer yes or no.")
+            print("Please answer 'y' or 'n'.")
 
 
 def get_files(start: str, all_files: bool = False) -> List[str]:
@@ -626,7 +636,7 @@ def walk(
     :param path: file system path.
     :param exclude_ignorables: exclude ignorable files.
     :param followlinks: follow symbolic links.
-    :returns: generator of file paths.
+    :return: generator of file paths.
     """
     if not is_ignorable(path) and os.path.isfile(path):
         yield path
