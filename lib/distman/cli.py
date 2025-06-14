@@ -122,12 +122,12 @@ def parse_args():
         help="do a dry run, no actions will be performed",
     )
     parser.add_argument(
+        "-v",
         "--verbose",
         action="store_true",
         help="show verbose information",
     )
     parser.add_argument(
-        "-v",
         "--version",
         action="version",
         version=f"distman {__version__}",
