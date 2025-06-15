@@ -88,7 +88,7 @@ def update_symlink(dest: str, target: str, dryrun: bool) -> bool:
     :param dryrun: If True, simulate the action without making changes.
     :return: True if the symlink was updated or would be updated in dry run mode.
     """
-    if os.path.lexists(dest):
+    if os.path.lexists(dest) and not dryrun:
         util.remove_object(dest)
     if dryrun:
         log.info("Would link: %s => %s", dest, target)
