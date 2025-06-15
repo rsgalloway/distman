@@ -467,7 +467,7 @@ def expand_wildcard_entry(
         if found:
             results.append((path, dest))
 
-    return results
+    return sorted(results)
 
 
 def get_file_versions(target: str) -> List[Tuple[str, int, str]]:
