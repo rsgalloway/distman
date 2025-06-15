@@ -34,147 +34,193 @@ Contains tests for the util module.
 """
 
 import os
-import unittest
-from unittest.mock import patch
-
-from distman.util import (check_symlinks, full_path, get_user, is_file_hidden,
-                          is_ignorable, normalize_path, remove_object, walk,
-                          yesNo)
+import tempfile
+import shutil
+import pytest
+from distman import util
 
 
-class TestUtils(unittest.TestCase):
-    def test_check_symlinks(self):
-        # Mock the tempfile.mktemp() function to return temporary file paths
-        with patch("tempfile.mktemp") as mock_mktemp:
-            mock_mktemp.side_effect = ["/tmp/temp_file", "/tmp/link_file"]
-
-            # Mock the os.symlink() function to raise an OSError
-            with patch("os.symlink", side_effect=OSError):
-                result = check_symlinks()
-
-                # Assert that the method returns False
-                self.assertFalse(result)
-
-            # Assert that the temporary files are removed
-            self.assertFalse(os.path.exists("/tmp/temp_file"))
-            self.assertFalse(os.path.exists("/tmp/link_file"))
-
-    def test_get_user(self):
-        # Mock the os.getenv() function to return the user name
-        with patch("os.getenv") as mock_getenv:
-            mock_getenv.side_effect = ["john", None, None]
-
-            # Call the method to get the user name
-            result = get_user()
-
-            # Assert that the correct user name is returned
-            self.assertEqual(result, "john")
-
-            # Call the method when both USER and USERNAME environment variables are not set
-            result = get_user()
-
-            # Assert that the default user name is returned
-            self.assertEqual(result, "unknown")
-
-    def test_is_file_hidden(self):
-        # Mock the os.path.basename() and has_hidden_attr() functions
-        with patch("os.path.basename") as mock_basename, patch(
-            "distman.util.has_hidden_attr"
-        ) as mock_has_hidden_attr:
-            # Set the return values of the mocked functions
-            mock_basename.return_value = ".hidden_file"
-            mock_has_hidden_attr.return_value = True
-
-            # Call the method to check if the file is hidden
-            result = is_file_hidden("/path/to/file")
-
-            # Assert that the method returns True
-            self.assertTrue(result)
-
-    def test_is_ignorable(self):
-        # Mock the is_file_hidden() function
-        with patch("distman.util.is_file_hidden") as mock_is_file_hidden:
-            # Set the return value of the mocked function
-            mock_is_file_hidden.return_value = False
-
-            # Call the method to check if the file is ignorable
-            result = is_ignorable("/path/to/file")
-
-            # Assert that the method returns False
-            self.assertFalse(result)
-
-    def test_normalize_path(self):
-        # Call the method to normalize a path
-        result = normalize_path("path\\to\\file/")
-
-        # Assert that the path is normalized correctly
-        self.assertEqual(result, "path/to/file")
-
-    def test_full_path(self):
-        # Call the method to get the full path from a relative path
-        result = full_path("/start/directory", "../relative/path")
-
-        # Assert that the full path is returned correctly
-        self.assertEqual(result, "/start/relative/path")
-
-    def test_remove_object(self):
-        # Mock the os.path.isdir() and os.remove() functions
-        with patch("os.path.isdir") as mock_isdir, patch("os.remove") as mock_remove:
-            # Set the return value of the mocked isdir() function
-            mock_isdir.return_value = True
-
-            # Call the method to remove a directory
-            remove_object("/path/to/directory", recurse=True)
-
-            # Assert that the rmtree() function is called
-            mock_remove.assert_called_with("/path/to/directory")
-
-            # Call the method to remove a file
-            remove_object("/path/to/file")
-
-            # Assert that the remove() function is called
-            mock_remove.assert_called_with("/path/to/file")
-
-    def test_yesNo(self):
-        # Mock the input() function to return user input
-        with patch("builtins.input") as mock_input:
-            # Set the return value of the mocked input() function
-            mock_input.return_value = "y"
-
-            # Call the method to ask a yes/no question
-            result = yesNo("Do you want to continue?")
-
-            # Assert that the method returns True
-            self.assertTrue(result)
-
-            # Set the return value of the mocked input() function
-            mock_input.return_value = "n"
-
-            # Call the method to ask a yes/no question
-            result = yesNo("Do you want to continue?")
-
-            # Assert that the method returns False
-            self.assertFalse(result)
-
-    def test_walk(self):
-        # Mock the is_ignorable() function
-        with patch("distman.util.is_ignorable") as mock_is_ignorable:
-            # Set the return value of the mocked is_ignorable() function
-            mock_is_ignorable.return_value = False
-
-            # Call the method to walk through the files
-            result = list(walk("/path/to/directory"))
-
-            # Assert that the correct file paths are returned
-            self.assertEqual(
-                result,
-                [
-                    "/path/to/directory/file1.txt",
-                    "/path/to/directory/file2.txt",
-                    "/path/to/directory/subdirectory/file3.txt",
-                ],
-            )
+@pytest.fixture
+def temp_dir():
+    """Fixture to create a temporary directory for testing."""
+    path = tempfile.mkdtemp()
+    yield path
+    shutil.rmtree(path)
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_normalize_path():
+    """Test the normalize_path function to ensure it correctly normalizes paths."""
+    assert util.normalize_path("./foo/bar/") == os.path.normpath("foo/bar")
+    assert util.normalize_path("") == "."
+
+
+def test_sanitize_path():
+    """Test the sanitize_path function to ensure it correctly sanitizes paths."""
+    assert util.sanitize_path("foo\\bar\\") == "foo/bar"
+    assert util.sanitize_path("foo/bar/") == "foo/bar"
+
+
+def test_get_path_type(temp_dir):
+    """Test the get_path_type function to ensure it correctly identifies file types."""
+    file_path = os.path.join(temp_dir, "test.txt")
+    dir_path = os.path.join(temp_dir, "subdir")
+    link_path = os.path.join(temp_dir, "link")
+
+    with open(file_path, "w") as f:
+        f.write("hello")
+
+    os.mkdir(dir_path)
+    os.symlink(file_path, link_path)
+
+    assert util.get_path_type(file_path) == "file"
+    assert util.get_path_type(dir_path) == "directory"
+    assert util.get_path_type(link_path) == "link"
+    assert util.get_path_type(os.path.join(temp_dir, "nonexistent")) == "null"
+
+
+def test_copy_file_and_compare(temp_dir):
+    """Test the copy_file function to ensure it correctly copies files and compares them."""
+    src = os.path.join(temp_dir, "src.txt")
+    dst = os.path.join(temp_dir, "dst.txt")
+
+    with open(src, "w") as f:
+        f.write("line1\r\nline2\nline3\r")
+
+    util.copy_file(src, dst)
+
+    with open(dst, "r") as f:
+        lines = f.readlines()
+    assert lines == ["line1\n", "line2\n", "line3\n"]
+    assert util.compare_files(src, dst)
+
+
+def test_remove_object(temp_dir):
+    """Test the remove_object function to ensure it correctly removes files and directories."""
+    file_path = os.path.join(temp_dir, "file.txt")
+    dir_path = os.path.join(temp_dir, "dir")
+    os.mkdir(dir_path)
+    with open(file_path, "w") as f:
+        f.write("data")
+    assert os.path.exists(file_path)
+    util.remove_object(file_path)
+    assert not os.path.exists(file_path)
+
+    assert os.path.exists(dir_path)
+    util.remove_object(dir_path)
+    assert not os.path.exists(dir_path)
+
+
+def test_replace_vars(monkeypatch):
+    """Test the replace_vars function to ensure it correctly replaces environment variables."""
+    monkeypatch.setenv("FOO", "bar")
+    result = util.replace_vars("path/to/{FOO}/dir")
+    assert result == "path/to/bar/dir"
+
+
+def test_hashes_equal():
+    """Test the hashes_equal function to ensure it correctly compares hashes."""
+    assert util.hashes_equal("abc123", "ABC123")
+    assert util.hashes_equal("ABC", "abcdef")
+    assert util.hashes_equal("abcdef", "ABC")
+
+
+def test_get_user(monkeypatch):
+    """Test the get_user function to ensure it correctly retrieves the current user."""
+    monkeypatch.setenv("USER", "alice")
+    assert util.get_user() == "alice"
+    monkeypatch.delenv("USER")
+    monkeypatch.setenv("USERNAME", "bob")
+    assert util.get_user() == "bob"
+
+
+def test_expand_wildcard_entry(temp_dir):
+    """Test the expand_wildcard_entry function to ensure it correctly expands wildcard patterns."""
+
+    # setup some test files
+    os.makedirs(os.path.join(temp_dir, "build"), exist_ok=True)
+    with open(os.path.join(temp_dir, "build", "file1.txt"), "w") as f:
+        f.write("Test file 1")
+    with open(os.path.join(temp_dir, "build", "file2.txt"), "w") as f:
+        f.write("Test file 2")
+
+    source_pattern = os.path.join(temp_dir, "build", "*")
+    destination_template = "{DEPLOY_ROOT}/lib/python/%1"
+
+    expected_results = [
+        (
+            os.path.join(temp_dir, "build", "file1.txt"),
+            "{DEPLOY_ROOT}/lib/python/file1.txt",
+        ),
+        (
+            os.path.join(temp_dir, "build", "file2.txt"),
+            "{DEPLOY_ROOT}/lib/python/file2.txt",
+        ),
+    ]
+
+    results = util.expand_wildcard_entry(source_pattern, destination_template)
+
+    assert len(results) == len(expected_results)
+    for result, expected in zip(results, expected_results):
+        assert result[0] == expected[0]
+        assert result[1] == expected[1]
+
+
+def test_get_file_versions(temp_dir):
+    """Test the get_file_versions function to ensure it correctly retrieves file versions."""
+    versioned_dir = os.path.join(temp_dir, "versions")
+    os.makedirs(versioned_dir, exist_ok=True)
+
+    # create versioned files
+    base_filename = "testfile.txt"
+    versions = [
+        "testfile.txt.1.commitA",
+        "testfile.txt.2.commitB",
+        "testfile.txt.1.commitC",
+        "testfile.txt.3.commitD",
+        "testfile.txt.2.commitA",
+    ]
+
+    for version in versions:
+        with open(os.path.join(versioned_dir, version), "w") as f:
+            f.write("Versioned content")
+
+    expected_results = [
+        (os.path.join(versioned_dir, "testfile.txt.1.commitC"), 1, "commitC"),
+        (os.path.join(versioned_dir, "testfile.txt.1.commitA"), 1, "commitA"),
+        (os.path.join(versioned_dir, "testfile.txt.2.commitB"), 2, "commitB"),
+        (os.path.join(versioned_dir, "testfile.txt.2.commitA"), 2, "commitA"),
+        (os.path.join(versioned_dir, "testfile.txt.3.commitD"), 3, "commitD"),
+    ]
+
+    target = os.path.join(os.path.dirname(versioned_dir), base_filename)
+    result = util.get_file_versions(target)
+
+    assert len(result) == len(expected_results)
+    for res, exp in zip(result, expected_results):
+        assert res[0] == exp[0]
+        assert res[1] == exp[1]
+        assert res[2] == exp[2]
+
+
+def test_link_object(temp_dir):
+    """Test the link_object function to ensure it correctly creates symbolic links."""
+    target_file = os.path.join(temp_dir, "target.txt")
+    link_file = os.path.join(temp_dir, "link_to_target.txt")
+
+    with open(target_file, "w") as f:
+        f.write("This is a target file.")
+
+    # test creating a symbolic link
+    assert util.link_object(target_file, link_file, target_file) is True
+    assert os.path.islink(link_file)
+    assert os.readlink(link_file) == target_file
+
+    # test linking to a non-existent target
+    link_file_2 = os.path.join(temp_dir, "link_to_non_existent.txt")
+    assert (
+        util.link_object("non_existent.txt", link_file_2, "non_existent.txt") is False
+    )
+    assert not os.path.exists(link_file_2)
+
+    os.remove(link_file)
+    os.remove(target_file)
