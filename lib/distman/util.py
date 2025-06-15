@@ -476,7 +476,7 @@ def get_file_versions(target: str) -> List[Tuple[str, int, str]]:
     :param target: Path to file to check.
     :return: List of tuples with version number and file.
     """
-    filedir = os.path.dirname(target) + "/" + config.DIR_VERSIONS
+    filedir = os.path.join(os.path.dirname(target), config.DIR_VERSIONS)
     if not os.path.exists(filedir):
         return []
 
