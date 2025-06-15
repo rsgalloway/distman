@@ -38,91 +38,115 @@ import unittest
 from unittest.mock import patch
 
 from distman import Distributor
+from distman.dist import get_source_and_dest, confirm, update_symlink
 
 
-class TestDistributor(unittest.TestCase):
-    """Tests for the Distributor class."""
-
-    def setUp(self):
-        self.distributor = Distributor()
-
-    def test_read_dist_file(self):
-        # Mock the dist file content
-        dist_file_content = {
-            "author": "John Doe",
-            "targets": {
-                "target1": {
-                    "sourcePath": "path/to/source1",
-                    "destPath": "path/to/dest1",
-                },
-                "target2": {
-                    "sourcePath": "path/to/source2",
-                    "destPath": "path/to/dest2",
-                },
-            },
-        }
-
-        # Mock the open() function to return the dist file content
-        with patch("builtins.open", create=True) as mock_open:
-            mock_open.return_value.__enter__.return_value.read.return_value = (
-                json.dumps(dist_file_content)
-            )
-
-            # Call the method to read the dist file
-            result = self.distributor.read_dist_file()
-
-            # Assert that the method returns True
-            self.assertTrue(result)
-
-            # Assert that the distributor's root attribute is set correctly
-            self.assertEqual(self.distributor.root, dist_file_content)
-
-    def test_get_targets(self):
-        # Set the distributor's root attribute
-        self.distributor.root = {
-            "targets": {
-                "target1": {
-                    "sourcePath": "path/to/source1",
-                    "destPath": "path/to/dest1",
-                },
-                "target2": {
-                    "sourcePath": "path/to/source2",
-                    "destPath": "path/to/dest2",
-                },
-            }
-        }
-
-        # Call the method to get the targets
-        targets = self.distributor.get_targets()
-
-        # Assert that the targets are returned correctly
-        self.assertEqual(targets, self.distributor.root["targets"])
-
-    def test_get_files(self):
-        # Set the distributor's directory attribute
-        self.distributor.directory = "/path/to/directory"
-
-        # Mock the util.walk() function to return a list of files
-        with patch("distman.util.walk") as mock_walk:
-            mock_walk.return_value = [
-                "/path/to/directory/file1.txt",
-                "/path/to/directory/file2.txt",
-                "/path/to/directory/subdirectory/file3.txt",
-            ]
-
-            # Call the method to get the files
-            files = self.distributor.get_files("/path/to/directory")
-
-            # Assert that the files are returned correctly
-            self.assertEqual(
-                files,
-                [
-                    "/path/to/directory/file1.txt",
-                    "/path/to/directory/file2.txt",
-                    "/path/to/directory/subdirectory/file3.txt",
-                ],
-            )
+def test_get_source_and_dest_valid():
+    """Test the get_source_and_dest function with valid source and destination."""
+    target_dict = {
+        "source": "path/to/source",
+        "destination": "path/to/dest",
+    }
+    result = get_source_and_dest(target_dict)
+    assert result == ("path/to/source", "path/to/dest")
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_get_source_and_dest_missing_source():
+    """Test the get_source_and_dest function with missing source."""
+    target_dict = {
+        "destination": "path/to/dest",
+    }
+    result = get_source_and_dest(target_dict)
+    assert result is None
+
+
+def test_get_source_and_dest_missing_dest():
+    """Test the get_source_and_dest function with missing destination."""
+    target_dict = {
+        "source": "path/to/source",
+    }
+    result = get_source_and_dest(target_dict)
+    assert result is None
+
+
+def test_get_source_and_dest_invalid_paths():
+    """Test the get_source_and_dest function with invalid paths."""
+    target_dict = {
+        "source": None,
+        "destination": None,
+    }
+    result = get_source_and_dest(target_dict)
+    assert result is None
+
+
+def test_confirm_yes():
+    """Test the confirm function with yes prompt returning True."""
+    result = confirm("Proceed?", yes=True, dryrun=False)
+    assert result is True
+
+
+def test_confirm_dryrun():
+    """Test the confirm function with dryrun returning True."""
+    result = confirm("Proceed?", yes=False, dryrun=True)
+    assert result is True
+
+
+def test_confirm_no():
+    """Test the confirm function with no prompt returning False."""
+    with patch("distman.util.yesNo", return_value=False):
+        result = confirm("Proceed?", yes=False, dryrun=False)
+        assert result is False
+
+
+def test_confirm_yesNo():
+    """Test the confirm function with yesNo prompt returning True."""
+    with patch("distman.util.yesNo", return_value=True):
+        result = confirm("Proceed?", yes=False, dryrun=False)
+        assert result is True
+
+
+def test_update_symlink_existing_link():
+    """"Test the update_symlink function when the destination exists."""
+    dest = "path/to/existing/link"
+    target = "path/to/target"
+    dryrun = False
+
+    # mock the necessary functions
+    with patch("os.path.lexists", return_value=True), patch(
+        "distman.util.remove_object"
+    ) as mock_remove, patch("distman.util.link_object", return_value=True) as mock_link:
+        result = update_symlink(dest, target, dryrun)
+
+        mock_remove.assert_called_once_with(dest)
+        mock_link.assert_called_once_with(target, dest, target)
+        assert result is True
+
+
+def test_update_symlink_dryrun():
+    """Test the update_symlink function when dryrun is True and the destination exists."""
+    dest = "path/to/existing/link"
+    target = "path/to/target"
+    dryrun = True
+
+    with patch("os.path.lexists", return_value=True), patch(
+        "distman.util.remove_object"
+    ) as mock_remove:
+        result = update_symlink(dest, target, dryrun)
+
+        mock_remove.assert_not_called()
+        assert result is True
+
+
+def test_update_symlink_no_existing_link():
+    """Test the update_symlink function when the destination does not exist."""
+    dest = "path/to/nonexistent/link"
+    target = "path/to/target"
+    dryrun = False
+
+    with patch("os.path.lexists", return_value=True), patch(
+        "distman.util.link_object", return_value=True
+    ) as mock_link:
+        result = update_symlink(dest, target, dryrun)
+
+        mock_link.assert_called_once_with(target, dest, target)
+        assert result is True
