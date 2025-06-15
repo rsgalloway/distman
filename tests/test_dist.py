@@ -40,7 +40,13 @@ import pytest
 from unittest.mock import patch
 
 from distman import config, Distributor
-from distman.dist import get_source_and_dest, confirm, update_symlink, get_version_dest
+from distman.dist import (
+    get_source_and_dest,
+    confirm,
+    update_symlink,
+    get_version_dest,
+    should_skip_target,
+)
 
 
 @pytest.fixture
@@ -175,9 +181,7 @@ def test_get_version_dest_creates_versioned_path(temp_dir):
     expected = os.path.join(temp_dir, config.DIR_VERSIONS, "file.txt.1.abc123")
 
     assert result == expected
-    assert os.path.exists(
-        os.path.dirname(result)
-    )
+    assert os.path.exists(os.path.dirname(result))
 
 
 def test_get_version_dest_without_short_head(temp_dir):
@@ -193,9 +197,7 @@ def test_get_version_dest_without_short_head(temp_dir):
     expected = os.path.join(temp_dir, config.DIR_VERSIONS, "file.txt.2")
 
     assert result == expected
-    assert os.path.exists(
-        os.path.dirname(result)
-    )
+    assert os.path.exists(os.path.dirname(result))
 
 
 def test_get_version_dest_creates_directory(temp_dir):
@@ -213,3 +215,43 @@ def test_get_version_dest_creates_directory(temp_dir):
     assert result == os.path.join(expected_dir, "test.txt.3.def456")
     assert os.path.exists(expected_dir)
     assert os.path.isdir(expected_dir)
+
+
+def test_should_skip_target_with_matching_pattern():
+    """Test should_skip_target function with a matching pattern."""
+    target_name = "example_target"
+    pattern = "example_target"
+    result = should_skip_target(target_name, pattern)
+    assert result is False
+
+
+def test_should_skip_target_with_matching_wildcard_pattern():
+    """Test should_skip_target function with a matching wildcard pattern."""
+    target_name = "example_target"
+    pattern = "example*"
+    result = should_skip_target(target_name, pattern)
+    assert result is False
+
+
+def test_should_skip_target_with_non_matching_pattern():
+    """Test should_skip_target function with a non-matching pattern."""
+    target_name = "example_target"
+    pattern = "test*"
+    result = should_skip_target(target_name, pattern)
+    assert result is True
+
+
+def test_should_skip_target_with_none_pattern():
+    """Test should_skip_target function with None pattern."""
+    target_name = "example_target"
+    pattern = None
+    result = should_skip_target(target_name, pattern)
+    assert result is False
+
+
+def test_should_skip_target_with_empty_pattern():
+    """Test should_skip_target function with an empty pattern."""
+    target_name = "example_target"
+    pattern = ""
+    result = should_skip_target(target_name, pattern)
+    assert result is True
