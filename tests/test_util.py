@@ -67,7 +67,7 @@ def test_get_path_type(temp_dir):
     link_path = os.path.join(temp_dir, "link")
 
     with open(file_path, "w") as f:
-        f.write("hello")
+        f.write("hello world")
 
     os.mkdir(dir_path)
     os.symlink(file_path, link_path)

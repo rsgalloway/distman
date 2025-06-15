@@ -33,12 +33,22 @@ __doc__ = """
 Contains tests for the dist module.
 """
 
-import json
-import unittest
+import os
+import tempfile
+import shutil
+import pytest
 from unittest.mock import patch
 
-from distman import Distributor
-from distman.dist import get_source_and_dest, confirm, update_symlink
+from distman import config, Distributor
+from distman.dist import get_source_and_dest, confirm, update_symlink, get_version_dest
+
+
+@pytest.fixture
+def temp_dir():
+    """Fixture to create a temporary directory for testing."""
+    path = tempfile.mkdtemp()
+    yield path
+    shutil.rmtree(path)
 
 
 def test_get_source_and_dest_valid():
@@ -106,7 +116,7 @@ def test_confirm_yesNo():
 
 
 def test_update_symlink_existing_link():
-    """"Test the update_symlink function when the destination exists."""
+    """ "Test the update_symlink function when the destination exists."""
     dest = "path/to/existing/link"
     target = "path/to/target"
     dryrun = False
@@ -150,3 +160,56 @@ def test_update_symlink_no_existing_link():
 
         mock_link.assert_called_once_with(target, dest, target)
         assert result is True
+
+
+def test_get_version_dest_creates_versioned_path(temp_dir):
+    """Test the get_version_dest function creates a versioned path."""
+    dest = os.path.join(temp_dir, "file.txt")
+    version_num = 1
+    short_head = "abc123"
+
+    with open(dest, "w") as f:
+        f.write("hello world")
+
+    result = get_version_dest(dest, version_num, short_head)
+    expected = os.path.join(temp_dir, config.DIR_VERSIONS, "file.txt.1.abc123")
+
+    assert result == expected
+    assert os.path.exists(
+        os.path.dirname(result)
+    )
+
+
+def test_get_version_dest_without_short_head(temp_dir):
+    """Test the get_version_dest function without a short head."""
+    dest = os.path.join(temp_dir, "file.txt")
+    version_num = 2
+    short_head = None
+
+    with open(dest, "w") as f:
+        f.write("hello world")
+
+    result = get_version_dest(dest, version_num, short_head)
+    expected = os.path.join(temp_dir, config.DIR_VERSIONS, "file.txt.2")
+
+    assert result == expected
+    assert os.path.exists(
+        os.path.dirname(result)
+    )
+
+
+def test_get_version_dest_creates_directory(temp_dir):
+    """Test the get_version_dest function creates the versions directory."""
+    dest = os.path.join(temp_dir, "test.txt")
+    version_num = 3
+    short_head = "def456"
+
+    with open(dest, "w") as f:
+        f.write("hello world")
+
+    result = get_version_dest(dest, version_num, short_head)
+    expected_dir = os.path.join(os.path.dirname(dest), config.DIR_VERSIONS)
+
+    assert result == os.path.join(expected_dir, "test.txt.3.def456")
+    assert os.path.exists(expected_dir)
+    assert os.path.isdir(expected_dir)
