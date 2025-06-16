@@ -57,6 +57,37 @@ def temp_dir():
     shutil.rmtree(path)
 
 
+@pytest.fixture
+def mock_dist_dict():
+    """Helper function to create a mock distribution dictionary."""
+    return {
+        "targets": {
+            "test_target": {
+                "source": "source_path",
+                "destination": "{DEPLOY_ROOT}/lib/python/source_path",
+            }
+        }
+    }
+
+
+@pytest.fixture
+def mock_distributor(mocker, temp_dir, mock_dist_dict):
+    """Fixture to mock the Distributor class and its methods."""
+    mocker.patch("distman.dist.Distributor.read_git_info", return_value=True)
+    mocker.patch("distman.dist.Distributor.is_git_behind", return_value=False)
+    mocker.patch("distman.dist.Distributor.git_changed_files", return_value=[])
+    mocker.patch(
+        "distman.dist.Distributor.get_targets", return_value=mock_dist_dict["targets"]
+    )
+    mocker.patch("distman.util.get_file_versions", return_value=[])
+    mocker.patch("distman.util.link_object", return_value=True)
+    mocker.patch("distman.util.remove_object", return_value=True)
+    mocker.patch("distman.util.replace_vars", side_effect=lambda s: s)
+    mocker.patch("distman.util.yesNo", return_value=True)
+    mocker.patch("os.makedirs", return_value=None)
+    os.environ["DEPLOY_ROOT"] = temp_dir
+
+
 def test_get_source_and_dest_valid():
     """Test the get_source_and_dest function with valid source and destination."""
     target_dict = {
@@ -254,4 +285,52 @@ def test_should_skip_target_with_empty_pattern():
     target_name = "example_target"
     pattern = ""
     result = should_skip_target(target_name, pattern)
+    assert result is True
+
+
+def test_distributor_initialization():
+    """Test the initialization of the Distributor class."""
+    distributor = Distributor()
+    assert distributor is not None
+
+
+def test_dist_with_valid_target(mock_distributor, mocker, mock_dist_dict):
+    """Test the dist method with a valid target."""
+    mocker.patch("os.path.exists", return_value=True)
+
+    dist = Distributor()
+    dist.root = mock_dist_dict
+    result = dist.dist(target="test_target", dryrun=True)
+    assert result is True
+
+
+def test_dist_with_missing_source(mock_distributor, mocker, mock_dist_dict):
+    """Test the dist method when the source is missing."""
+    dist = Distributor()
+    dist.root = mock_dist_dict
+    result = dist.dist(target="test_target", dryrun=False)
+    assert result is False
+
+
+def test_reset_file_version_with_valid_target(mock_distributor, mocker, mock_dist_dict):
+    """Test the reset_file_version method with a valid target."""
+    dist = Distributor()
+    dist.root = mock_dist_dict
+    result = dist.reset_file_version("test_target", dryrun=True)
+
+
+def test_change_file_version_with_valid_target(
+    mock_distributor, mocker, mock_dist_dict
+):
+    """Test the change_file_version method with a valid target."""
+    dist = Distributor()
+    dist.root = mock_dist_dict
+    dist.change_file_version("test_target", target_version=1, dryrun=True)
+
+
+def test_delete_target_with_existing_target(mock_distributor, mocker, mock_dist_dict):
+    """Test the delete_target method with an existing target."""
+    dist = Distributor()
+    dist.root = mock_dist_dict
+    result = dist.delete_target("test_target", dryrun=True)
     assert result is True
