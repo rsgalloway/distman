@@ -190,7 +190,7 @@ def test_update_symlink_no_existing_link():
     target = "path/to/target"
     dryrun = False
 
-    with patch("os.path.lexists", return_value=True), patch(
+    with patch("os.path.lexists", return_value=False), patch(
         "distman.util.link_object", return_value=True
     ) as mock_link:
         result = update_symlink(dest, target, dryrun)
