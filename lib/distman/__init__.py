@@ -43,6 +43,6 @@ try:
     envstack.init(__prog__)
 
 except Exception as e:
-    print("error initializing envstack environment: %s" % str(e))
+    pass
 
 from .dist import Distributor
