@@ -203,10 +203,10 @@ def main():
         else:
             target_file = args.target
             target_commit = args.commit
+            target_version = args.number
             if len(target_commit) < config.LEN_MINHASH:
                 print("Hashes must be at least %d characters" % config.LEN_MINHASH)
                 return 2
-            target_version = 0
 
         # do target version change
         if distributor.change_file_version(
