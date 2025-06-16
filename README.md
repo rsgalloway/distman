@@ -60,6 +60,33 @@ When files are distributed (or disted), they are copied to a `versions` folder
 and a symlink is created to the version. When a new version is disted, the
 version number is incremented and the link is updated.
 
+#### Wildcards
+
+You can use shell-style wildcards (e.g., *) in the "source" field of a target
+definition to match multiple files or directories. This is useful when you want
+to distribute a group of files without listing each one individually.
+
+When using wildcards, you must also use numeric substitution variables (%1, %2,
+etc.) in the "destination" path. These correspond to the wildcard matches in
+order of appearance.
+
+```json
+"targets": {
+  "build": {
+    "source": "build/*.py",
+    "destination": "{DEPLOY_ROOT}/lib/python/%1"
+  }
+}
+```
+
+In this example:
+
+- `build/*.py` expands to all `.py` files in the `build/` folder.
+- Each matched file is symlinked to `{DEPLOY_ROOT}/lib/python/filename.py`.
+
+> Wildcards are expanded at runtime using Python's glob and fnmatch mechanisms.
+Matching results are processed and symlinked individually.
+
 ## Usage
 
 To dist files defined in a `dist.json` file (remove -d when ready):

@@ -47,9 +47,11 @@ ROOT = {
 }.get(PLATFORM, f"./pipe/{ENV}")
 DEPLOY_ROOT = os.getenv("DEPLOY_ROOT", f"{ROOT}/{ENV}")
 DEFAULT_ENV = {
-    "HOME": HOME,
-    "ROOT": ROOT,
     "DEPLOY_ROOT": DEPLOY_ROOT,
+    "ENV": ENV,
+    "HOME": HOME,
+    "PLATFORM": PLATFORM,
+    "ROOT": ROOT,
 }
 
 # dist file settings

@@ -35,7 +35,7 @@ distman distributes files and directories to versioned destinations.
 
 __author__ = "ryan@rsgalloway.com"
 __prog__ = "distman"
-__version__ = "0.4.3"
+__version__ = "0.5.0"
 
 try:
     import envstack
@@ -43,6 +43,6 @@ try:
     envstack.init(__prog__)
 
 except Exception as e:
-    print("error initializing envstack environment: %s" % str(e))
+    pass
 
 from .dist import Distributor

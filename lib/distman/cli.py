@@ -122,12 +122,12 @@ def parse_args():
         help="do a dry run, no actions will be performed",
     )
     parser.add_argument(
+        "-v",
         "--verbose",
         action="store_true",
         help="show verbose information",
     )
     parser.add_argument(
-        "-v",
         "--version",
         action="version",
         version=f"distman {__version__}",
@@ -191,12 +191,8 @@ def main():
                 return 1
 
         elif args.number:
-            if not args.target:
-                print("No target specified to change version")
-                return 2
-            else:
-                target_file = args.target
-                target_version = args.number
+            target_file = args.target
+            target_version = args.number
             try:
                 target_version = int(target_version)
             except Exception:
@@ -205,16 +201,12 @@ def main():
             target_commit = ""
 
         else:
-            if not args.target:
-                print("No target specified to change version")
-                return 2
-            else:
-                target_file = args.target
-                target_commit = args.commit
+            target_file = args.target
+            target_commit = args.commit
+            target_version = args.number
             if len(target_commit) < config.LEN_MINHASH:
                 print("Hashes must be at least %d characters" % config.LEN_MINHASH)
-                return 0
-            target_version = 0
+                return 2
 
         # do target version change
         if distributor.change_file_version(
