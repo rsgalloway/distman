@@ -206,7 +206,9 @@ class Distributor(GitRepo):
                 for src_path, dst_path in util.expand_wildcard_entry(source, dest):
                     try:
                         dst_resolved = util.sanitize_path(util.replace_vars(dst_path))
-                        target_list.append(Target(name, src_path, dst_resolved))
+                        target_list.append(
+                            Target(name, src_path, dst_resolved, target_options)
+                        )
                     except Exception as e:
                         log.error(f"{e} resolving wildcard target {name}")
                         return False

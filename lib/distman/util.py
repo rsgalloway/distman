@@ -190,9 +190,8 @@ def copy_directory(
     :return: None
     """
     source = os.path.relpath(source)
-    all_files = get_files(source, all_files=all_files)
 
-    for filepath in all_files:
+    for filepath in get_files(source, all_files=all_files):
         relative = filepath[len(source) + 1 :] if source != "." else filepath
         target = os.path.join(dest, relative)
         copy_file(filepath, target, substitute_tokens, token_env, token_defaults)
