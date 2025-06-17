@@ -42,12 +42,13 @@ from distman.source import GitRepo
 
 @dataclass
 class Target:
-    """Represents a distribution target with its name, source path, and
-    destination path."""
+    """Represents a distribution target with its name, source path, destination
+    path and dist options."""
 
     name: str
     source: str
     dest: str
+    options: Optional[dict] = None
 
 
 def get_source_and_dest(target_dict: dict) -> Optional[Tuple[str, str]]:
@@ -247,7 +248,9 @@ class Distributor(GitRepo):
                         return False
                     os.makedirs(os.path.dirname(dest_resolved), exist_ok=True)
 
-                target_list.append(Target(name, src_path, dest_resolved))
+                target_list.append(
+                    Target(name, src_path, dest_resolved, target_options)
+                )
 
         if not target_list:
             log.info(f"No matching targets in {config.DIST_FILE}")
@@ -306,7 +309,7 @@ class Distributor(GitRepo):
                     source_path,
                     version_dest,
                     all_files=all,
-                    substitute_tokens=target_options.get("substitute_tokens", False),
+                    substitute_tokens=t.options.get("substitute_tokens", False),
                 )
                 if not versiononly:
                     update_symlink(t.dest, version_dest, dryrun)
