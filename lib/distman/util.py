@@ -94,14 +94,43 @@ def check_symlinks() -> bool:
     return True
 
 
-def copy_file(source: str, dest: str) -> None:
+def copy_file(
+    source: str,
+    dest: str,
+    substitute_tokens: bool = False,
+    token_env=None,
+    token_defaults=None,
+) -> None:
     """Copies a file or link. Converts line endings to linux LF, preserving
     original source file mode.
 
+    Substitutes tokens in the file if substitute_tokens is True. Tokens are in
+    the form of {TOKEN} and can be replaced with environment variables or default
+    values.
+
     :param source: Path to source file or link.
     :param dest: Path to destination.
+    :param substitute_tokens: If True, replaces tokens in the file
+        with environment variables or defaults.
+    :param token_env: Optional dictionary of environment variables to use for
+        token substitution.
+    :param token_defaults: Optional dictionary of default values for token
+        substitution.
     :return: None
     """
+    if token_env is None:
+        token_env = os.environ
+    if token_defaults is None:
+        token_defaults = config.DEFAULT_ENV
+
+    def is_binary(file_path):
+        with open(file_path, "rb") as f:
+            chunk = f.read(1024)
+            return b"\0" in chunk
+
+    if substitute_tokens and is_binary(source):
+        raise ValueError(f"Cannot substitute tokens in binary file: {source}")
+
     try:
         destdir = os.path.dirname(dest)
         if not os.path.isdir(destdir):
@@ -115,9 +144,16 @@ def copy_file(source: str, dest: str) -> None:
                 log.error("Failed to create symbolic link: %s" % str(e))
         # copy file, converting line endings to LF
         else:
-            with open(source, "r") as infile, open(dest, "wb") as outfile:
+            with open(source, "r", encoding="utf-8", errors="replace") as infile, open(
+                dest, "w", encoding="utf-8"
+            ) as outfile:
                 for line in infile:
-                    outfile.write((line.rstrip("\r\n") + "\n").encode("utf-8"))
+                    line = line.replace("\r\n", "\n").replace("\r", "\n")
+                    if substitute_tokens:
+                        line = replace_vars(
+                            line, env=token_env, defaults=token_defaults
+                        )
+                    outfile.write(line)
     except UnicodeDecodeError:
         shutil.copy2(source, dest)
     except Exception as e:
@@ -128,13 +164,30 @@ def copy_file(source: str, dest: str) -> None:
             os.chmod(dest, os.stat(source).st_mode)
 
 
-def copy_directory(source: str, dest: str, all_files: bool = False) -> None:
+def copy_directory(
+    source: str,
+    dest: str,
+    all_files: bool = False,
+    substitute_tokens: bool = False,
+    token_env=None,
+    token_defaults=None,
+) -> None:
     """Recursively copies a directory (ignores hidden files).
+
+    Substitutes tokens in the file if substitute_tokens is True. Tokens are in
+    the form of {TOKEN} and can be replaced with environment variables or default
+    values.
 
     :param files: List of file paths to copy.
     :param source: Path to source directory.
     :param dest: Path to destination directory.
     :param all_files: Copy all files, including hidden and ignorable files.
+    :param substitute_tokens: If True, replaces tokens in the file
+        with environment variables or defaults.
+    :param token_env: Optional dictionary of environment variables to use for
+        token substitution.
+    :param token_defaults: Optional dictionary of default values for token
+        substitution.
     :return: None
     """
     source = os.path.relpath(source)
@@ -143,26 +196,45 @@ def copy_directory(source: str, dest: str, all_files: bool = False) -> None:
     for filepath in all_files:
         relative = filepath[len(source) + 1 :] if source != "." else filepath
         target = os.path.join(dest, relative)
-        copy_file(filepath, target)
+        copy_file(filepath, target, substitute_tokens, token_env, token_defaults)
 
 
-def copy_object(source: str, dest: str, all_files: bool = False) -> None:
+def copy_object(
+    source: str,
+    dest: str,
+    all_files: bool = False,
+    substitute_tokens: bool = False,
+    token_env=None,
+    token_defaults=None,
+) -> None:
     """Copies, or links, a file or directory recursively (ignores hidden
     files).
+
+    Substitutes tokens in the file if substitute_tokens is True. Tokens are in
+    the form of {TOKEN} and can be replaced with environment variables or default
+    values.
 
     :param source: Path to source file, link or directory.
     :param dest: Path to destination file or directory.
     :param all_files: Copy all files in a directory, including hidden and
         ignorable files.
+    :param substitute_tokens: If True, replaces tokens in the file
+        with environment variables or defaults.
+    :param token_env: Optional dictionary of environment variables to use for
+        token substitution.
+    :param token_defaults: Optional dictionary of default values for token
+        substitution.
     :return: None
     """
     if os.path.islink(source):
         link_target = os.readlink(source)
         link_object(link_target, dest, link_target)
     elif os.path.isfile(source):
-        copy_file(source, dest)
+        copy_file(source, dest, substitute_tokens, token_env, token_defaults)
     elif os.path.isdir(source):
-        copy_directory(source, dest, all_files=all_files)
+        copy_directory(
+            source, dest, all_files, substitute_tokens, token_env, token_defaults
+        )
     else:
         raise Exception("Source '%s' not found" % source)
 
@@ -568,29 +640,50 @@ def remove_object(path: str, recurse: bool = False) -> None:
         log.error("Error removing '%s': %s", path, e)
 
 
-def replace_vars(pathstr: str) -> str:
-    """Replaces tokens in string with environment variable or config default.
+def replace_vars(
+    s: str,
+    env=None,
+    defaults=None,
+    open_token=config.PATH_TOKEN_OPEN,
+    close_token=config.PATH_TOKEN_CLOSE,
+) -> str:
+    """Replaces {VARS} in the input string with values from the environment or defaults.
 
-    :param pathstr: Path string with tokens.
-    :return: Path string with tokens replaced.
+    :param s: The input string.
+    :param env: Optional override dict for environment variables.
+    :param defaults: Optional dict for fallback values.
+    :param open_token: Start delimiter for token, default is '{'.
+    :param close_token: End delimiter for token, default is '}'.
+    :return: The string with substitutions applied.
     """
-    open_token = config.PATH_TOKEN_OPEN
-    close_token = config.PATH_TOKEN_CLOSE
+    if env is None:
+        env = os.environ
+    if defaults is None:
+        defaults = config.DEFAULT_ENV
 
-    while True:
-        start = pathstr.find(open_token)
-        end = pathstr.find(close_token, start + 1)
-        if start == -1 or end == -1 or end <= start:
+    i = 0
+    result = []
+    while i < len(s):
+        start = s.find(open_token, i)
+        if start == -1:
+            result.append(s[i:])
             break
 
-        var = pathstr[start + 1 : end].strip().upper()
-        value = os.getenv(var, config.DEFAULT_ENV.get(var))
+        end = s.find(close_token, start + len(open_token))
+        if end == -1:
+            raise ValueError(
+                f"Unclosed token starting at position {start}: {s[start:]}"
+            )
+
+        result.append(s[i:start])
+        var_name = s[start + len(open_token) : end].strip().upper()
+        value = env.get(var_name, defaults.get(var_name))
         if value is None:
-            raise ValueError("Cannot resolve environment variable: %s" % var)
+            raise ValueError(f"Cannot resolve environment variable: {var_name}")
+        result.append(value)
+        i = end + len(close_token)
 
-        pathstr = pathstr[:start] + value + pathstr[end + 1 :]
-
-    return pathstr
+    return "".join(result)
 
 
 def yesNo(question: str) -> bool:
