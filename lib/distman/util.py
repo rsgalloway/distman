@@ -177,7 +177,6 @@ def copy_directory(
     the form of {TOKEN} and can be replaced with environment variables or default
     values.
 
-    :param files: List of file paths to copy.
     :param source: Path to source directory.
     :param dest: Path to destination directory.
     :param all_files: Copy all files, including hidden and ignorable files.
