@@ -62,7 +62,7 @@ def get_source_and_dest(target_dict: dict) -> Optional[Tuple[str, str]]:
         return None
     try:
         source = util.normalize_path(source)
-        dest = util.sanitize_path(util.replace_vars(dest, strict=True))
+        dest = util.sanitize_path(util.replace_vars(dest))
     except Exception as e:
         log.error(f"Error resolving paths: {e}")
         return None

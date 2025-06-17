@@ -150,7 +150,7 @@ def copy_file(
                     line = line.replace("\r\n", "\n").replace("\r", "\n")
                     if substitute_tokens:
                         line = replace_vars(
-                            line, env=token_env, defaults=token_defaults
+                            line, env=token_env, defaults=token_defaults, strict=False
                         )
                     outfile.write(line)
     except UnicodeDecodeError:
@@ -307,6 +307,8 @@ def find_matching_versions(
 ) -> List[Tuple[str, int, str]]:
     """Finds all matching versions of a file in the destination directory,
     sorted from oldest to newest.
+
+    [("/path/to/target.1.abc123", 1, "abc123"),]
 
     :param source_path: Path to source file.
     :param dest: Path to destination directory.
@@ -657,7 +659,7 @@ def replace_vars(
     defaults=None,
     open_token=config.PATH_TOKEN_OPEN,
     close_token=config.PATH_TOKEN_CLOSE,
-    strict=False,
+    strict=True,
 ) -> str:
     """Replaces {VARS} in the input string with values from the environment or defaults.
 
