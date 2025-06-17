@@ -62,7 +62,7 @@ def get_source_and_dest(target_dict: dict) -> Optional[Tuple[str, str]]:
         return None
     try:
         source = util.normalize_path(source)
-        dest = util.sanitize_path(util.replace_vars(dest))
+        dest = util.sanitize_path(util.replace_vars(dest, strict=True))
     except Exception as e:
         log.error(f"Error resolving paths: {e}")
         return None
@@ -179,6 +179,7 @@ class Distributor(GitRepo):
 
         changed_files = self.git_changed_files()
         changed_dirs = util.get_common_root_dirs(changed_files)
+        global_options = self.root.get("options", {})
 
         if config.DIST_FILE in changed_files:
             log.warning(f"Uncommitted changes in {config.DIST_FILE}")
@@ -193,6 +194,11 @@ class Distributor(GitRepo):
             if source is None or dest is None:
                 log.info(f"Target {name}: Missing source or dest path")
                 continue
+
+            # get target options
+            target_options = util.get_effective_options(
+                global_options, entry.get("options", {})
+            )
 
             # check for wildcard in source
             if "*" in source:
@@ -296,7 +302,12 @@ class Distributor(GitRepo):
             version_dest = get_version_dest(t.dest, version_num, self.short_head)
 
             if not dryrun:
-                util.copy_object(source_path, version_dest, all_files=all)
+                util.copy_object(
+                    source_path,
+                    version_dest,
+                    all_files=all,
+                    substitute_tokens=target_options.get("substitute_tokens", False),
+                )
                 if not versiononly:
                     update_symlink(t.dest, version_dest, dryrun)
                     log.info(f"Updated: {t.source} => {version_dest}")

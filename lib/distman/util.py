@@ -135,14 +135,13 @@ def copy_file(
         destdir = os.path.dirname(dest)
         if not os.path.isdir(destdir):
             os.makedirs(destdir)
-        # copy link
         if os.path.islink(source):
             linkto = os.readlink(source)
             try:
                 os.symlink(linkto, dest, target_is_directory=os.path.isdir(linkto))
             except OSError as e:
                 log.error("Failed to create symbolic link: %s" % str(e))
-        # copy file, converting line endings to LF
+        # copy file, converting line endings to LF and replacing tokens
         else:
             with open(source, "r", encoding="utf-8", errors="replace") as infile, open(
                 dest, "w", encoding="utf-8"
@@ -316,6 +315,18 @@ def find_matching_versions(
     """
     version_list = version_list or get_file_versions(dest)
     return [v for v in version_list if compare_objects(source_path, v[0])]
+
+
+def get_effective_options(global_options: dict, target_options: dict) -> dict:
+    """Merge global and target-specific options, with target taking precedence.
+
+    :param global_options: Global options dictionary.
+    :param target_options: Target-specific options dictionary.
+    :return: Merged dictionary with effective options.
+    """
+    effective = dict(global_options or {})
+    effective.update(target_options or {})
+    return effective
 
 
 def get_user() -> str:
@@ -646,6 +657,7 @@ def replace_vars(
     defaults=None,
     open_token=config.PATH_TOKEN_OPEN,
     close_token=config.PATH_TOKEN_CLOSE,
+    strict=False,
 ) -> str:
     """Replaces {VARS} in the input string with values from the environment or defaults.
 
@@ -654,6 +666,7 @@ def replace_vars(
     :param defaults: Optional dict for fallback values.
     :param open_token: Start delimiter for token, default is '{'.
     :param close_token: End delimiter for token, default is '}'.
+    :param strict: If True, raises an error if a token cannot be resolved.
     :return: The string with substitutions applied.
     """
     if env is None:
@@ -679,7 +692,11 @@ def replace_vars(
         var_name = s[start + len(open_token) : end].strip().upper()
         value = env.get(var_name, defaults.get(var_name))
         if value is None:
-            raise ValueError(f"Cannot resolve environment variable: {var_name}")
+            if strict:
+                raise ValueError(f"Cannot resolve token: {var_name}")
+            else:
+                log.warning(f"Cannot resolve token: {var_name}")
+            value = f"{open_token}{var_name}{close_token}"
         result.append(value)
         i = end + len(close_token)
 
