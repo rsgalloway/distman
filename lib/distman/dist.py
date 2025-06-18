@@ -42,12 +42,13 @@ from distman.source import GitRepo
 
 @dataclass
 class Target:
-    """Represents a distribution target with its name, source path, and
-    destination path."""
+    """Represents a distribution target with its name, source path, destination
+    path and dist options."""
 
     name: str
     source: str
     dest: str
+    options: Optional[dict] = None
 
 
 def get_source_and_dest(target_dict: dict) -> Optional[Tuple[str, str]]:
@@ -179,6 +180,7 @@ class Distributor(GitRepo):
 
         changed_files = self.git_changed_files()
         changed_dirs = util.get_common_root_dirs(changed_files)
+        global_options = self.root.get("options", {})
 
         if config.DIST_FILE in changed_files:
             log.warning(f"Uncommitted changes in {config.DIST_FILE}")
@@ -194,12 +196,19 @@ class Distributor(GitRepo):
                 log.info(f"Target {name}: Missing source or dest path")
                 continue
 
+            # get target options
+            target_options = util.get_effective_options(
+                global_options, entry.get("options", {})
+            )
+
             # check for wildcard in source
             if "*" in source:
                 for src_path, dst_path in util.expand_wildcard_entry(source, dest):
                     try:
                         dst_resolved = util.sanitize_path(util.replace_vars(dst_path))
-                        target_list.append(Target(name, src_path, dst_resolved))
+                        target_list.append(
+                            Target(name, src_path, dst_resolved, target_options)
+                        )
                     except Exception as e:
                         log.error(f"{e} resolving wildcard target {name}")
                         return False
@@ -241,7 +250,9 @@ class Distributor(GitRepo):
                         return False
                     os.makedirs(os.path.dirname(dest_resolved), exist_ok=True)
 
-                target_list.append(Target(name, src_path, dest_resolved))
+                target_list.append(
+                    Target(name, src_path, dest_resolved, target_options)
+                )
 
         if not target_list:
             log.info(f"No matching targets in {config.DIST_FILE}")
@@ -296,7 +307,12 @@ class Distributor(GitRepo):
             version_dest = get_version_dest(t.dest, version_num, self.short_head)
 
             if not dryrun:
-                util.copy_object(source_path, version_dest, all_files=all)
+                util.copy_object(
+                    source_path,
+                    version_dest,
+                    all_files=all,
+                    substitute_tokens=t.options.get("substitute_tokens", False),
+                )
                 if not versiononly:
                     update_symlink(t.dest, version_dest, dryrun)
                     log.info(f"Updated: {t.source} => {version_dest}")
