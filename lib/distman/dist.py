@@ -230,15 +230,15 @@ class Distributor(GitRepo):
                     log.info(f"Target {name}: Source '{source}' does not exist")
                     return False
 
-                # if (
-                #     not show
-                #     and not force
-                #     and (src_path in changed_files or src_path in changed_dirs)
-                # ):
-                #     log.info(
-                #         f"Target {name}: Source '{source}' has uncommitted changes. Commit or use --force."
-                #     )
-                #     return False
+                if (
+                    not show
+                    and not force
+                    and (src_path in changed_files or src_path in changed_dirs)
+                ):
+                    log.info(
+                        f"Target {name}: Source '{source}' has uncommitted changes. Commit or use --force."
+                    )
+                    return False
 
                 if (
                     not show
