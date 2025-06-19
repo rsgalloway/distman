@@ -143,16 +143,14 @@ def copy_file(
                 log.error("Failed to create symbolic link: %s" % str(e))
         # copy file, converting line endings to LF and replacing tokens
         else:
-            with open(source, "r", encoding="utf-8", errors="replace") as infile, open(
-                dest, "w", encoding="utf-8"
-            ) as outfile:
+            with open(source, "r") as infile, open(dest, "wb") as outfile:
                 for line in infile:
                     line = line.replace("\r\n", "\n").replace("\r", "\n")
                     if substitute_tokens:
                         line = replace_vars(
                             line, env=token_env, defaults=token_defaults, strict=False
                         )
-                    outfile.write(line)
+                    outfile.write((line).encode("utf-8"))
     except UnicodeDecodeError:
         shutil.copy2(source, dest)
     except Exception as e:
@@ -298,6 +296,7 @@ def compare_objects(path1: str, path2: str) -> bool:
     return True
 
 
+# TODO: optimize find_matching_versions to avoid reading all versions
 def find_matching_versions(
     source_path: str,
     dest: str,

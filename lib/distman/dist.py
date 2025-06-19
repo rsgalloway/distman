@@ -230,15 +230,15 @@ class Distributor(GitRepo):
                     log.info(f"Target {name}: Source '{source}' does not exist")
                     return False
 
-                if (
-                    not show
-                    and not force
-                    and (src_path in changed_files or src_path in changed_dirs)
-                ):
-                    log.info(
-                        f"Target {name}: Source '{source}' has uncommitted changes. Commit or use --force."
-                    )
-                    return False
+                # if (
+                #     not show
+                #     and not force
+                #     and (src_path in changed_files or src_path in changed_dirs)
+                # ):
+                #     log.info(
+                #         f"Target {name}: Source '{source}' has uncommitted changes. Commit or use --force."
+                #     )
+                #     return False
 
                 if (
                     not show
@@ -287,7 +287,10 @@ class Distributor(GitRepo):
             source_path = t.source
             version_num = version_list[-1][1] + 1 if version_list else 0
 
-            matches = util.find_matching_versions(source_path, t.dest, version_list)
+            # look for matches within the last 10 versions
+            matches = util.find_matching_versions(
+                source_path, t.dest, version_list[-10:]
+            )
             if matches and not force:
                 match_file, match_num, _ = matches[-1]
                 if os.path.islink(t.dest) and os.readlink(t.dest).endswith(
