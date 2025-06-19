@@ -34,6 +34,7 @@ Contains tests for the util module.
 """
 
 import os
+import filecmp
 import tempfile
 import shutil
 import pytest
@@ -49,19 +50,22 @@ def temp_dir():
 
 
 def test_normalize_path():
-    """Test the normalize_path function to ensure it correctly normalizes paths."""
+    """Test the normalize_path function to ensure it correctly normalizes
+    paths."""
     assert util.normalize_path("./foo/bar/") == os.path.normpath("foo/bar")
     assert util.normalize_path("") == "."
 
 
 def test_sanitize_path():
-    """Test the sanitize_path function to ensure it correctly sanitizes paths."""
+    """Test the sanitize_path function to ensure it correctly sanitizes
+    paths."""
     assert util.sanitize_path("foo\\bar\\") == "foo/bar"
     assert util.sanitize_path("foo/bar/") == "foo/bar"
 
 
 def test_get_path_type(temp_dir):
-    """Test the get_path_type function to ensure it correctly identifies file types."""
+    """Test the get_path_type function to ensure it correctly identifies file
+    types."""
     file_path = os.path.join(temp_dir, "test.txt")
     dir_path = os.path.join(temp_dir, "subdir")
     link_path = os.path.join(temp_dir, "link")
@@ -79,7 +83,8 @@ def test_get_path_type(temp_dir):
 
 
 def test_copy_file_and_compare(temp_dir):
-    """Test the copy_file function to ensure it correctly copies files and compares them."""
+    """Test the copy_file function to ensure it correctly copies files and
+    compares them."""
     src = os.path.join(temp_dir, "src.txt")
     dst = os.path.join(temp_dir, "dst.txt")
 
@@ -94,8 +99,46 @@ def test_copy_file_and_compare(temp_dir):
     assert util.compare_files(src, dst)
 
 
+def test_copy_file_with_token_substitution(temp_dir):
+    """Test the copy_file function with token substitution enabled."""
+    src = os.path.join(temp_dir, "src_with_tokens.txt")
+    dst = os.path.join(temp_dir, "dst_with_tokens.txt")
+
+    # write a file with tokens
+    with open(src, "w") as f:
+        f.write("Hello, {USER}!\nWelcome to {PLACE}.")
+
+    # set environment variables for substitution
+    os.environ["USER"] = "Alice"
+    os.environ["PLACE"] = "Wonderland"
+
+    util.copy_file(src, dst, substitute_tokens=True)
+
+    with open(dst, "r") as f:
+        lines = f.readlines()
+    assert lines == ["Hello, Alice!\n", "Welcome to Wonderland."]
+    assert util.compare_files(src, dst) is False
+
+
+def test_copy_file_binary_file(temp_dir):
+    """Test the copy_find function to ensure it correctly copies binary files."""
+    src = os.path.join(temp_dir, "binary_file.bin")
+    dst = os.path.join(temp_dir, "copied_binary_file.bin")
+
+    # write 1KB of random binary data
+    with open(src, "wb") as f:
+        f.write(os.urandom(1024))
+
+    util.copy_file(src, dst)
+
+    # verify the copied file is the same as the original
+    assert util.compare_files(src, dst)
+    assert filecmp.cmp(src, dst)
+
+
 def test_remove_object(temp_dir):
-    """Test the remove_object function to ensure it correctly removes files and directories."""
+    """Test the remove_object function to ensure it correctly removes files and
+    directories."""
     file_path = os.path.join(temp_dir, "file.txt")
     dir_path = os.path.join(temp_dir, "dir")
     os.mkdir(dir_path)
@@ -111,7 +154,8 @@ def test_remove_object(temp_dir):
 
 
 def test_replace_vars(monkeypatch):
-    """Test the replace_vars function to ensure it correctly replaces environment variables."""
+    """Test the replace_vars function to ensure it correctly replaces environment
+    variables."""
     monkeypatch.setenv("FOO", "bar")
     result = util.replace_vars("path/to/{FOO}/dir")
     assert result == "path/to/bar/dir"
@@ -125,7 +169,8 @@ def test_hashes_equal():
 
 
 def test_get_user(monkeypatch):
-    """Test the get_user function to ensure it correctly retrieves the current user."""
+    """Test the get_user function to ensure it correctly retrieves the current
+    user."""
     monkeypatch.setenv("USER", "alice")
     assert util.get_user() == "alice"
     monkeypatch.delenv("USER")
@@ -134,7 +179,8 @@ def test_get_user(monkeypatch):
 
 
 def test_expand_wildcard_entry(temp_dir):
-    """Test the expand_wildcard_entry function to ensure it correctly expands wildcard patterns."""
+    """Test the expand_wildcard_entry function to ensure it correctly expands
+    wildcard patterns."""
 
     # setup some test files
     os.makedirs(os.path.join(temp_dir, "build"), exist_ok=True)
@@ -166,7 +212,8 @@ def test_expand_wildcard_entry(temp_dir):
 
 
 def test_get_file_versions(temp_dir):
-    """Test the get_file_versions function to ensure it correctly retrieves file versions."""
+    """Test the get_file_versions function to ensure it correctly retrieves file
+    versions."""
     versioned_dir = os.path.join(temp_dir, "versions")
     os.makedirs(versioned_dir, exist_ok=True)
 
@@ -203,7 +250,8 @@ def test_get_file_versions(temp_dir):
 
 
 def test_link_object(temp_dir):
-    """Test the link_object function to ensure it correctly creates symbolic links."""
+    """Test the link_object function to ensure it correctly creates symbolic
+    links."""
     target_file = os.path.join(temp_dir, "target.txt")
     link_file = os.path.join(temp_dir, "link_to_target.txt")
 
