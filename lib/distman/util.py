@@ -128,9 +128,6 @@ def copy_file(
             chunk = f.read(1024)
             return b"\0" in chunk
 
-    if substitute_tokens and is_binary(source):
-        raise ValueError(f"Cannot substitute tokens in binary file: {source}")
-
     try:
         destdir = os.path.dirname(dest)
         if not os.path.isdir(destdir):
@@ -146,15 +143,16 @@ def copy_file(
             with open(source, "r") as infile, open(dest, "wb") as outfile:
                 for line in infile:
                     line = line.replace("\r\n", "\n").replace("\r", "\n")
-                    if substitute_tokens:
+                    if substitute_tokens and not is_binary(source):
                         line = replace_vars(
                             line, env=token_env, defaults=token_defaults, strict=False
                         )
                     outfile.write((line).encode("utf-8"))
-    except UnicodeDecodeError:
+    # if file is binary, or has invalid characters, copy it as is
+    except (UnicodeDecodeError, TypeError, ValueError):
         shutil.copy2(source, dest)
     except Exception as e:
-        log.error("File copy error: %s" % str(e))
+        log.error("File copy error: %s %s", source, str(e))
     finally:
         # preserve original file mode if not a link
         if not os.path.islink(source):
@@ -688,13 +686,11 @@ def replace_vars(
             )
 
         result.append(s[i:start])
-        var_name = s[start + len(open_token) : end].strip().upper()
+        var_name = s[start + len(open_token) : end]
         value = env.get(var_name, defaults.get(var_name))
         if value is None:
             if strict:
                 raise ValueError(f"Cannot resolve token: {var_name}")
-            else:
-                log.warning(f"Cannot resolve token: {var_name}")
             value = f"{open_token}{var_name}{close_token}"
         result.append(value)
         i = end + len(close_token)
