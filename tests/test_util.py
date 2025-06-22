@@ -136,6 +136,23 @@ def test_copy_file_binary_file(temp_dir):
     assert filecmp.cmp(src, dst)
 
 
+def test_copy_file_binary_file_tokens(temp_dir):
+    """Test the copy_find function to ensure it correctly copies binary files,
+    with substitute_tokens=True to make sure file is still copied."""
+    src = os.path.join(temp_dir, "binary_file_2.bin")
+    dst = os.path.join(temp_dir, "copied_binary_file_2.bin")
+
+    # write 1KB of random binary data
+    with open(src, "wb") as f:
+        f.write(os.urandom(1024))
+
+    util.copy_file(src, dst, substitute_tokens=True)
+
+    # verify the copied file is the same as the original
+    assert util.compare_files(src, dst)
+    assert filecmp.cmp(src, dst)
+
+
 def test_remove_object(temp_dir):
     """Test the remove_object function to ensure it correctly removes files and
     directories."""
@@ -159,6 +176,31 @@ def test_replace_vars(monkeypatch):
     monkeypatch.setenv("FOO", "bar")
     result = util.replace_vars("path/to/{FOO}/dir")
     assert result == "path/to/bar/dir"
+
+
+def test_replace_vars_missing_strict():
+    """Test the replace_vars function to ensure it raises a ValueError."""
+    with pytest.raises(ValueError):
+        util.replace_vars("path/to/{MISSING}/dir")
+
+
+def test_replace_vars_missing_not_strict(monkeypatch):
+    """Test the replace_vars function to ensure it does not replace vars that
+    are missing."""
+    result = util.replace_vars("path/to/{MISSING}/dir", strict=False)
+    assert result == "path/to/{MISSING}/dir"
+
+
+def test_replace_vars_binary(temp_dir):
+    """Test the replace_vars function with a binary file."""
+    src = os.path.join(temp_dir, "binary_file_3.bin")
+
+    # write 1KB of random binary data
+    with open(src, "wb") as f:
+        f.write(os.urandom(1024))
+
+    with pytest.raises(TypeError):
+        util.replace_vars(open(src, "rb"))
 
 
 def test_hashes_equal():
