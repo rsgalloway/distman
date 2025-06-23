@@ -1,8 +1,20 @@
 distman
 =======
 
-Distributes files and directories to versioned destinations defined in
-`dist.json` files.
+`distman` is a config-driven deployment tool that performs safe, versioned rollouts
+of software, scripts, and configuration files to predefined locations on the
+filesystem. It’s ideal for environments where deterministic deployments,
+environment-aware transforms, and clean rollback are more important than packaging
+or pip installation.
+
+When used alongside [envstack](https://github.com/rsgalloway/envstack), distman
+can act as a drop-in alternative to virtualenv or Python packaging, enabling you
+to:
+
+- Install Python tools and libraries via source-controlled builds
+- Swap or rollback versions using atomic symlinks
+- Configure and isolate runtime environments using .env files
+- Avoid the overhead of pip/venv/pyproject setups for internal tools or scripts
 
 ## Installation
 
