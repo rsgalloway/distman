@@ -310,17 +310,19 @@ def find_matching_versions(
     :param dest: Path to destination directory.
     :param commit_hash: Optional commit hash to filter versions.
     :param version_list: List of tuples with version file, number and commit.
-    :param force: If True, ignore commit_hash and rescan versions.
+    :param force: Ignore commit_hash and rescan target versions.
     :return: List of tuples with version file, number and commit.
     """
 
-    # if no version list is provided, read all versions from the destination
-    version_list = version_list or get_file_versions(dest)
+    # refresh version_list from the target destination
+    if version_list is None or force:
+        version_list = get_file_versions(dest)
 
-    # look for a specific commit hash
-    for version_file, version_num, version_commit in version_list:
-        if version_commit == commit_hash:
-            return [(version_file, version_num, version_commit)]
+    # match versions by commit hash
+    if not force and commit_hash:
+        for version_file, version_num, version_commit in version_list:
+            if version_commit == commit_hash:
+                return [(version_file, version_num, version_commit)]
 
     # if no commit hash is provided, return all versions that match the source path
     return [v for v in version_list if compare_objects(source_path, v[0])]
