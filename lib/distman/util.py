@@ -320,9 +320,11 @@ def find_matching_versions(
 
     # match versions by commit hash
     if not force and commit_hash:
+        results = []
         for version_file, version_num, version_commit in version_list:
             if version_commit == commit_hash:
-                return [(version_file, version_num, version_commit)]
+                results.append((version_file, version_num, version_commit))
+        return results
 
     # if no commit hash is provided, return all versions that match the source path
     return [v for v in version_list if compare_objects(source_path, v[0])]
