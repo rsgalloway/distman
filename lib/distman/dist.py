@@ -286,7 +286,7 @@ class Distributor(GitRepo):
             source_path = t.source
             version_num = version_list[-1][1] + 1 if version_list else 0
 
-            # look for matches within the last 10 versions
+            # look for matches in existing versions
             matches = util.find_matching_versions(
                 source_path=source_path,
                 dest=t.dest,
@@ -322,9 +322,8 @@ class Distributor(GitRepo):
                 )
                 if not versiononly:
                     update_symlink(t.dest, version_dest, dryrun)
-                    log.info(f"Updated: {t.source} => {version_dest}")
-            elif not versiononly:
-                log.info(f"Updated: {t.source} => {version_dest}")
+
+            log.info(f"Updated: {t.source} => {version_dest}")
 
         if self.repo:
             try:
