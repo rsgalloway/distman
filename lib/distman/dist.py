@@ -289,8 +289,12 @@ class Distributor(GitRepo):
 
             # look for matches within the last 10 versions
             matches = util.find_matching_versions(
-                source_path, t.dest, version_list[-10:]
+                source_path=source_path,
+                dest=t.dest,
+                commit_hash=self.short_head,
+                version_list=version_list,
             )
+
             if matches and not force:
                 match_file, match_num, _ = matches[-1]
                 if os.path.islink(t.dest) and os.readlink(t.dest).endswith(
