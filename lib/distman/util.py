@@ -294,23 +294,39 @@ def compare_objects(path1: str, path2: str) -> bool:
     return True
 
 
-# TODO: optimize find_matching_versions to avoid reading all versions
 def find_matching_versions(
     source_path: str,
     dest: str,
+    commit_hash: Optional[str] = None,
     version_list: Optional[List[Tuple[str, int, str]]] = None,
+    force: Optional[bool] = False,
 ) -> List[Tuple[str, int, str]]:
     """Finds all matching versions of a file in the destination directory,
     sorted from oldest to newest.
 
-    [("/path/to/target.1.abc123", 1, "abc123"),]
+    [("/path/to/dest/versions/target.1.abc123", 1, "abc123"),]
 
     :param source_path: Path to source file.
-    :param dest: Path to destination directory.
+    :param dest: Path to target destination.
+    :param commit_hash: Optional commit hash to filter versions.
     :param version_list: List of tuples with version file, number and commit.
+    :param force: Ignore commit_hash and rescan target versions.
     :return: List of tuples with version file, number and commit.
     """
-    version_list = version_list or get_file_versions(dest)
+
+    # refresh version_list from the target destination
+    if version_list is None or force:
+        version_list = get_file_versions(dest)
+
+    # match versions by commit hash
+    if not force and commit_hash:
+        results = []
+        for version_file, version_num, version_commit in version_list:
+            if version_commit == commit_hash:
+                results.append((version_file, version_num, version_commit))
+        return results
+
+    # if no commit hash is provided, return all versions that match the source path
     return [v for v in version_list if compare_objects(source_path, v[0])]
 
 
@@ -551,10 +567,21 @@ def expand_wildcard_entry(
 
 
 def get_file_versions(target: str) -> List[Tuple[str, int, str]]:
-    """Find the highest numeric version number for a file.
+    """Returns a list of all versions of a file in the versions directory:
 
-    :param target: Path to file to check.
-    :return: List of tuples with version number and file.
+        [("/path/to/dest/versions/target.1.abc123", 1, "abc123"),]
+
+    The versions directory is expected to be located in the same directory as
+    the target file, named as config.DIR_VERSIONS. The files are expected to
+    be named in the format <target>.<version>.<commit>, where <version> is an
+    integer and <commit> is a string. The function returns a list of tuples
+    with the file path, version number, and commit string.
+
+    The version number is extracted from the file name, and the commit string
+    is everything after the version number, up to the next dot or dash.
+
+    :param target: Path to target destination.
+    :return: List of tuples of (file path, version number, commit string).
     """
     filedir = os.path.join(os.path.dirname(target), config.DIR_VERSIONS)
     if not os.path.exists(filedir):

@@ -314,3 +314,53 @@ def test_link_object(temp_dir):
 
     os.remove(link_file)
     os.remove(target_file)
+
+
+def test_find_matching_versions(temp_dir):
+    """Test the find_matching_versions function to ensure it correctly finds
+    matching versions of a file."""
+    source_dir = os.path.join(temp_dir, "src", "source.txt")
+    source_file = os.path.join(source_dir, "source.txt")
+    dest_dir = os.path.join(temp_dir, "dest")
+    target_file = os.path.join(dest_dir, "source.txt")
+    versions_dir = os.path.join(dest_dir, "versions")
+    os.makedirs(source_dir, exist_ok=True)
+    os.makedirs(dest_dir, exist_ok=True)
+    os.makedirs(versions_dir, exist_ok=True)
+
+    # create a source file
+    with open(source_file, "w") as f:
+        f.write("this is the source file")
+
+    # create versioned files in the destination directory
+    versioned_files = [
+        "source.txt.1.commitA",
+        "source.txt.2.commitB",
+        "source.txt.1.commitC",
+        "source.txt.3.commitD",
+        "source.txt.2.commitA",
+    ]
+
+    for version in versioned_files:
+        # commitA files match source file content
+        if version.endswith(".commitA"):
+            content = "this is the source file"
+        # commitB files have different content
+        else:
+            content = f"this is the versioned file for {version}"
+        with open(os.path.join(versions_dir, version), "w") as f:
+            f.write(content)
+
+    # test without commit_hash, should match commitA
+    results = util.find_matching_versions(source_file, target_file)
+    assert len(results) == 2
+
+    # test with a specific commit_hash, should match commitB
+    results = util.find_matching_versions(
+        source_file, target_file, commit_hash="commitB"
+    )
+    assert len(results) == 1
+
+    # test with force option, should match commitA
+    results = util.find_matching_versions(source_file, target_file, force=True)
+    assert len(results) == 2

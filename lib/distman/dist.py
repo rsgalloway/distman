@@ -92,7 +92,6 @@ def update_symlink(dest: str, target: str, dryrun: bool) -> bool:
     if os.path.lexists(dest) and not dryrun:
         util.remove_object(dest)
     if dryrun:
-        log.info("Would link: %s => %s", dest, target)
         return True
     return util.link_object(target, dest, target)
 
@@ -287,10 +286,15 @@ class Distributor(GitRepo):
             source_path = t.source
             version_num = version_list[-1][1] + 1 if version_list else 0
 
-            # look for matches within the last 10 versions
+            # look for matches in existing versions
             matches = util.find_matching_versions(
-                source_path, t.dest, version_list[-10:]
+                source_path=source_path,
+                dest=t.dest,
+                commit_hash=self.short_head,
+                version_list=version_list,
+                force=force,
             )
+
             if matches and not force:
                 match_file, match_num, _ = matches[-1]
                 if os.path.islink(t.dest) and os.readlink(t.dest).endswith(
@@ -318,9 +322,8 @@ class Distributor(GitRepo):
                 )
                 if not versiononly:
                     update_symlink(t.dest, version_dest, dryrun)
-                    log.info(f"Updated: {t.source} => {version_dest}")
-            elif not versiononly:
-                log.info(f"Would update: {t.source} => {version_dest}")
+
+            log.info(f"Updated: {t.source} => {version_dest}")
 
         if self.repo:
             try:

@@ -247,7 +247,7 @@ class GitRepo(Source):
                 return True
 
         except GitCommandError as err:
-            log.error("Git error checking remote branch: %s", str(err))
+            log.warning("Warning: branch '%s' not found on remote.", self.branch_name)
             return True
         except Exception as err:
             log.error("Unexpected error checking remote branch: %s", str(err))
