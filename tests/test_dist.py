@@ -324,9 +324,10 @@ def test_change_file_version_with_valid_target(
     mock_distributor, mocker, mock_dist_dict
 ):
     """Test the change_file_version method with a valid target."""
-    mocker.patch("distman.util.get_file_versions", return_value=[
-        ("/path/to/test_target.1.abc123", 1, "abc123")
-    ])
+    mocker.patch(
+        "distman.util.get_file_versions",
+        return_value=[("/path/to/test_target.1.abc123", 1, "abc123")],
+    )
     dist = Distributor()
     dist.root = mock_dist_dict
     result = dist.change_file_version("test_target", target_version=1, dryrun=True)

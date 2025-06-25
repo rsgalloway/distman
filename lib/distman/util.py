@@ -304,10 +304,10 @@ def find_matching_versions(
     """Finds all matching versions of a file in the destination directory,
     sorted from oldest to newest.
 
-    [("/path/to/target.1.abc123", 1, "abc123"),]
+    [("/path/to/dest/versions/target.1.abc123", 1, "abc123"),]
 
     :param source_path: Path to source file.
-    :param dest: Path to destination directory.
+    :param dest: Path to target destination.
     :param commit_hash: Optional commit hash to filter versions.
     :param version_list: List of tuples with version file, number and commit.
     :param force: Ignore commit_hash and rescan target versions.
@@ -569,7 +569,7 @@ def expand_wildcard_entry(
 def get_file_versions(target: str) -> List[Tuple[str, int, str]]:
     """Returns a list of all versions of a file in the versions directory:
 
-        [("/path/to/target.1.abc123", 1, "abc123"),]
+        [("/path/to/dest/versions/target.1.abc123", 1, "abc123"),]
 
     The versions directory is expected to be located in the same directory as
     the target file, named as config.DIR_VERSIONS. The files are expected to
@@ -580,7 +580,7 @@ def get_file_versions(target: str) -> List[Tuple[str, int, str]]:
     The version number is extracted from the file name, and the commit string
     is everything after the version number, up to the next dot or dash.
 
-    :param target: Path to file to check.
+    :param target: Path to target destination.
     :return: List of tuples of (file path, version number, commit string).
     """
     filedir = os.path.join(os.path.dirname(target), config.DIR_VERSIONS)
