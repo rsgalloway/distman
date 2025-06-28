@@ -178,10 +178,8 @@ class Distributor(GitRepo):
         if not self.root:
             log.error(f"{config.DIST_FILE} not found or invalid")
             return False
-
         if not self.read_git_info():
             return False
-
         if verbose:
             self.log_distribution_info()
 
@@ -368,15 +366,35 @@ class Distributor(GitRepo):
             return False
         if dryrun:
             log.info(config.DRYRUN_MESSAGE)
+
         any_found = False
+        target_list = []
+
         for target_name, target_dict in targets_node.items():
             if should_skip_target(target_name, target):
                 continue
             pair = get_source_and_dest(target_dict)
             if not pair:
                 continue
+
             source, dest = pair
             any_found = True
+
+            # check for wildcard in source
+            if "*" in source:
+                for src_path, dst_path in util.expand_wildcard_entry(source, dest):
+                    target_type = util.get_path_type(src_path)[0]
+                    try:
+                        dest = util.sanitize_path(util.replace_vars(dst_path))
+                        target_list.append((src_path, dest))
+                    except Exception as e:
+                        log.error(f"{e} resolving wildcard target {target}")
+                        return False
+
+            else:
+                target_list.append((source, dest))
+
+        for source, dest in target_list:
             version_list = util.get_file_versions(dest)
             if not version_list:
                 log.info(
@@ -390,8 +408,10 @@ class Distributor(GitRepo):
             else:
                 update_symlink(dest, latest_ver, dryrun)
                 log.info(f"{source} ={target_type}> {latest_ver}")
+
         if not any_found:
             log.info("No targets found to reset")
+
         return any_found
 
     def show_distribution_info(
