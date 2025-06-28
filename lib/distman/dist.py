@@ -93,7 +93,8 @@ def update_symlink(dest: str, target: str, dryrun: bool) -> bool:
         util.remove_object(dest)
     if dryrun:
         return True
-    return util.link_object(target, dest, target)
+    version_dest = util.get_version_dest(target)
+    return util.link_object(version_dest, dest, target)
 
 
 def get_version_dest(dest: str, version_num: int, short_head: Optional[str]) -> str:

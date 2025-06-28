@@ -39,7 +39,7 @@ import shutil
 import pytest
 from unittest.mock import patch
 
-from distman import config, Distributor
+from distman import config, Distributor, util
 from distman.dist import (
     get_source_and_dest,
     confirm,
@@ -152,23 +152,6 @@ def test_confirm_yesNo():
         assert result is True
 
 
-def test_update_symlink_existing_link():
-    """ "Test the update_symlink function when the destination exists."""
-    dest = "path/to/existing/link"
-    target = "path/to/target"
-    dryrun = False
-
-    # mock the necessary functions
-    with patch("os.path.lexists", return_value=True), patch(
-        "distman.util.remove_object"
-    ) as mock_remove, patch("distman.util.link_object", return_value=True) as mock_link:
-        result = update_symlink(dest, target, dryrun)
-
-        mock_remove.assert_called_once_with(dest)
-        mock_link.assert_called_once_with(target, dest, target)
-        assert result is True
-
-
 def test_update_symlink_dryrun():
     """Test the update_symlink function when dryrun is True and the destination exists."""
     dest = "path/to/existing/link"
@@ -184,6 +167,23 @@ def test_update_symlink_dryrun():
         assert result is True
 
 
+def test_update_symlink_existing_link():
+    """ "Test the update_symlink function when the destination exists."""
+    dest = "path/to/existing/link"
+    target = "path/to/target"
+    dryrun = False
+
+    with patch("os.path.lexists", return_value=True), patch(
+        "distman.util.remove_object"
+    ) as mock_remove, patch("distman.util.link_object", return_value=True) as mock_link:
+        result = update_symlink(dest, target, dryrun)
+
+        mock_remove.assert_called_once_with(dest)
+        version_dest = util.get_version_dest(target)
+        mock_link.assert_called_once_with(version_dest, dest, target)
+        assert result is True
+
+
 def test_update_symlink_no_existing_link():
     """Test the update_symlink function when the destination does not exist."""
     dest = "path/to/nonexistent/link"
@@ -195,7 +195,8 @@ def test_update_symlink_no_existing_link():
     ) as mock_link:
         result = update_symlink(dest, target, dryrun)
 
-        mock_link.assert_called_once_with(target, dest, target)
+        version_dest = util.get_version_dest(target)
+        mock_link.assert_called_once_with(version_dest, dest, target)
         assert result is True
 
 

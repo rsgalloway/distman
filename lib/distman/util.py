@@ -435,6 +435,20 @@ def sanitize_path(path: str) -> str:
     return path.replace("\\", "/").rstrip("/") if path else path
 
 
+def get_version_dest(target: str) -> str:
+    """Returns the version destination directory for a given target file.
+
+    The version destination is expected to be in the same directory as the
+    target file, named as config.DIR_VERSIONS, e.g.:
+
+        .../lib/python/distman -> versions/distman.1.0e98327
+
+    :param target: Path to target file.
+    :return: Path to the version destination.
+    """
+    return os.path.join(config.DIR_VERSIONS, os.path.basename(target))
+
+
 def get_link_full_path(link: str) -> str:
     """Returns the full path of a symbolic link.
 
