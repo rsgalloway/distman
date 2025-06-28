@@ -168,7 +168,7 @@ def test_update_symlink_dryrun():
 
 
 def test_update_symlink_existing_link():
-    """ "Test the update_symlink function when the destination exists."""
+    """Test the update_symlink function when the destination exists."""
     dest = "path/to/existing/link"
     target = "path/to/target"
     dryrun = False
