@@ -43,7 +43,7 @@ from distman.source import GitRepo
 @dataclass
 class Target:
     """Represents a distribution target with its name, source path, destination
-    path and dist options."""
+    path, type (folder, directory or link) and dist options."""
 
     name: str
     source: str
@@ -174,6 +174,9 @@ class Distributor(GitRepo):
 
         if not self.read_git_info():
             return False
+
+        if verbose:
+            self.log_distribution_info()
 
         targets_node = self.get_targets()
         if not targets_node:
@@ -403,7 +406,8 @@ class Distributor(GitRepo):
             if not os.path.lexists(dest):
                 log.info(f"Missing: {dest}")
             else:
-                log.info(f"{source} => {os.readlink(dest)}:")
+                target_type = util.get_path_type(source)[0]
+                log.info(f"{source} ={target_type}> {os.readlink(dest)}:")
         else:
             log.info(f"{source}:")
         for version_file, version_num, version_commit in version_list:
