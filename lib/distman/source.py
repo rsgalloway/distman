@@ -105,7 +105,7 @@ class Source(object):
 
         self.author = self.root.get(config.TAG_AUTHOR, util.get_user())
 
-        version = int(self.root.get(config.TAG_VERSION, 0))
+        version = int(self.root.get(config.TAG_VERSION, config.DIST_FILE_VERSION))
         if version < config.DIST_FILE_VERSION:
             log.warning(
                 "WARNING: Old dist file version: %s (current %d)",
