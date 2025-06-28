@@ -561,7 +561,9 @@ class Distributor(GitRepo):
         if dryrun:
             log.info(config.DRYRUN_MESSAGE)
 
+        target_list = []
         any_found = False
+
         for target_name, target_dict in targets_node.items():
             if should_skip_target(target_name, target):
                 continue
@@ -571,59 +573,74 @@ class Distributor(GitRepo):
                 continue
             source, dest = pair
 
-            version_list = util.get_file_versions(dest)
-            if version_list:
-                if target_version is not None:
-                    version_list = [
-                        v for v in version_list if int(v[1]) == int(target_version)
-                    ]
-                elif target_commit:
-                    version_list = [
-                        v
-                        for v in version_list
-                        if util.hashes_equal(target_commit, v[2])
-                    ]
+            # check for wildcard in source
+            if "*" in source:
+                for src_path, dst_path in util.expand_wildcard_entry(source, dest):
+                    target_type = util.get_path_type(src_path)[0]
+                    try:
+                        dest = util.sanitize_path(util.replace_vars(dst_path))
+                        target_list.append((src_path, dest))
+                    except Exception as e:
+                        log.error(f"{e} resolving wildcard target {target}")
+                        return False
 
-            if version_list:
-                if len(version_list) == 1:
-                    question = f"Delete {version_list[0][0]}?"
-                else:
-                    question = f"Delete all {len(version_list)} versions for target '{target_name}'?"
-                if not confirm(question, yes, dryrun):
-                    continue
             else:
-                continue
+                target_list.append((source, dest))
 
-            any_found = True
-            distinfo = util.get_dist_info(dest=dest)
-            link_path = util.get_link_full_path(dest)
+            for source, dest in target_list:
+                version_list = util.get_file_versions(dest)
+                if version_list:
+                    if target_version is not None:
+                        version_list = [
+                            v for v in version_list if int(v[1]) == int(target_version)
+                        ]
+                    elif target_commit:
+                        version_list = [
+                            v
+                            for v in version_list
+                            if util.hashes_equal(target_commit, v[2])
+                        ]
 
-            if (target_commit or target_version) and link_path in [
-                v[0] for v in version_list
-            ]:
-                log.warning(
-                    f"Cannot delete target '{target_name}' because it is linked to the version being deleted"
-                )
-                continue
-
-            if target_commit is None and target_version is None:
-                if os.path.lexists(dest):
-                    log.info(f"Delete: {dest}")
-                    if not dryrun:
-                        util.remove_object(dest)
+                if version_list:
+                    if len(version_list) == 1:
+                        question = f"Delete {version_list[0][0]}?"
+                    else:
+                        question = f"Delete all {len(version_list)} versions for target '{target_name}'?"
+                    if not confirm(question, yes, dryrun):
+                        continue
                 else:
-                    log.info(f"Missing: {dest}")
-                if os.path.lexists(distinfo):
-                    log.info(f"Delete: {distinfo}")
-                    if not dryrun:
-                        os.remove(distinfo)
-                else:
-                    log.info(f"Missing: {distinfo}")
+                    continue
 
-            for verfile, _, _ in version_list:
-                log.info(f"Delete: {verfile}")
-                if not dryrun:
-                    util.remove_object(verfile, recurse=True)
+                any_found = True
+                distinfo = util.get_dist_info(dest=dest)
+                link_path = util.get_link_full_path(dest)
+
+                if (target_commit or target_version) and link_path in [
+                    v[0] for v in version_list
+                ]:
+                    log.warning(
+                        f"Cannot delete target '{target_name}' because it is linked to the version being deleted"
+                    )
+                    continue
+
+                if target_commit is None and target_version is None:
+                    if os.path.lexists(dest):
+                        log.info(f"Delete: {dest}")
+                        if not dryrun:
+                            util.remove_object(dest)
+                    else:
+                        log.info(f"Missing: {dest}")
+                    if os.path.lexists(distinfo):
+                        log.info(f"Delete: {distinfo}")
+                        if not dryrun:
+                            os.remove(distinfo)
+                    else:
+                        log.info(f"Missing: {distinfo}")
+
+                for verfile, _, _ in version_list:
+                    log.info(f"Delete: {verfile}")
+                    if not dryrun:
+                        util.remove_object(verfile, recurse=True)
 
         if not any_found:
             log.info("No targets found to delete")
