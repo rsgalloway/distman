@@ -576,7 +576,6 @@ class Distributor(GitRepo):
             # check for wildcard in source
             if "*" in source:
                 for src_path, dst_path in util.expand_wildcard_entry(source, dest):
-                    target_type = util.get_path_type(src_path)[0]
                     try:
                         dest = util.sanitize_path(util.replace_vars(dst_path))
                         target_list.append((src_path, dest))
@@ -605,7 +604,7 @@ class Distributor(GitRepo):
                     if len(version_list) == 1:
                         question = f"Delete {version_list[0][0]}?"
                     else:
-                        question = f"Delete all {len(version_list)} versions for target '{target_name}'?"
+                        question = f"Delete {len(version_list)} versions for target '{target_name}'?"
                     if not confirm(question, yes, dryrun):
                         continue
                 else:
