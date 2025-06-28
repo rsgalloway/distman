@@ -504,6 +504,7 @@ class Distributor(GitRepo):
                 log.info(f"Target {target_name}: No versioned files found for {source}")
                 continue
 
+            dest_target_version = target_version
             if isinstance(target_version, int) and target_version < 0:
                 if abs(target_version) > len(version_list) - 1:
                     log.warning(
@@ -573,7 +574,9 @@ class Distributor(GitRepo):
             version_list = util.get_file_versions(dest)
             if version_list:
                 if target_version is not None:
-                    version_list = [v for v in version_list if v[1] == target_version]
+                    version_list = [
+                        v for v in version_list if int(v[1]) == int(target_version)
+                    ]
                 elif target_commit:
                     version_list = [
                         v
@@ -581,7 +584,10 @@ class Distributor(GitRepo):
                         if util.hashes_equal(target_commit, v[2])
                     ]
 
-            question = f"Delete target '{target_name}' ({source} => {dest}) and {len(version_list)} versions?"
+            if len(version_list) == 1:
+                question = f"Delete {version_list[0][0]}?"
+            else:
+                question = f"Delete all {len(version_list)} versions for target '{target_name}'?"
             if not confirm(question, yes, dryrun):
                 continue
 
@@ -599,20 +605,20 @@ class Distributor(GitRepo):
 
             if target_commit is None and target_version is None:
                 if os.path.lexists(dest):
-                    log.info(f"Deleting: {dest}")
+                    log.info(f"Delete: {dest}")
                     if not dryrun:
                         util.remove_object(dest)
                 else:
                     log.info(f"Missing: {dest}")
                 if os.path.lexists(distinfo):
-                    log.info(f"Deleting: {distinfo}")
+                    log.info(f"Delete: {distinfo}")
                     if not dryrun:
                         os.remove(distinfo)
                 else:
                     log.info(f"Missing: {distinfo}")
 
             for verfile, _, _ in version_list:
-                log.info(f"Deleting: {verfile}")
+                log.info(f"Delete: {verfile}")
                 if not dryrun:
                     util.remove_object(verfile, recurse=True)
 
