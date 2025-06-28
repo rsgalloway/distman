@@ -48,6 +48,7 @@ class Target:
     name: str
     source: str
     dest: str
+    type: str
     options: Optional[dict] = None
 
 
@@ -204,10 +205,17 @@ class Distributor(GitRepo):
             # check for wildcard in source
             if "*" in source:
                 for src_path, dst_path in util.expand_wildcard_entry(source, dest):
+                    target_type = util.get_path_type(src_path)[0]
                     try:
                         dst_resolved = util.sanitize_path(util.replace_vars(dst_path))
                         target_list.append(
-                            Target(name, src_path, dst_resolved, target_options)
+                            Target(
+                                name,
+                                src_path,
+                                dst_resolved,
+                                target_type,
+                                target_options,
+                            )
                         )
                     except Exception as e:
                         log.error(f"{e} resolving wildcard target {name}")
@@ -250,8 +258,9 @@ class Distributor(GitRepo):
                         return False
                     os.makedirs(os.path.dirname(dest_resolved), exist_ok=True)
 
+                target_type = util.get_path_type(src_path)[0]
                 target_list.append(
-                    Target(name, src_path, dest_resolved, target_options)
+                    Target(name, src_path, dest_resolved, target_type, target_options)
                 )
 
         if not target_list:
@@ -301,15 +310,18 @@ class Distributor(GitRepo):
                 if os.path.islink(t.dest) and os.readlink(t.dest).endswith(
                     os.path.basename(match_file)
                 ):
-                    log.info(f"Unchanged: {t.source} => {match_file}")
+                    log.info(f"Unchanged: {t.source} ={t.type}> {match_file}")
+                    continue
+                if versiononly and not force:
+                    log.info(f"Match: {t.source} ={t.type}> {match_file}")
                     continue
                 if confirm(
-                    f"Target: {t.source}: Found match {match_num}: {match_file}. Update link?",
+                    f"Match: {t.source} ={t.type}> {match_file}. Update link?",
                     yes,
                     dryrun,
                 ):
                     update_symlink(t.dest, match_file, dryrun)
-                    log.info(f"Updated: {t.source} => {match_file}")
+                    log.info(f"Updated: {t.source} ={t.type}> {match_file}")
                     continue
 
             version_dest = get_version_dest(t.dest, version_num, self.short_head)
@@ -324,7 +336,7 @@ class Distributor(GitRepo):
                 if not versiononly:
                     update_symlink(t.dest, version_dest, dryrun)
 
-            log.info(f"Updated: {t.source} => {version_dest}")
+            log.info(f"Updated: {t.source} ={t.type}> {version_dest}")
 
         if self.repo:
             try:
