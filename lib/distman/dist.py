@@ -43,7 +43,14 @@ from distman.source import GitRepo
 @dataclass
 class Target:
     """Represents a distribution target with its name, source path, destination
-    path, type (folder, directory or link) and dist options."""
+    path, type (folder, directory or link) and dist options.
+
+    name: The name of the target.
+    source: The source path of the target.
+    dest: The destination path of the target.
+    type: The type of the target (e.g., file, directory, link).
+    options: Optional dictionary of additional options for the target.
+    """
 
     name: str
     source: str
