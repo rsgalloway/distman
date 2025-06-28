@@ -473,6 +473,8 @@ class Distributor(GitRepo):
             log.info(config.DRYRUN_MESSAGE)
 
         any_found = False
+        target_list = []
+
         for target_name, target_dict in targets_node.items():
             if should_skip_target(target_name, target):
                 continue
@@ -482,11 +484,24 @@ class Distributor(GitRepo):
                 continue
             source, dest = pair
 
+            # check for wildcard in source
+            if "*" in source:
+                for src_path, dst_path in util.expand_wildcard_entry(source, dest):
+                    target_type = util.get_path_type(src_path)[0]
+                    try:
+                        dest = util.sanitize_path(util.replace_vars(dst_path))
+                        target_list.append((src_path, dest))
+                    except Exception as e:
+                        log.error(f"{e} resolving wildcard target {target}")
+                        return False
+
+            else:
+                target_list.append((source, dest))
+
+        for source, dest in target_list:
             version_list = util.get_file_versions(dest)
             if not version_list:
-                log.info(
-                    f"Target {target_name}: No versioned files found for '{source}'"
-                )
+                log.info(f"Target {target_name}: No versioned files found for {source}")
                 continue
 
             if isinstance(target_version, int) and target_version < 0:
@@ -495,32 +510,27 @@ class Distributor(GitRepo):
                         f"Requested to roll back {abs(target_version)} versions but only {len(version_list) - 1} exist for {source}"
                     )
                     continue
-                target_version = version_list[target_version - 1][1]
+                # get the version number to roll back to for this source
+                dest_target_version = version_list[target_version - 1][1]
 
             matched = False
             for verfile, vernum, vercommit in version_list:
                 if (target_commit and util.hashes_equal(target_commit, vercommit)) or (
-                    target_version is not None and vernum == target_version
+                    target_version is not None and vernum == dest_target_version
                 ):
                     any_found = True
                     matched = True
                     target_type = util.get_path_type(verfile)[0]
-                    if dryrun:
-                        log.info(f"{source} ={target_type}> {verfile}")
-                    else:
+                    log.info(f"{source} ={target_type}> {verfile}")
+                    if not dryrun:
                         update_symlink(dest, verfile, dryrun)
-                        log.info(f"{source} ={target_type}> {verfile}")
                     break
 
             if not matched:
                 if target_commit:
-                    log.info(
-                        f"Target commit {target_commit} not found for target {target_name}"
-                    )
+                    log.info(f"Target commit {target_commit} not found for {source}")
                 else:
-                    log.info(
-                        f"Target version {target_version} not found for target {target_name}"
-                    )
+                    log.info(f"Target version {target_version} not found for {source}")
 
         if not any_found:
             log.info("No targets found to change version")
