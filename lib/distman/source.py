@@ -74,6 +74,11 @@ class Source(object):
         """Returns the targets defined in the dist file."""
         return self.root.get(config.TAG_TARGETS) if self.root else None
 
+    def log_distribution_info(self) -> None:
+        """Logs source information."""
+        log.info("Name: %s", self.name)
+        log.info("Path: %s", self.path)
+
     def read_dist_file(self, directory: str = ".") -> bool:
         """Reads the dist file from the specified directory.
 
@@ -100,7 +105,7 @@ class Source(object):
 
         self.author = self.root.get(config.TAG_AUTHOR, util.get_user())
 
-        version = int(self.root.get(config.TAG_VERSION, 0))
+        version = int(self.root.get(config.TAG_VERSION, config.DIST_FILE_VERSION))
         if version < config.DIST_FILE_VERSION:
             log.warning(
                 "WARNING: Old dist file version: %s (current %d)",
@@ -108,7 +113,7 @@ class Source(object):
                 config.DIST_FILE_VERSION,
             )
         elif version > config.DIST_FILE_VERSION:
-            log.error(
+            log.warning(
                 "ERROR: This dist file is newer than supported version: %s (current %d)",
                 version,
                 config.DIST_FILE_VERSION,
@@ -116,7 +121,7 @@ class Source(object):
             self.root = None
             return False
 
-        log.info("Author: %s", self.author)
+        log.debug("Author: %s", self.author)
         return True
 
 
@@ -185,6 +190,13 @@ class GitRepo(Source):
             return self.repo.remotes[0].url
         return self.path
 
+    def log_distribution_info(self) -> None:
+        """Logs source repo information."""
+        log.info("Name: %s", self.name)
+        log.info("Path: %s", self.path)
+        log.info("Branch: %s", self.branch_name)
+        log.info("Head: %s (%s)", self.head, self.short_head)
+
     def read_git_info(self) -> bool:
         """Reads the git repository information and initializes the object."""
         self.branch_name = ""
@@ -208,7 +220,7 @@ class GitRepo(Source):
                 branch = self.repo.active_branch
                 self.branch_name = branch.name
                 if self.branch_name not in config.MAIN_BRANCHES:
-                    log.warning("Warning: Not on a main branch")
+                    log.warning("Warning: Not on a main branch: %s", self.branch_name)
             except (TypeError, AttributeError):
                 log.warning("Warning: Detached HEAD or no active branch")
 
@@ -217,12 +229,6 @@ class GitRepo(Source):
             self.repo = None
         except Exception as e:
             log.warning("Error reading git repo: %s", str(e))
-
-        log.info("Name: %s", self.name)
-        log.info("Path: %s", self.path)
-        if self.repo and self.branch_name:
-            log.info("Branch: %s", self.branch_name)
-            log.info("Head: %s (%s)", self.head, self.short_head)
 
         return True
 

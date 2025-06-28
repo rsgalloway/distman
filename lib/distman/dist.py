@@ -43,11 +43,19 @@ from distman.source import GitRepo
 @dataclass
 class Target:
     """Represents a distribution target with its name, source path, destination
-    path and dist options."""
+    path, type (folder, directory or link) and dist options.
+
+    name: The name of the target.
+    source: The source path of the target.
+    dest: The destination path of the target.
+    type: The type of the target (e.g., file, directory, link).
+    options: Optional dictionary of additional options for the target.
+    """
 
     name: str
     source: str
     dest: str
+    type: str
     options: Optional[dict] = None
 
 
@@ -93,7 +101,8 @@ def update_symlink(dest: str, target: str, dryrun: bool) -> bool:
         util.remove_object(dest)
     if dryrun:
         return True
-    return util.link_object(target, dest, target)
+    version_dest = util.get_version_dest(target)
+    return util.link_object(version_dest, dest, target)
 
 
 def get_version_dest(dest: str, version_num: int, short_head: Optional[str]) -> str:
@@ -173,6 +182,9 @@ class Distributor(GitRepo):
         if not self.read_git_info():
             return False
 
+        if verbose:
+            self.log_distribution_info()
+
         targets_node = self.get_targets()
         if not targets_node:
             return False
@@ -203,10 +215,17 @@ class Distributor(GitRepo):
             # check for wildcard in source
             if "*" in source:
                 for src_path, dst_path in util.expand_wildcard_entry(source, dest):
+                    target_type = util.get_path_type(src_path)[0]
                     try:
                         dst_resolved = util.sanitize_path(util.replace_vars(dst_path))
                         target_list.append(
-                            Target(name, src_path, dst_resolved, target_options)
+                            Target(
+                                name,
+                                src_path,
+                                dst_resolved,
+                                target_type,
+                                target_options,
+                            )
                         )
                     except Exception as e:
                         log.error(f"{e} resolving wildcard target {name}")
@@ -249,8 +268,9 @@ class Distributor(GitRepo):
                         return False
                     os.makedirs(os.path.dirname(dest_resolved), exist_ok=True)
 
+                target_type = util.get_path_type(src_path)[0]
                 target_list.append(
-                    Target(name, src_path, dest_resolved, target_options)
+                    Target(name, src_path, dest_resolved, target_type, target_options)
                 )
 
         if not target_list:
@@ -300,15 +320,18 @@ class Distributor(GitRepo):
                 if os.path.islink(t.dest) and os.readlink(t.dest).endswith(
                     os.path.basename(match_file)
                 ):
-                    log.info(f"Unchanged: {t.source} => {match_file}")
+                    log.info(f"Unchanged: {t.source} ={t.type}> {match_file}")
+                    continue
+                if versiononly and not force:
+                    log.info(f"Match: {t.source} ={t.type}> {match_file}")
                     continue
                 if confirm(
-                    f"Target: {t.source}: Found match {match_num}: {match_file}. Update link?",
+                    f"Match: {t.source} ={t.type}> {match_file}. Update link?",
                     yes,
                     dryrun,
                 ):
                     update_symlink(t.dest, match_file, dryrun)
-                    log.info(f"Updated: {t.source} => {match_file}")
+                    log.info(f"Updated: {t.source} ={t.type}> {match_file}")
                     continue
 
             version_dest = get_version_dest(t.dest, version_num, self.short_head)
@@ -323,7 +346,7 @@ class Distributor(GitRepo):
                 if not versiononly:
                     update_symlink(t.dest, version_dest, dryrun)
 
-            log.info(f"Updated: {t.source} => {version_dest}")
+            log.info(f"Updated: {t.source} ={t.type}> {version_dest}")
 
         if self.repo:
             try:
@@ -390,7 +413,8 @@ class Distributor(GitRepo):
             if not os.path.lexists(dest):
                 log.info(f"Missing: {dest}")
             else:
-                log.info(f"{source} => {os.readlink(dest)}:")
+                target_type = util.get_path_type(source)[0]
+                log.info(f"{source} ={target_type}> {os.readlink(dest)}:")
         else:
             log.info(f"{source}:")
         for version_file, version_num, version_commit in version_list:
