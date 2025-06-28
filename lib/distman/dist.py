@@ -584,11 +584,14 @@ class Distributor(GitRepo):
                         if util.hashes_equal(target_commit, v[2])
                     ]
 
-            if len(version_list) == 1:
-                question = f"Delete {version_list[0][0]}?"
+            if version_list:
+                if len(version_list) == 1:
+                    question = f"Delete {version_list[0][0]}?"
+                else:
+                    question = f"Delete all {len(version_list)} versions for target '{target_name}'?"
+                if not confirm(question, yes, dryrun):
+                    continue
             else:
-                question = f"Delete all {len(version_list)} versions for target '{target_name}'?"
-            if not confirm(question, yes, dryrun):
                 continue
 
             any_found = True
