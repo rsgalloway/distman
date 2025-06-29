@@ -24,11 +24,11 @@ The easiest way to install:
 $ pip install -U distman
 ```
 
-Alternatively, use distman to dist to a deployment area using options defined
-in the `dist.json` and `distman.env` environment stack files:
+Alternatively, use the provided Makefile to build the requirements and dist to
+the deplyoment area:
 
 ```bash
-$ distman [-d]
+$ make install
 ```
 
 Files, directories and links can be distributed from any folder or git repo

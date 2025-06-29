@@ -5,6 +5,7 @@
 # Usage:
 #   make           - Builds targets
 #   make clean     - Removes all build artifacts
+#   make build     - Builds the requirements for Linux
 #   make install   - Installs the build artifacts using distman
 #
 # Requirements:
@@ -19,23 +20,19 @@ BUILD_CMD := pip install -r requirements.txt -t build
 # Target to build for Linux
 build: clean
 	$(BUILD_CMD)
-
-# Combined target to build for both platforms
-all: build
+	rm -rf build/bin
 
 # Clean target to remove the build directory
 clean:
 	rm -rf build
 
 # Install target to install the builds using distman
-# using --force allows uncommitted changes to be disted
 dryrun:
-	distman --force --dryrun
+	distman --dryrun
 
 # Install target to install the builds using distman
-# using --force allows uncommitted changes to be disted
 install: build
-	distman --force --yes
+	distman --yes
 
 # Phony targets
 .PHONY: build dryrun install clean
