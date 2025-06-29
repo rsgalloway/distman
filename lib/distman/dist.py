@@ -101,7 +101,7 @@ def update_symlink(dest: str, target: str, dryrun: bool) -> bool:
         util.remove_object(dest)
     if dryrun:
         return True
-    version_dest = util.get_version_dest(target)
+    version_dest = os.path.join(config.DIR_VERSIONS, os.path.basename(target))
     return util.link_object(version_dest, dest, target)
 
 
@@ -114,7 +114,7 @@ def get_version_dest(dest: str, version_num: int, short_head: Optional[str]) -> 
     :return: The versioned destination path.
     """
     versions_dir = os.path.join(os.path.dirname(dest), config.DIR_VERSIONS)
-    os.makedirs(versions_dir, exist_ok=True)
+    os.makedirs(versions_dir, exist_ok=True)  # TODO: move this
     version_dest = os.path.join(
         versions_dir, os.path.basename(dest) + f".{version_num}"
     )

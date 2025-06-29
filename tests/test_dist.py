@@ -179,7 +179,7 @@ def test_update_symlink_existing_link():
         result = update_symlink(dest, target, dryrun)
 
         mock_remove.assert_called_once_with(dest)
-        version_dest = util.get_version_dest(target)
+        version_dest = util.get_rel_version_path(target)
         mock_link.assert_called_once_with(version_dest, dest, target)
         assert result is True
 
@@ -195,7 +195,7 @@ def test_update_symlink_no_existing_link():
     ) as mock_link:
         result = update_symlink(dest, target, dryrun)
 
-        version_dest = util.get_version_dest(target)
+        version_dest = util.get_rel_version_path(target)
         mock_link.assert_called_once_with(version_dest, dest, target)
         assert result is True
 
@@ -337,6 +337,7 @@ def test_change_file_version_with_valid_target(
 
 def test_delete_target_with_existing_target(mock_distributor, mocker, mock_dist_dict):
     """Test the delete_target method with an existing target."""
+    mocker.patch("os.path.exists", return_value=True)
     dist = Distributor()
     dist.root = mock_dist_dict
     result = dist.delete_target("test_target", dryrun=True)

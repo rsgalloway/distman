@@ -435,8 +435,8 @@ def sanitize_path(path: str) -> str:
     return path.replace("\\", "/").rstrip("/") if path else path
 
 
-def get_version_dest(target: str) -> str:
-    """Returns the version destination directory for a given target file.
+def get_rel_version_path(target: str) -> str:
+    """Returns the relative version path for a given target file.
 
     The version destination is expected to be in the same directory as the
     target file, named as config.DIR_VERSIONS, e.g.:
