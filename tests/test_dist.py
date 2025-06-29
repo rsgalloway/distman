@@ -338,7 +338,21 @@ def test_change_file_version_with_valid_target(
 def test_delete_target_with_existing_target(mock_distributor, mocker, mock_dist_dict):
     """Test the delete_target method with an existing target."""
     mocker.patch("os.path.exists", return_value=True)
+    mocker.patch(
+        "distman.util.get_file_versions",
+        return_value=[("/path/to/test_target.1.abc123", 1, "abc123")],
+    )
     dist = Distributor()
     dist.root = mock_dist_dict
     result = dist.delete_target("test_target", dryrun=True)
     assert result is True
+
+
+def test_delete_target_with_no_versions(mock_distributor, mocker, mock_dist_dict):
+    """Test the delete_target method with no versions found."""
+    mocker.patch("os.path.exists", return_value=True)
+    mocker.patch("distman.util.get_file_versions", return_value=[])
+    dist = Distributor()
+    dist.root = mock_dist_dict
+    result = dist.delete_target("test_target", dryrun=True)
+    assert result is False
