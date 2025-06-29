@@ -196,4 +196,4 @@ def setup_logging(dryrun: bool = False):
         try:
             setup_file_handler()
         except Exception as err:
-            print("Error: %s" % str(err))
+            log.error("Could not create log file: %s" % str(err))

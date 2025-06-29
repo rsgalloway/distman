@@ -179,7 +179,7 @@ def test_update_symlink_existing_link():
         result = update_symlink(dest, target, dryrun)
 
         mock_remove.assert_called_once_with(dest)
-        version_dest = util.get_version_dest(target)
+        version_dest = util.get_rel_version_path(target)
         mock_link.assert_called_once_with(version_dest, dest, target)
         assert result is True
 
@@ -195,13 +195,13 @@ def test_update_symlink_no_existing_link():
     ) as mock_link:
         result = update_symlink(dest, target, dryrun)
 
-        version_dest = util.get_version_dest(target)
+        version_dest = util.get_rel_version_path(target)
         mock_link.assert_called_once_with(version_dest, dest, target)
         assert result is True
 
 
-def test_get_version_dest_creates_versioned_path(temp_dir):
-    """Test the get_version_dest function creates a versioned path."""
+def test_get_version_dest_with_short_head(temp_dir):
+    """Test the get_version_dest function with a short head."""
     dest = os.path.join(temp_dir, "file.txt")
     version_num = 1
     short_head = "abc123"
@@ -213,7 +213,6 @@ def test_get_version_dest_creates_versioned_path(temp_dir):
     expected = os.path.join(temp_dir, config.DIR_VERSIONS, "file.txt.1.abc123")
 
     assert result == expected
-    assert os.path.exists(os.path.dirname(result))
 
 
 def test_get_version_dest_without_short_head(temp_dir):
@@ -229,11 +228,10 @@ def test_get_version_dest_without_short_head(temp_dir):
     expected = os.path.join(temp_dir, config.DIR_VERSIONS, "file.txt.2")
 
     assert result == expected
-    assert os.path.exists(os.path.dirname(result))
 
 
-def test_get_version_dest_creates_directory(temp_dir):
-    """Test the get_version_dest function creates the versions directory."""
+def test_get_version_dest_version_num(temp_dir):
+    """Test the get_version_dest function with a short head and version number."""
     dest = os.path.join(temp_dir, "test.txt")
     version_num = 3
     short_head = "def456"
@@ -245,8 +243,6 @@ def test_get_version_dest_creates_directory(temp_dir):
     expected_dir = os.path.join(os.path.dirname(dest), config.DIR_VERSIONS)
 
     assert result == os.path.join(expected_dir, "test.txt.3.def456")
-    assert os.path.exists(expected_dir)
-    assert os.path.isdir(expected_dir)
 
 
 def test_should_skip_target_with_matching_pattern():
@@ -337,7 +333,22 @@ def test_change_file_version_with_valid_target(
 
 def test_delete_target_with_existing_target(mock_distributor, mocker, mock_dist_dict):
     """Test the delete_target method with an existing target."""
+    mocker.patch("os.path.exists", return_value=True)
+    mocker.patch(
+        "distman.util.get_file_versions",
+        return_value=[("/path/to/test_target.1.abc123", 1, "abc123")],
+    )
     dist = Distributor()
     dist.root = mock_dist_dict
     result = dist.delete_target("test_target", dryrun=True)
     assert result is True
+
+
+def test_delete_target_with_no_versions(mock_distributor, mocker, mock_dist_dict):
+    """Test the delete_target method with no versions found."""
+    mocker.patch("os.path.exists", return_value=True)
+    mocker.patch("distman.util.get_file_versions", return_value=[])
+    dist = Distributor()
+    dist.root = mock_dist_dict
+    result = dist.delete_target("test_target", dryrun=True)
+    assert result is False
