@@ -6,6 +6,10 @@
             "source": "bin/distman",
             "destination": "{DEPLOY_ROOT}/bin/distman"
         },
+        "build": {
+            "source": "build/*",
+            "destination": "{DEPLOY_ROOT}/lib/python/%1"
+        },
         "bat": {
             "source": "bin/distman.bat",
             "destination": "{DEPLOY_ROOT}/bin/distman.bat"
