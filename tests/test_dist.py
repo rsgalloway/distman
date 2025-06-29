@@ -200,8 +200,8 @@ def test_update_symlink_no_existing_link():
         assert result is True
 
 
-def test_get_version_dest_creates_versioned_path(temp_dir):
-    """Test the get_version_dest function creates a versioned path."""
+def test_get_version_dest_with_short_head(temp_dir):
+    """Test the get_version_dest function with a short head."""
     dest = os.path.join(temp_dir, "file.txt")
     version_num = 1
     short_head = "abc123"
@@ -213,7 +213,6 @@ def test_get_version_dest_creates_versioned_path(temp_dir):
     expected = os.path.join(temp_dir, config.DIR_VERSIONS, "file.txt.1.abc123")
 
     assert result == expected
-    assert os.path.exists(os.path.dirname(result))
 
 
 def test_get_version_dest_without_short_head(temp_dir):
@@ -229,11 +228,10 @@ def test_get_version_dest_without_short_head(temp_dir):
     expected = os.path.join(temp_dir, config.DIR_VERSIONS, "file.txt.2")
 
     assert result == expected
-    assert os.path.exists(os.path.dirname(result))
 
 
-def test_get_version_dest_creates_directory(temp_dir):
-    """Test the get_version_dest function creates the versions directory."""
+def test_get_version_dest_version_num(temp_dir):
+    """Test the get_version_dest function with a short head and version number."""
     dest = os.path.join(temp_dir, "test.txt")
     version_num = 3
     short_head = "def456"
@@ -245,8 +243,6 @@ def test_get_version_dest_creates_directory(temp_dir):
     expected_dir = os.path.join(os.path.dirname(dest), config.DIR_VERSIONS)
 
     assert result == os.path.join(expected_dir, "test.txt.3.def456")
-    assert os.path.exists(expected_dir)
-    assert os.path.isdir(expected_dir)
 
 
 def test_should_skip_target_with_matching_pattern():

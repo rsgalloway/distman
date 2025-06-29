@@ -114,7 +114,6 @@ def get_version_dest(dest: str, version_num: int, short_head: Optional[str]) -> 
     :return: The versioned destination path.
     """
     versions_dir = os.path.join(os.path.dirname(dest), config.DIR_VERSIONS)
-    os.makedirs(versions_dir, exist_ok=True)  # TODO: move this
     version_dest = os.path.join(
         versions_dir, os.path.basename(dest) + f".{version_num}"
     )
@@ -264,7 +263,11 @@ class Distributor(GitRepo):
                     question = f"Target {name}: Destination dir '{os.path.dirname(dest_resolved)}' doesn't exist. Create?"
                     if not confirm(question, yes, dryrun):
                         return False
-                    os.makedirs(os.path.dirname(dest_resolved), exist_ok=True)
+                    try:
+                        os.makedirs(os.path.dirname(dest_resolved), exist_ok=True)
+                    except Exception as err:
+                        log.error(str(err))
+                        return False
 
                 target_type = util.get_path_type(src_path)[0]
                 target_list.append(
@@ -332,6 +335,7 @@ class Distributor(GitRepo):
                     log.info(f"Updated: {t.source} ={t.type}> {match_file}")
                     continue
 
+            # get the destination path for the versioned file
             version_dest = get_version_dest(t.dest, version_num, self.short_head)
 
             if not dryrun:
