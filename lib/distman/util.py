@@ -650,6 +650,23 @@ def hashes_equal(hash_str_a: str, hash_str_b: str) -> bool:
         return hash_str_b.upper().startswith(hash_str_a.upper())
 
 
+def is_binary(path: str) -> bool:
+    """Check if a file is binary.
+
+    :param path: Path to the file to check.
+    :return: True if the file is binary, False otherwise.
+    """
+    if (
+        str(path)
+        .lower()
+        .endswith((".dll", ".ico", ".png", ".jpg", ".pyc", ".pyo", ".pyd", ".so"))
+    ):
+        return True
+    with open(path, "rb") as f:
+        chunk = f.read(1024)
+        return b"\0" in chunk
+
+
 def link_object(target: str, link: str, actual_target: str) -> bool:
     """Creates symbolic link to a file or directory.
 
