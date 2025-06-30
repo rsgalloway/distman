@@ -41,8 +41,10 @@ from distman.pipeline import (
     validate_pipeline_spec,
     get_pipeline_for_target,
     run_pipeline,
+    ValidationError,
 )
 from distman.source import GitRepo
+from distman.transform import TransformError
 
 
 @dataclass
@@ -369,9 +371,15 @@ class Distributor(GitRepo):
                             input_path=t.source,
                             build_dir=config.BUILD_DIR,
                         )
+                    except ValidationError as e:
+                        log.error(f"Pipeline validation error: {e}")
+                        raise
+                    except TransformError as e:
+                        log.error(f"Pipeline error: {e}")
+                        raise
                     except Exception as e:
-                        log.error("Pipeline error: %s", str(e))
-                        continue
+                        log.error("Unexpected error in pipeline: %s", str(e))
+                        raise
 
                 # copy the source file to the versioned destination
                 util.copy_object(
