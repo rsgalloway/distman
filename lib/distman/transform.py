@@ -100,7 +100,7 @@ def _replace_tokens_in_file(src: str, dst: str, tokens: dict) -> str:
     with open(src, "r", encoding="utf-8") as f:
         content = f.read()
     for key, val in tokens.items():
-        content = content.replace(key, val)
+        content = content.replace(key, util.replace_vars(val))
     with open(dst, "w", encoding="utf-8") as f:
         f.write(content)
 
