@@ -73,6 +73,8 @@ setup(
     },
     install_requires=[
         "GitPython==3.1.43",
+        "htmlmin==0.1.12",
+        "jsmin==3.0.1",
     ],
     extras_require={
         ":python_version<'3.7'": ["dataclasses"]

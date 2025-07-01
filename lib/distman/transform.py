@@ -34,6 +34,7 @@ Contains basic transform classes and functions.
 """
 
 import os
+import re
 import shutil
 import py_compile
 
@@ -154,3 +155,123 @@ def _byte_compile_dir(directory: str) -> str:
             py_compile.compile(filepath, cfile=filepath + "c")
             os.remove(filepath)
     return directory
+
+
+def minify(input: str, output: str) -> str:
+    """Minify a given src file and output to a dst file.
+
+    :param input: Path to the input file or directory.
+    :param output: Path to the output file or directory.
+    :raises TransformError: If the input file does not exist or is not a file.
+    :return: The path to the output file or directory after minification.
+    """
+
+    if os.path.isdir(input):
+        shutil.copytree(input, output, dirs_exist_ok=True)
+        _minify_dir(output)
+    else:
+        os.makedirs(os.path.dirname(output), exist_ok=True)
+        _minify_file(input, output)
+
+    return output
+
+
+def _minify_css(input: str) -> str:
+    """Returns minified css source.
+
+    :param input: Path to the input CSS file.
+    :return: Minified CSS source as a string.
+    """
+
+    minified = ""
+
+    with open(input, "r") as infile:
+        minified = infile.read()
+        minified = re.sub(r"/\*.*?\*/", "", minified, flags=re.DOTALL)
+        minified = re.sub(r"\s+", " ", minified)
+        minified = re.sub(r"\s*([{}:;,])\s*", r"\1", minified)
+        minified = re.sub(r"}\s*", "}", minified)
+        minified = re.sub(r"{\s*", "{", minified)
+
+    return minified
+
+
+def _minify_js(input: str) -> str:
+    """Returns minified js source.
+
+    :param input: Path to the input JavaScript file.
+    :return: Minified JavaScript source as a string.
+    """
+
+    minified = ""
+
+    from jsmin import jsmin
+
+    with open(input) as js_file:
+        minified = jsmin(js_file.read(), quote_chars="'\"`")
+
+    return minified
+
+
+def _minify_html(input: str) -> str:
+    """Returns minified html source.
+
+    :param input: Path to the input HTML file.
+    :return: Minified HTML source as a string.
+    """
+
+    import htmlmin
+
+    with open(input, "r") as infile:
+        html_content = infile.read()
+
+        minified_html = htmlmin.minify(
+            html_content, remove_comments=True, remove_empty_space=True
+        )
+
+        return minified_html
+
+
+def _minify_dir(directory: str) -> str:
+    """Minify all files in a directory.
+
+    :param directory: Path to the directory containing files to minify.
+    :raises TransformError: If a file is not found or is not a regular file.
+    :return: The path to the directory after minification.
+    """
+    for filepath in util.walk(directory):
+        _minify_file(filepath, filepath)
+    return directory
+
+
+def _minify_file(input: str, output: str) -> str:
+    """Returns minified file contents.
+
+    :param input: Path to the input file.
+    :param output: Path to the output file.
+    :raises TransformError: If the input file does not exist or is not a file.
+    :return: The path to the output file after minification.
+    """
+
+    minified = ""
+
+    if not os.path.exists(input):
+        raise TransformError(f"File not found: {input}")
+
+    _, ext = os.path.splitext(input)
+
+    try:
+        if ext in (".js",):
+            minified = _minify_js(input)
+        elif ext in (".css", ".css3"):
+            minified = _minify_css(input)
+        elif ext in (".html", ".htm"):
+            minified = _minify_html(input)
+
+    except Exception as e:
+        raise TransformError(e)
+
+    with open(output, "w") as fp:
+        fp.write(minified)
+
+    return output
