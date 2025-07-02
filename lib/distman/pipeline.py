@@ -35,6 +35,7 @@ Contains source pipeline step classes and functions.
 
 import os
 import shlex
+import shutil
 import subprocess
 import importlib
 from typing import Callable, Optional, Dict, Any
@@ -75,8 +76,21 @@ def run_pipeline(
 
     for step_name, step in pipeline.items():
         log.info("Running: '%s'", step_name)
-        output = os.path.join(build_dir, "distman", target.name, step_name)
-        os.makedirs(output, exist_ok=True)
+
+        if os.path.isfile(current):
+            output = os.path.join(
+                build_dir,
+                "distman",
+                target.name,
+                step_name,
+                os.path.basename(input_path),
+            )
+            os.makedirs(os.path.dirname(output), exist_ok=True)
+            shutil.copy2(current, output)
+        elif os.path.isdir(current):
+            output = os.path.join(build_dir, "distman", target.name, step_name)
+            os.makedirs(output, exist_ok=True)
+            shutil.copytree(current, output, dirs_exist_ok=True)
 
         if "script" in step:
             script = step["script"]
@@ -89,6 +103,7 @@ def run_pipeline(
 
         elif "func" in step:
             func = resolve_dotted_path(step["func"])
+            # log.info("current: %s, output: %s", current, output)
             func(input=current, output=output, **step.get("options", {}))
 
         current = output

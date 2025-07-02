@@ -135,11 +135,21 @@ def byte_compile(input: str, output: str) -> str:
     if os.path.isdir(input):
         shutil.copytree(input, output, dirs_exist_ok=True)
         _byte_compile_dir(output)
-    elif input.endswith(".py"):
-        os.makedirs(os.path.dirname(output), exist_ok=True)
-        py_compile.compile(input, cfile=output + "c")
     else:
-        raise TransformError("Can only byte-compile .py files or directories")
+        _byte_compile_file(input, output)
+    return output
+
+
+def _byte_compile_file(input: str, output: str = None) -> str:
+    """Byte-compile a single Python file.
+
+    :param input: Path to the input Python file.
+    :param output: Path to the output compiled file.
+    :return: The path to the output compiled file.
+    """
+    if not output:
+        output = input + "c"
+    py_compile.compile(input, cfile=output)
     return output
 
 
@@ -151,9 +161,10 @@ def _byte_compile_dir(directory: str) -> str:
     :return: The path to the directory after byte-compilation.
     """
     for filepath in util.walk(directory):
-        if filepath.endswith(".py"):
-            py_compile.compile(filepath, cfile=filepath + "c")
-            os.remove(filepath)
+        if util.is_binary(filepath):
+            continue
+        _byte_compile_file(filepath, filepath + "c")
+        os.remove(filepath)
     return directory
 
 
@@ -240,6 +251,8 @@ def _minify_dir(directory: str) -> str:
     :return: The path to the directory after minification.
     """
     for filepath in util.walk(directory):
+        if util.is_binary(filepath):
+            continue
         _minify_file(filepath, filepath)
     return directory
 
