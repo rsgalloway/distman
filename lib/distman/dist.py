@@ -362,7 +362,7 @@ class Distributor(GitRepo):
             version_dest = get_version_dest(t.dest, version_num, self.short_head)
 
             if not dryrun:
-                # run the pipeline steps for the target
+                # run the pipeline steps for the target in order
                 if t.pipeline:
                     try:
                         source_path = run_pipeline(

@@ -38,7 +38,7 @@ import shlex
 import shutil
 import subprocess
 import importlib
-from typing import Callable, Optional, Dict, Any
+from typing import Callable, Optional, Dict, List, Tuple, Any
 
 from distman.logger import log
 
@@ -60,6 +60,27 @@ def resolve_dotted_path(path: str) -> Callable:
     return getattr(module, attr)
 
 
+def sort_pipeline(pipeline: dict) -> List[Tuple[str, dict]]:
+    """Sort the pipeline steps by their order attribute:
+
+        "pipeline": {
+            "replace_tokens": {
+                "func": "distman.transform.replace_tokens",
+                "options": { "tokens": { "__VERSION__": "0.6.0" } },
+                "order": 10
+            },
+            "byte_compile": {
+                "func": "distman.transform.byte_compile",
+                "order": 20
+            }
+        }
+
+    :param pipeline: The pipeline dictionary to sort.
+    :return: A sorted list of tuples (step_name, step_definition).
+    """
+    return sorted(pipeline.items(), key=lambda item: item[1].get("order", 0))
+
+
 def run_pipeline(
     target, pipeline: Dict[str, Any], input_path: str, build_dir: str
 ) -> str:
@@ -74,7 +95,7 @@ def run_pipeline(
 
     current = input_path
 
-    for step_name, step in pipeline.items():
+    for step_name, step in sort_pipeline(pipeline):
         log.info("Running: '%s'", step_name)
 
         if os.path.isfile(current):
@@ -138,7 +159,7 @@ def validate_pipeline_spec(pipeline: Optional[dict], context: str = "global") ->
     if not isinstance(pipeline, dict):
         raise ValidationError(f"{context} pipeline must be a dict or null")
 
-    for step_name, step in pipeline.items():
+    for step_name, step in sort_pipeline(pipeline):
         if not isinstance(step, dict):
             raise ValidationError(f"{context} step '{step_name}' must be a dict")
 
