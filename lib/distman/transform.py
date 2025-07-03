@@ -148,10 +148,10 @@ def byte_compile(input: str, output: str) -> str:
     """
     if os.path.isdir(input):
         shutil.copytree(input, output, dirs_exist_ok=True)
-        _byte_compile_dir(output)
+        return _byte_compile_dir(output)
     elif os.path.isfile(input):
         os.makedirs(os.path.dirname(output), exist_ok=True)
-        _byte_compile_file(input, output)
+        return _byte_compile_file(input, output)
     else:
         raise TransformError(
             f"Cannot byte-compile: '{input}' is not a file or directory"
@@ -303,7 +303,7 @@ def _minify_file(input: str, output: str) -> str:
     if not os.path.exists(input):
         raise TransformError(f"File not found: {input}")
 
-    _, ext = os.path.splitext(input)
+    _, ext = os.path.splitext(str(input).lower())
 
     try:
         if ext in (".js",):
@@ -312,6 +312,8 @@ def _minify_file(input: str, output: str) -> str:
             minified = _minify_css(input)
         elif ext in (".html", ".htm"):
             minified = _minify_html(input)
+        else:
+            raise TransformError(f"Unsupported file type for minification: {ext}")
 
     except Exception as e:
         raise TransformError(e)
