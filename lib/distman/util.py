@@ -414,6 +414,10 @@ def get_path_type(path: str) -> str:
     return "null"
 
 
+def test():
+    raise Exception("this is a test")
+
+
 def normalize_path(path: str) -> str:
     """Normalizes relative paths by removing leading "./" and calling
     os.path.normpath.

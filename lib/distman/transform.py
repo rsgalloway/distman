@@ -37,6 +37,7 @@ import os
 import re
 import shutil
 import py_compile
+from typing import Optional
 
 from distman import util
 from distman.logger import log
@@ -148,21 +149,38 @@ def byte_compile(input: str, output: str) -> str:
     if os.path.isdir(input):
         shutil.copytree(input, output, dirs_exist_ok=True)
         _byte_compile_dir(output)
-    else:
+    elif os.path.isfile(input):
+        os.makedirs(os.path.dirname(output), exist_ok=True)
         _byte_compile_file(input, output)
-    return output
+    else:
+        raise TransformError(
+            f"Cannot byte-compile: '{input}' is not a file or directory"
+        )
 
 
-def _byte_compile_file(input: str, output: str = None) -> str:
+def _byte_compile_file(
+    input: str, output: str = None, display_path: Optional[str] = None
+) -> str:
     """Byte-compile a single Python file.
 
     :param input: Path to the input Python file.
     :param output: Path to the output compiled file.
+    :param display_path: Optional path for display purposes (e.g., for error messages).
     :return: The path to the output compiled file.
     """
     if not output:
         output = input + "c"
-    py_compile.compile(input, cfile=output)
+
+    # if no display path is given, use the input file name
+    if not display_path:
+        display_path = os.path.basename(input)
+
+    py_compile.compile(input, cfile=output, dfile=display_path)
+
+    # preserve the original file's mode for the compiled file
+    mode = os.stat(input).st_mode
+    os.chmod(output, mode)
+
     return output
 
 
@@ -176,7 +194,8 @@ def _byte_compile_dir(directory: str) -> str:
     for filepath in util.walk(directory):
         if util.is_binary(filepath):
             continue
-        _byte_compile_file(filepath, filepath + "c")
+        display_path = os.path.relpath(filepath, directory)
+        _byte_compile_file(filepath, filepath + "c", display_path)
         os.remove(filepath)
     return directory
 
