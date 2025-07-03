@@ -34,7 +34,7 @@ Contains tests for the transform module.
 """
 
 import os
-from distman.transform import replace_tokens, byte_compile, chmod
+from distman.transform import replace_tokens, byte_compile, chmod, minify
 
 
 def test_replace_tokens(tmp_path):
@@ -68,3 +68,38 @@ def test_byte_compile_file(tmp_path):
     byte_compile(str(f), str(out_file))
 
     assert out_file.exists()
+
+
+def test_minify_css(tmp_path):
+    """Test the minify function to ensure it correctly minifies a CSS file."""
+    css_file = tmp_path / "style.css"
+    css_file.write_text("body { margin: 0; } /* Comment */")
+    minified_css_file = tmp_path / "minified_style.css"
+
+    minify(str(css_file), str(minified_css_file))
+    assert minified_css_file.read_text() == "body{margin:0;}"
+
+
+def test_minify_js(tmp_path):
+    """Test the minify function to ensure it correctly minifies a JS file."""
+    js_file = tmp_path / "script.js"
+    js_file.write_text("function test() { console.log('Hello'); }")
+    minified_js_file = tmp_path / "minified_script.js"
+
+    minify(str(js_file), str(minified_js_file))
+    assert minified_js_file.read_text() == "function test(){console.log('Hello');}"
+
+
+def test_minify_html(tmp_path):
+    """Test the minify function to ensure it correctly minifies an HTML file."""
+    html_file = tmp_path / "index.html"
+    html_file.write_text(
+        "<html>\n<head>\n<title> Test </title> </head>\n<body>\n</body>\n</html>"
+    )
+    minified_html_file = tmp_path / "minified_index.html"
+
+    minify(str(html_file), str(minified_html_file))
+    assert (
+        minified_html_file.read_text()
+        == "<html><head><title>Test</title></head><body></body></html>"
+    )
