@@ -41,7 +41,7 @@ with open(os.path.join(here, "README.md")) as f:
 setup(
     name="distman",
     version="0.6.0",
-    description="Super simple file distribution",
+    description="Simple software distribution for complex pipelines",
     long_description=long_description,
     long_description_content_type="text/markdown",
     author="Ryan Galloway",
