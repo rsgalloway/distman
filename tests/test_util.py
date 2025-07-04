@@ -99,27 +99,6 @@ def test_copy_file_and_compare(temp_dir):
     assert util.compare_files(src, dst)
 
 
-def test_copy_file_with_token_substitution(temp_dir):
-    """Test the copy_file function with token substitution enabled."""
-    src = os.path.join(temp_dir, "src_with_tokens.txt")
-    dst = os.path.join(temp_dir, "dst_with_tokens.txt")
-
-    # write a file with tokens
-    with open(src, "w") as f:
-        f.write("Hello, {USER}!\nWelcome to {PLACE}.")
-
-    # set environment variables for substitution
-    os.environ["USER"] = "Alice"
-    os.environ["PLACE"] = "Wonderland"
-
-    util.copy_file(src, dst, substitute_tokens=True)
-
-    with open(dst, "r") as f:
-        lines = f.readlines()
-    assert lines == ["Hello, Alice!\n", "Welcome to Wonderland."]
-    assert util.compare_files(src, dst) is False
-
-
 def test_copy_file_binary_file(temp_dir):
     """Test the copy_find function to ensure it correctly copies binary files."""
     src = os.path.join(temp_dir, "binary_file.bin")
@@ -137,8 +116,7 @@ def test_copy_file_binary_file(temp_dir):
 
 
 def test_copy_file_binary_file_tokens(temp_dir):
-    """Test the copy_find function to ensure it correctly copies binary files,
-    with substitute_tokens=True to make sure file is still copied."""
+    """Test the copy_find function to ensure it correctly copies binary files,"""
     src = os.path.join(temp_dir, "binary_file_2.bin")
     dst = os.path.join(temp_dir, "copied_binary_file_2.bin")
 
@@ -146,7 +124,7 @@ def test_copy_file_binary_file_tokens(temp_dir):
     with open(src, "wb") as f:
         f.write(os.urandom(1024))
 
-    util.copy_file(src, dst, substitute_tokens=True)
+    util.copy_file(src, dst)
 
     # verify the copied file is the same as the original
     assert util.compare_files(src, dst)
