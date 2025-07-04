@@ -375,18 +375,14 @@ class Distributor(GitRepo):
                         log.error(f"Pipeline validation error: {e}")
                         raise
                     except TransformError as e:
-                        log.error(f"Pipeline error: {e}")
+                        log.error(f"Pipeline transform error: {e}")
                         raise
                     except Exception as e:
-                        log.error("Unexpected error in pipeline: %s", str(e))
+                        log.error("Pipeline error: %s", str(e))
                         raise
 
                 # copy the source file to the versioned destination
-                util.copy_object(
-                    source_path,
-                    version_dest,
-                    all_files=all,
-                )
+                util.copy_object(source_path, version_dest, all_files=all)
                 if not versiononly:
                     if not update_symlink(t.dest, version_dest, dryrun):
                         continue
