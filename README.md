@@ -1,6 +1,8 @@
 distman
 =======
 
+Simple software distribution for complex pipelines,
+
 `distman` is a config-driven deployment tool that performs safe, versioned rollouts
 of software, scripts, and configuration files to predefined locations on the
 filesystem. It’s ideal for environments where deterministic deployments,
@@ -98,6 +100,31 @@ In this example:
 
 > Wildcards are expanded at runtime using Python's glob and fnmatch mechanisms.
 Matching results are processed and symlinked individually.
+
+#### Transforms
+
+`distman` supports a customizable pipeline of transforms that operate on each
+target before final distribution. These transforms can run:
+
+- Custom Python functions (func)
+- Shell commands (script)
+
+Pipeline steps can be defined globally at the top of a dist.json file, or
+per-target:
+
+```json
+"pipeline": {
+    "formatting": {
+        "script": ["black --check {input}"]
+    },
+    "replace_tokens": {
+        "func": "distman.transform.replace_tokens",
+        "options": {
+            "tokens": { "__VERSION__": "1.2.3" }
+        }
+    }
+}
+```
 
 ## Usage
 
