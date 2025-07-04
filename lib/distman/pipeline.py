@@ -41,6 +41,7 @@ import importlib
 from typing import Callable, Optional, Dict, List, Tuple, Any
 
 from distman.logger import log
+from distman.transform import TransformError
 
 
 class ValidationError(Exception):
@@ -81,6 +82,29 @@ def sort_pipeline(pipeline: dict) -> List[Tuple[str, dict]]:
     return sorted(pipeline.items(), key=lambda item: item[1].get("order", 0))
 
 
+def run_script_step(cmd: str, env: dict = None) -> None:
+    """Run a script command in a subprocess.
+
+    :param script_cmd: The command to run as a string.
+    :param env: Optional environment variables to set for the subprocess.
+    :raises TransformError: If the script fails with a non-zero exit code.
+    """
+    try:
+        log.info("Running: '%s'", cmd)
+        subprocess.run(
+            cmd,
+            shell=True,
+            check=True,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except subprocess.CalledProcessError as e:
+        log.error(f"Pipeline step failed: {cmd}")
+        log.error(e.stderr.decode())
+        raise TransformError(f"Pipeline step failed with exit code {e.returncode}")
+
+
 def run_pipeline(
     target, pipeline: Dict[str, Any], input_path: str, build_dir: str
 ) -> str:
@@ -96,7 +120,7 @@ def run_pipeline(
     current = input_path
 
     for step_name, step in sort_pipeline(pipeline):
-        log.info("Running: '%s'", step_name)
+        log.info("Step: '%s'", step_name)
 
         if os.path.isfile(current):
             output = os.path.join(
@@ -120,7 +144,7 @@ def run_pipeline(
             else:
                 cmd = script
             cmd = cmd.format(input=shlex.quote(current), output=shlex.quote(output))
-            subprocess.run(cmd, shell=True, check=True)
+            run_script_step(cmd, env=step.get("env", None))
 
         elif "func" in step:
             func = resolve_dotted_path(step["func"])

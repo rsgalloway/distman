@@ -75,3 +75,17 @@ def test_get_pipeline_for_target_merges():
     target_pipeline = {"step2": {"script": "echo 2"}}
     merged = get_pipeline_for_target(global_pipeline, target_pipeline)
     assert "step1" in merged and "step2" in merged
+
+
+def test_black_check_fails(tmp_path):
+    """Test that the black_check step fails on unformatted code."""
+    from distman.pipeline import run_pipeline, TransformError
+
+    f = tmp_path / "unformatted.py"
+    f.write_text("x=1+2")
+
+    target = Target("test", "input.txt", "test/input.txt", "f")
+    pipeline = {"black_check": {"script": ["black --check {input}"]}}
+
+    with pytest.raises(TransformError):
+        run_pipeline(target, pipeline, str(f), tmp_path / "build")
