@@ -43,6 +43,9 @@ from typing import Callable, Optional, Dict, List, Tuple, Any
 from distman.logger import log
 from distman.transform import TransformError
 
+# define the allowed keys for pipeline steps
+ALLOWED_KEYS = {"func", "script", "options", "env"}
+
 
 class ValidationError(Exception):
     """Raised when a pipeline or step is improperly defined."""
@@ -138,13 +141,12 @@ def run_pipeline(
             shutil.copytree(current, output, dirs_exist_ok=True)
 
         if "script" in step:
-            script = step["script"]
-            if isinstance(script, list):
-                cmd = " && ".join(script)
-            else:
-                cmd = script
-            cmd = cmd.format(input=shlex.quote(current), output=shlex.quote(output))
-            run_script_step(cmd, env=step.get("env", None))
+            commands = step["script"]
+            if isinstance(commands, str):
+                commands = [commands]
+            for cmd in commands:
+                cmd = cmd.format(input=shlex.quote(current), output=shlex.quote(output))
+                run_script_step(cmd, env=step.get("env", None))
 
         elif "func" in step:
             func = resolve_dotted_path(step["func"])
@@ -194,22 +196,37 @@ def validate_pipeline_spec(pipeline: Optional[dict], context: str = "global") ->
 
         has_script = "script" in step
         has_func = "func" in step
+        unknown_keys = set(step) - ALLOWED_KEYS
 
+        # check for unknown keys in the step
+        if unknown_keys:
+            raise ValidationError(
+                f"Pipeline step '{step_name}' contains unknown keys: {', '.join(unknown_keys)}"
+            )
+
+        # check for required keys
         if not (has_script or has_func):
             raise ValidationError(
                 f"{context} step '{step_name}' must have 'script' or 'func'"
             )
 
+        # check for conflicting keys
+        if has_func and has_script:
+            raise ValidationError(
+                f"{context} step '{step_name}': cannot have both 'script' and 'func'"
+            )
+
+        # check types of script and func
         if has_script and not isinstance(step["script"], (str, list)):
             raise ValidationError(
                 f"{context} step '{step_name}': 'script' must be string or list"
             )
-
         if has_func and not isinstance(step["func"], str):
             raise ValidationError(
                 f"{context} step '{step_name}': 'func' must be string"
             )
 
+        # check for options
         if "options" in step and not isinstance(step["options"], dict):
             raise ValidationError(
                 f"{context} step '{step_name}': 'options' must be a dict"
