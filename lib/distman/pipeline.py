@@ -30,7 +30,7 @@
 #
 
 __doc__ = """
-Contains source pipeline step classes and functions.
+Contains transform pipeline step classes and functions.
 """
 
 import os
@@ -124,7 +124,6 @@ def run_pipeline(
 
         elif "func" in step:
             func = resolve_dotted_path(step["func"])
-            # log.info("current: %s, output: %s", current, output)
             func(input=current, output=output, **step.get("options", {}))
 
         current = output
@@ -149,7 +148,13 @@ def get_pipeline_for_target(
 
 
 def validate_pipeline_spec(pipeline: Optional[dict], context: str = "global") -> None:
-    """Validate the structure of a pipeline specification.
+    """Validate the structure of a pipeline specification. Format:
+
+            "step_name": {
+                "func": "package.module.function",
+                "options": { "key": value },
+                "order": 10
+            },
 
     :param pipeline: The pipeline specification to validate.
     :param context: Context for error messages, e.g., "global" or "target".
