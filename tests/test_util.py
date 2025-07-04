@@ -100,25 +100,9 @@ def test_copy_file_and_compare(temp_dir):
 
 
 def test_copy_file_binary_file(temp_dir):
-    """Test the copy_find function to ensure it correctly copies binary files."""
+    """Test the copy_file function to ensure it correctly copies binary files."""
     src = os.path.join(temp_dir, "binary_file.bin")
     dst = os.path.join(temp_dir, "copied_binary_file.bin")
-
-    # write 1KB of random binary data
-    with open(src, "wb") as f:
-        f.write(os.urandom(1024))
-
-    util.copy_file(src, dst)
-
-    # verify the copied file is the same as the original
-    assert util.compare_files(src, dst)
-    assert filecmp.cmp(src, dst)
-
-
-def test_copy_file_binary_file_tokens(temp_dir):
-    """Test the copy_find function to ensure it correctly copies binary files,"""
-    src = os.path.join(temp_dir, "binary_file_2.bin")
-    dst = os.path.join(temp_dir, "copied_binary_file_2.bin")
 
     # write 1KB of random binary data
     with open(src, "wb") as f:
