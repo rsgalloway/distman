@@ -37,7 +37,14 @@ from typing import Optional, Tuple, List
 
 from distman import config, util
 from distman.logger import log
+from distman.pipeline import (
+    validate_pipeline_spec,
+    get_pipeline_for_target,
+    run_pipeline,
+    ValidationError,
+)
 from distman.source import GitRepo
+from distman.transform import TransformError
 
 
 @dataclass
@@ -49,6 +56,7 @@ class Target:
     source: The source path of the target.
     dest: The destination path of the target.
     type: The type of the target (e.g., file, directory, link).
+    pipeline: Optional dictionary of pipeline steps to apply to the target.
     options: Optional dictionary of additional options for the target.
     """
 
@@ -56,6 +64,7 @@ class Target:
     source: str
     dest: str
     type: str
+    pipeline: Optional[dict] = None
     options: Optional[dict] = None
 
 
@@ -188,7 +197,9 @@ class Distributor(GitRepo):
 
         changed_files = self.git_changed_files()
         changed_dirs = util.get_common_root_dirs(changed_files)
-        global_options = self.root.get("options", {})
+        global_pipeline = self.root.get(config.TAG_PIPELINE)
+        validate_pipeline_spec(global_pipeline, context="global")
+        global_options = self.root.get(config.TAG_OPTIONS, {})
 
         if config.DIST_FILE in changed_files:
             log.warning(f"Uncommitted changes in {config.DIST_FILE}")
@@ -204,9 +215,13 @@ class Distributor(GitRepo):
                 log.info(f"Target {name}: Missing source or dest path")
                 continue
 
-            # get target options
+            # get target pipeline and options
+            target_pipeline = get_pipeline_for_target(
+                global_pipeline, entry.get(config.TAG_PIPELINE)
+            )
+            validate_pipeline_spec(target_pipeline, context=f"target '{name}'")
             target_options = util.get_effective_options(
-                global_options, entry.get("options", {})
+                global_options, entry.get(config.TAG_OPTIONS, {})
             )
 
             # check for wildcard in source
@@ -221,6 +236,7 @@ class Distributor(GitRepo):
                                 src_path,
                                 dst_resolved,
                                 target_type,
+                                target_pipeline,
                                 target_options,
                             )
                         )
@@ -271,7 +287,14 @@ class Distributor(GitRepo):
 
                 target_type = util.get_path_type(src_path)[0]
                 target_list.append(
-                    Target(name, src_path, dest_resolved, target_type, target_options)
+                    Target(
+                        name,
+                        src_path,
+                        dest_resolved,
+                        target_type,
+                        target_pipeline,
+                        target_options,
+                    )
                 )
 
         if not target_list:
@@ -331,22 +354,38 @@ class Distributor(GitRepo):
                     yes,
                     dryrun,
                 ):
-                    update_symlink(t.dest, match_file, dryrun)
-                    log.info(f"Updated: {t.source} ={t.type}> {match_file}")
+                    if update_symlink(t.dest, match_file, dryrun):
+                        log.info(f"Updated: {t.source} ={t.type}> {match_file}")
                     continue
 
             # get the destination path for the versioned file
             version_dest = get_version_dest(t.dest, version_num, self.short_head)
 
             if not dryrun:
-                util.copy_object(
-                    source_path,
-                    version_dest,
-                    all_files=all,
-                    substitute_tokens=t.options.get("substitute_tokens", False),
-                )
+                # run the pipeline steps for the target in order
+                if t.pipeline:
+                    try:
+                        source_path = run_pipeline(
+                            target=t,
+                            pipeline=t.pipeline,
+                            input_path=t.source,
+                            build_dir=config.BUILD_DIR,
+                        )
+                    except ValidationError as e:
+                        log.error(f"Pipeline validation error: {e}")
+                        raise
+                    except TransformError as e:
+                        log.error(f"Pipeline transform error: {e}")
+                        raise
+                    except Exception as e:
+                        log.error("Pipeline error: %s", str(e))
+                        raise
+
+                # copy the source file to the versioned destination
+                util.copy_object(source_path, version_dest, all_files=all)
                 if not versiononly:
-                    update_symlink(t.dest, version_dest, dryrun)
+                    if not update_symlink(t.dest, version_dest, dryrun):
+                        continue
 
             log.info(f"Updated: {t.source} ={t.type}> {version_dest}")
 
@@ -410,8 +449,8 @@ class Distributor(GitRepo):
             if dryrun:
                 log.info(f"{source} ={target_type}> {latest_ver}")
             else:
-                update_symlink(dest, latest_ver, dryrun)
-                log.info(f"{source} ={target_type}> {latest_ver}")
+                if update_symlink(dest, latest_ver, dryrun):
+                    log.info(f"{source} ={target_type}> {latest_ver}")
 
         if not any_found:
             log.info("No targets found to reset")

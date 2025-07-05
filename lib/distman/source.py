@@ -220,12 +220,12 @@ class GitRepo(Source):
                 branch = self.repo.active_branch
                 self.branch_name = branch.name
                 if self.branch_name not in config.MAIN_BRANCHES:
-                    log.warning("Warning: Not on a main branch: %s", self.branch_name)
+                    log.warning("WARNING: Not on a main branch: %s", self.branch_name)
             except (TypeError, AttributeError):
-                log.warning("Warning: Detached HEAD or no active branch")
+                log.warning("WARNING: Detached HEAD or no active branch")
 
         except git.InvalidGitRepositoryError:
-            log.warning("Warning: Not in a git repository")
+            log.warning("WARNING: Not in a git repository")
             self.repo = None
         except Exception as e:
             log.warning("Error reading git repo: %s", str(e))
@@ -253,7 +253,7 @@ class GitRepo(Source):
                 return True
 
         except GitCommandError as err:
-            log.warning("Warning: branch '%s' not found on remote.", self.branch_name)
+            log.warning("WARNING: branch '%s' not found on remote.", self.branch_name)
             return True
         except Exception as err:
             log.error("Unexpected error checking remote branch: %s", str(err))

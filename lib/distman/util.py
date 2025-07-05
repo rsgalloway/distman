@@ -94,40 +94,14 @@ def check_symlinks() -> bool:
     return True
 
 
-def copy_file(
-    source: str,
-    dest: str,
-    substitute_tokens: bool = False,
-    token_env=None,
-    token_defaults=None,
-) -> None:
+def copy_file(source: str, dest: str) -> None:
     """Copies a file or link. Converts line endings to linux LF, preserving
     original source file mode.
 
-    Substitutes tokens in the file if substitute_tokens is True. Tokens are in
-    the form of {TOKEN} and can be replaced with environment variables or default
-    values.
-
     :param source: Path to source file or link.
     :param dest: Path to destination.
-    :param substitute_tokens: If True, replaces tokens in the file
-        with environment variables or defaults.
-    :param token_env: Optional dictionary of environment variables to use for
-        token substitution.
-    :param token_defaults: Optional dictionary of default values for token
-        substitution.
     :return: None
     """
-    if token_env is None:
-        token_env = os.environ
-    if token_defaults is None:
-        token_defaults = config.DEFAULT_ENV
-
-    def is_binary(file_path):
-        with open(file_path, "rb") as f:
-            chunk = f.read(1024)
-            return b"\0" in chunk
-
     try:
         destdir = os.path.dirname(dest)
         if not os.path.isdir(destdir):
@@ -143,10 +117,6 @@ def copy_file(
             with open(source, "r") as infile, open(dest, "wb") as outfile:
                 for line in infile:
                     line = line.replace("\r\n", "\n").replace("\r", "\n")
-                    if substitute_tokens and not is_binary(source):
-                        line = replace_vars(
-                            line, env=token_env, defaults=token_defaults, strict=False
-                        )
                     outfile.write((line).encode("utf-8"))
     # if file is binary, or has invalid characters, copy it as is
     except (UnicodeDecodeError, TypeError, ValueError):
@@ -159,14 +129,7 @@ def copy_file(
             os.chmod(dest, os.stat(source).st_mode)
 
 
-def copy_directory(
-    source: str,
-    dest: str,
-    all_files: bool = False,
-    substitute_tokens: bool = False,
-    token_env=None,
-    token_defaults=None,
-) -> None:
+def copy_directory(source: str, dest: str, all_files: bool = False) -> None:
     """Recursively copies a directory (ignores hidden files).
 
     Substitutes tokens in the file if substitute_tokens is True. Tokens are in
@@ -176,12 +139,6 @@ def copy_directory(
     :param source: Path to source directory.
     :param dest: Path to destination directory.
     :param all_files: Copy all files, including hidden and ignorable files.
-    :param substitute_tokens: If True, replaces tokens in the file
-        with environment variables or defaults.
-    :param token_env: Optional dictionary of environment variables to use for
-        token substitution.
-    :param token_defaults: Optional dictionary of default values for token
-        substitution.
     :return: None
     """
     source = os.path.relpath(source)
@@ -189,17 +146,10 @@ def copy_directory(
     for filepath in get_files(source, all_files=all_files):
         relative = filepath[len(source) + 1 :] if source != "." else filepath
         target = os.path.join(dest, relative)
-        copy_file(filepath, target, substitute_tokens, token_env, token_defaults)
+        copy_file(filepath, target)
 
 
-def copy_object(
-    source: str,
-    dest: str,
-    all_files: bool = False,
-    substitute_tokens: bool = False,
-    token_env=None,
-    token_defaults=None,
-) -> None:
+def copy_object(source: str, dest: str, all_files: bool = False) -> None:
     """Copies, or links, a file or directory recursively (ignores hidden
     files).
 
@@ -211,23 +161,15 @@ def copy_object(
     :param dest: Path to destination file or directory.
     :param all_files: Copy all files in a directory, including hidden and
         ignorable files.
-    :param substitute_tokens: If True, replaces tokens in the file
-        with environment variables or defaults.
-    :param token_env: Optional dictionary of environment variables to use for
-        token substitution.
-    :param token_defaults: Optional dictionary of default values for token
-        substitution.
     :return: None
     """
     if os.path.islink(source):
         link_target = os.readlink(source)
         link_object(link_target, dest, link_target)
     elif os.path.isfile(source):
-        copy_file(source, dest, substitute_tokens, token_env, token_defaults)
+        copy_file(source, dest)
     elif os.path.isdir(source):
-        copy_directory(
-            source, dest, all_files, substitute_tokens, token_env, token_defaults
-        )
+        copy_directory(source, dest, all_files)
     else:
         raise Exception("Source '%s' not found" % source)
 
@@ -648,6 +590,23 @@ def hashes_equal(hash_str_a: str, hash_str_b: str) -> bool:
         return hash_str_a.upper().startswith(hash_str_b.upper())
     else:
         return hash_str_b.upper().startswith(hash_str_a.upper())
+
+
+def is_binary(path: str) -> bool:
+    """Check if a file is binary.
+
+    :param path: Path to the file to check.
+    :return: True if the file is binary, False otherwise.
+    """
+    if (
+        str(path)
+        .lower()
+        .endswith((".dll", ".ico", ".png", ".jpg", ".pyc", ".pyo", ".pyd", ".so"))
+    ):
+        return True
+    with open(path, "rb") as f:
+        chunk = f.read(1024)
+        return b"\0" in chunk
 
 
 def link_object(target: str, link: str, actual_target: str) -> bool:

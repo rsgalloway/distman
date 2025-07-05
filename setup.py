@@ -40,8 +40,8 @@ with open(os.path.join(here, "README.md")) as f:
 
 setup(
     name="distman",
-    version="0.5.7",
-    description="Super simple file distribution",
+    version="0.6.0",
+    description="Simple software distribution for complex pipelines",
     long_description=long_description,
     long_description_content_type="text/markdown",
     author="Ryan Galloway",
@@ -73,6 +73,8 @@ setup(
     },
     install_requires=[
         "GitPython==3.1.43",
+        "htmlmin==0.1.12",
+        "jsmin==3.0.1",
     ],
     extras_require={
         ":python_version<'3.7'": ["dataclasses"]

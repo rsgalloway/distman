@@ -60,6 +60,9 @@ DIST_FILE_VERSION = 1
 DIST_INFO_EXT = ".dist"
 DIR_VERSIONS = "versions"
 
+# build directory settings
+BUILD_DIR = os.getenv("BUILD_DIR", "build")
+
 # logging settings
 LOG_NAME = "distman"
 LOG_DIR = os.getenv("LOG_DIR", os.path.expanduser("~/log/distman"))
@@ -73,7 +76,7 @@ DRYRUN_MESSAGE = "NOTICE: Dry run (no changes will be made)"
 IGNORABLE = [
     "*~",
     ".git*",
-    ".env",
+    # ".env",
     ".venv",
     "*.bup",
     "*.bak",
@@ -81,9 +84,9 @@ IGNORABLE = [
     "*.lock",
     # "*.dist-info",  # required by importlib-metadata
     # "*.egg-info",  # required by setuptools
-    "*.pyc",
-    "*.pyd",
-    "*.pyo",
+    # "*.pyc",
+    # "*.pyd",
+    # "*.pyo",
     "*.swp",
     "*.temp*",
     "*.tmp",
@@ -108,6 +111,8 @@ PATH_TOKEN_CLOSE = "}"
 # dist file keys/tags
 TAG_AUTHOR = "author"
 TAG_DESTPATH = "destination"
+TAG_PIPELINE = "pipeline"
+TAG_OPTIONS = "options"
 TAG_SOURCEPATH = "source"
 TAG_VERSION = "version"
 TAG_TARGETS = "targets"

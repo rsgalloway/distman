@@ -6,12 +6,8 @@
             "destination": "{DEPLOY_ROOT}/lib/python/%1"
         },
         "bin": {
-            "source": "bin/distman",
-            "destination": "{DEPLOY_ROOT}/bin/distman"
-        },
-        "bat": {
-            "source": "bin/distman.bat",
-            "destination": "{DEPLOY_ROOT}/bin/distman.bat"
+            "source": "bin/*",
+            "destination": "{DEPLOY_ROOT}/bin/%1"
         },
         "env": {
             "source": "distman.env",
@@ -19,7 +15,12 @@
         },
         "lib": {
             "source": "lib/distman",
-            "destination": "{DEPLOY_ROOT}/lib/python/distman"
+            "destination": "{DEPLOY_ROOT}/lib/python/distman",
+            "pipeline": {
+                "formatting": {
+                    "script": ["black --check {input}"]
+                }
+            }
         }
     }
 }
