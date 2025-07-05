@@ -21,6 +21,7 @@ BUILD_CMD := pip install -r requirements.txt -t build
 build: clean
 	$(BUILD_CMD)
 	rm -rf build/bin
+	rm -rf build/distman
 
 # Clean target to remove the build directory
 clean:
