@@ -200,21 +200,22 @@ def _byte_compile_dir(directory: str) -> str:
     return directory
 
 
-def minify(input: str, output: str) -> str:
+def minify(input: str, output: str, strict: bool = False) -> str:
     """Minify a given src file and output to a dst file.
 
     :param input: Path to the input file or directory.
     :param output: Path to the output file or directory.
+    :param strict: If True, raises an error for unsupported file types.
     :raises TransformError: If the input file does not exist or is not a file.
     :return: The path to the output file or directory after minification.
     """
 
     if os.path.isdir(input):
         shutil.copytree(input, output, dirs_exist_ok=True)
-        _minify_dir(output)
+        _minify_dir(output, strict=strict)
     else:
         os.makedirs(os.path.dirname(output), exist_ok=True)
-        _minify_file(input, output)
+        _minify_file(input, output, strict=strict)
 
     return output
 
@@ -275,25 +276,27 @@ def _minify_html(input: str) -> str:
         return minified_html
 
 
-def _minify_dir(directory: str) -> str:
+def _minify_dir(directory: str, strict: bool = False) -> str:
     """Minify all files in a directory.
 
     :param directory: Path to the directory containing files to minify.
+    :param strict: If True, raises an error for unsupported file types.
     :raises TransformError: If a file is not found or is not a regular file.
     :return: The path to the directory after minification.
     """
     for filepath in util.walk(directory):
         if util.is_binary(filepath):
             continue
-        _minify_file(filepath, filepath)
+        _minify_file(filepath, filepath, strict=strict)
     return directory
 
 
-def _minify_file(input: str, output: str) -> str:
+def _minify_file(input: str, output: str, strict: bool = False) -> str:
     """Returns minified file contents.
 
     :param input: Path to the input file.
     :param output: Path to the output file.
+    :param strict: If True, raises an error for unsupported file types.
     :raises TransformError: If the input file does not exist or is not a file.
     :return: The path to the output file after minification.
     """
@@ -313,7 +316,12 @@ def _minify_file(input: str, output: str) -> str:
         elif ext in (".html", ".htm"):
             minified = _minify_html(input)
         else:
-            raise TransformError(f"Unsupported file type for minification: {ext}")
+            if strict:
+                raise TransformError(f"Unsupported file type for minification: {ext}")
+            else:
+                log.warning("Unsupported file type for minification: %s", input)
+                shutil.copy2(input, output)
+                return output
 
     except Exception as e:
         raise TransformError(e)
