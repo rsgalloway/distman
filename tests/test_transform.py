@@ -34,7 +34,10 @@ Contains tests for the transform module.
 """
 
 import os
+import pytest
+
 from distman.transform import replace_tokens, byte_compile, chmod, minify
+from distman.transform import TransformError
 
 
 def test_replace_tokens(tmp_path):
@@ -114,3 +117,15 @@ def test_minify_binary_file(tmp_path):
 
     minify(str(binary_file), str(minified_binary_file))
     assert minified_binary_file.read_bytes() == binary_data
+
+
+def test_minify_binary_file_strict(tmp_path):
+    """Test the minify function to ensure it raises a TransformError when strict=True
+    for a binary file."""
+    binary_file = tmp_path / "image.png"
+    binary_data = bytes([137, 80, 78, 71, 13, 10, 26, 10])  # sample PNG header
+    binary_file.write_bytes(binary_data)
+    minified_binary_file = tmp_path / "minified" / "image.png"
+
+    with pytest.raises(TransformError):
+        minify(str(binary_file), str(minified_binary_file), strict=True)
