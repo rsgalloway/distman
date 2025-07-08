@@ -289,11 +289,12 @@ def _minify_dir(directory: str) -> str:
     return directory
 
 
-def _minify_file(input: str, output: str) -> str:
+def _minify_file(input: str, output: str, strict: bool = False) -> str:
     """Returns minified file contents.
 
     :param input: Path to the input file.
     :param output: Path to the output file.
+    :param strict: If True, raises an error for unsupported file types.
     :raises TransformError: If the input file does not exist or is not a file.
     :return: The path to the output file after minification.
     """
@@ -313,7 +314,11 @@ def _minify_file(input: str, output: str) -> str:
         elif ext in (".html", ".htm"):
             minified = _minify_html(input)
         else:
-            raise TransformError(f"Unsupported file type for minification: {ext}")
+            if strict:
+                raise TransformError(f"Unsupported file type for minification: {ext}")
+            else:
+                log.warning("Unsupported file type for minification: %s", ext)
+                shutil.copy2(input, output)
 
     except Exception as e:
         raise TransformError(e)
