@@ -317,8 +317,9 @@ def _minify_file(input: str, output: str, strict: bool = False) -> str:
             if strict:
                 raise TransformError(f"Unsupported file type for minification: {ext}")
             else:
-                log.warning("Unsupported file type for minification: %s", ext)
+                log.warning("Unsupported file type for minification: %s", input)
                 shutil.copy2(input, output)
+                return
 
     except Exception as e:
         raise TransformError(e)

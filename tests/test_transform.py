@@ -103,3 +103,14 @@ def test_minify_html(tmp_path):
         minified_html_file.read_text()
         == "<html><head><title>Test</title></head><body></body></html>"
     )
+
+
+def test_minify_binary_file(tmp_path):
+    """Test the minify function to ensure it correctly copies a binary file as-is."""
+    binary_file = tmp_path / "image.png"
+    binary_data = bytes([137, 80, 78, 71, 13, 10, 26, 10])  # sample PNG header
+    binary_file.write_bytes(binary_data)
+    minified_binary_file = tmp_path / "minified" / "image.png"
+
+    minify(str(binary_file), str(minified_binary_file))
+    assert minified_binary_file.read_bytes() == binary_data

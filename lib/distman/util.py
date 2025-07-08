@@ -601,7 +601,27 @@ def is_binary(path: str) -> bool:
     if (
         str(path)
         .lower()
-        .endswith((".dll", ".ico", ".png", ".jpg", ".pyc", ".pyo", ".pyd", ".so"))
+        .endswith(
+            (
+                ".dll",
+                ".ico",
+                ".png",
+                ".jpg",
+                ".pyc",
+                ".pyo",
+                ".pyd",
+                ".so",
+                ".svg",
+                ".zip",
+                ".tar",
+                ".gz",
+                ".bz2",
+                ".exe",
+                ".bin",
+                ".class",
+                ".pdf",
+            )
+        )
     ):
         return True
     with open(path, "rb") as f:
