@@ -212,7 +212,7 @@ def minify(input: str, output: str, strict: bool = False) -> str:
 
     if os.path.isdir(input):
         shutil.copytree(input, output, dirs_exist_ok=True)
-        _minify_dir(output, stict=strict)
+        _minify_dir(output, strict=strict)
     else:
         os.makedirs(os.path.dirname(output), exist_ok=True)
         _minify_file(input, output, strict=strict)
