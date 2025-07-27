@@ -132,10 +132,6 @@ def copy_file(source: str, dest: str) -> None:
 def copy_directory(source: str, dest: str, all_files: bool = False) -> None:
     """Recursively copies a directory (ignores hidden files).
 
-    Substitutes tokens in the file if substitute_tokens is True. Tokens are in
-    the form of {TOKEN} and can be replaced with environment variables or default
-    values.
-
     :param source: Path to source directory.
     :param dest: Path to destination directory.
     :param all_files: Copy all files, including hidden and ignorable files.
@@ -152,10 +148,6 @@ def copy_directory(source: str, dest: str, all_files: bool = False) -> None:
 def copy_object(source: str, dest: str, all_files: bool = False) -> None:
     """Copies, or links, a file or directory recursively (ignores hidden
     files).
-
-    Substitutes tokens in the file if substitute_tokens is True. Tokens are in
-    the form of {TOKEN} and can be replaced with environment variables or default
-    values.
 
     :param source: Path to source file, link or directory.
     :param dest: Path to destination file or directory.
