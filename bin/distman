@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 
 __doc__ = """
-Contains a simple executable for the distman cli.py module.
+Contains deprecated executable for the distman cli.py module.
 """
 
 import re
 import sys
-from distman.cli import main
+from distman.cli import main_legacy
 
 if __name__ == "__main__":
     sys.argv[0] = re.sub(r"(-script\.pyw|\.exe)?$", "", sys.argv[0])
-    sys.exit(main())
+    sys.exit(main_legacy())

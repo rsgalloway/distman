@@ -137,6 +137,19 @@ def parse_args():
     return args
 
 
+def main_legacy():
+    """Main thread with deprecation warning."""
+    import warnings
+
+    warnings.warn(
+        "The 'distman' command is deprecated and will be removed in a future release. "
+        "Please use 'dist' instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return main()
+
+
 def main():
     """Main thread."""
 

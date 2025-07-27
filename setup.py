@@ -68,7 +68,8 @@ setup(
     packages=find_packages("lib"),
     entry_points={
         "console_scripts": [
-            "distman = distman.cli:main",
+            "dist = distman.cli:main",
+            "distman = distman.cli:main_legacy",
         ],
     },
     install_requires=[
