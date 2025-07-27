@@ -248,7 +248,6 @@ class Distributor(GitRepo):
                     except Exception as e:
                         log.error(f"{e} resolving wildcard target {name}")
                         return False
-
             else:
                 try:
                     dest_resolved = util.sanitize_path(util.replace_vars(dest))
@@ -272,15 +271,15 @@ class Distributor(GitRepo):
                         log.error(f"Target {name}: Source '{source}' does not exist")
                         return False
 
-                if (
-                    not show
-                    and not force
-                    and (src_path in changed_files or src_path in changed_dirs)
-                ):
-                    log.info(
-                        f"Target {name}: Source '{source}' has uncommitted changes. Commit or use --force."
-                    )
-                    return False
+                # if (
+                #     not show
+                #     and not force
+                #     and (src_path in changed_files or src_path in changed_dirs)
+                # ):
+                #     log.info(
+                #         f"Target {name}: Source '{source}' has uncommitted changes. Commit or use --force."
+                #     )
+                #     return False
 
                 if (
                     not show
@@ -321,6 +320,13 @@ class Distributor(GitRepo):
         for t in target_list:
             util.create_dest_folder(t.dest, dryrun, yes)
 
+            # determine if the commit hash will be used for matching versions
+            match_options = t.options.get("match")
+            if not match_options or match_options == "commit_hash":
+                commit_hash = self.short_head
+            else:
+                commit_hash = None
+
             if not dryrun and not show:
                 util.write_dist_info(
                     t.dest,
@@ -345,7 +351,7 @@ class Distributor(GitRepo):
             matches = util.find_matching_versions(
                 source_path=source_path,
                 dest=t.dest,
-                commit_hash=self.short_head,
+                commit_hash=commit_hash,
                 version_list=version_list,
                 force=force,
             )
