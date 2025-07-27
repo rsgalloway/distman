@@ -718,7 +718,10 @@ def safe_copytree(src: str, dst: str):
     :param dst: Destination directory path.
     """
 
-    for file in walk(src):
+    if os.path.abspath(src) == os.path.abspath(dst):
+        raise ValueError("Source and destination are the same: {src}")
+
+    for file in walk(src, exclude_paths=dst):
         relative_path = os.path.relpath(file, src)
         target_path = os.path.join(dst, relative_path)
         os.makedirs(os.path.dirname(target_path), exist_ok=True)
@@ -754,7 +757,10 @@ def get_files(start: str, all_files: bool = False) -> List[str]:
 
 
 def walk(
-    path: str, exclude_ignorables: bool = True, followlinks: bool = False
+    path: str,
+    exclude_ignorables: bool = True,
+    followlinks: bool = False,
+    exclude_paths: Optional[List[str]] = None,
 ) -> Generator[str, None, None]:
     """Generator that yields relative file paths that are not ignorable.
     Will include nested directories and symbolic links to directories:
@@ -769,12 +775,15 @@ def walk(
     :param path: file system path.
     :param exclude_ignorables: exclude ignorable files.
     :param followlinks: follow symbolic links.
+    :param exclude_paths: list of paths to exclude from the search.
     :return: generator of file paths.
     """
     if not is_ignorable(path) and os.path.isfile(path):
         yield path
     for dirname, dirs, files in os.walk(path, topdown=True, followlinks=followlinks):
         if exclude_ignorables and is_ignorable(dirname):
+            continue
+        if exclude_paths and dirname in exclude_paths:
             continue
         for d in dirs:
             if exclude_ignorables and is_ignorable(d):
