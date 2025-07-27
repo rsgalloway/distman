@@ -710,6 +710,22 @@ def replace_vars(
     return "".join(result)
 
 
+def safe_copytree(src: str, dst: str):
+    """Safely copies a directory tree, avoiding infinite recursion, and skipping
+    ignorable file patterns defined in config.IGNORABLE.
+
+    :param src: Source directory path.
+    :param dst: Destination directory path.
+    """
+
+    for file in walk(src):
+        relative_path = os.path.relpath(file, src)
+        target_path = os.path.join(dst, relative_path)
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        log.debug("Copying %s -> %s", file, target_path)
+        shutil.copy2(file, target_path)
+
+
 def yesNo(question: str) -> bool:
     """Displays question text to user and reads yes/no input.
 
