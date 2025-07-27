@@ -105,7 +105,7 @@ def copy_file(source: str, dest: str) -> None:
     try:
         destdir = os.path.dirname(dest)
         if not os.path.isdir(destdir):
-            os.makedirs(destdir)
+            os.makedirs(destdir, exist_ok=True)
         if os.path.islink(source):
             linkto = os.readlink(source)
             try:

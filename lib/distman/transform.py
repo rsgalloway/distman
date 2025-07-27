@@ -72,7 +72,7 @@ def replace_tokens(input: str, output: str, tokens: dict) -> str:
     :return: The path to the output file or directory.
     """
     if os.path.isdir(input):
-        util.copy_directory(input, output)
+        shutil.copytree(input, output, dirs_exist_ok=True)
         _replace_tokens_in_dir(output, tokens)
     else:
         _replace_tokens_in_file(input, output, tokens)
