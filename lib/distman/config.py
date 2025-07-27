@@ -99,6 +99,9 @@ IGNORABLE = [
     ".vscode",
 ]
 
+# ignore missing files in dist file
+IGNORE_MISSING = os.getenv("IGNORE_MISSING", "false").lower() in ("true", "1", "yes")
+
 # git repo settings
 LEN_HASH = 7
 LEN_MINHASH = 4

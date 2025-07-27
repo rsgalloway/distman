@@ -191,10 +191,11 @@ Most configuration is done in the `distman.env`
 Default config settings are in the config.py module. The following environment
 variables are supported:
 
-| Variable     | Description |
-|--------------|-------------|
-| $DEPLOY_ROOT | file deployment root directory |
-| $ENV         | target environment (e.g. prod or dev) |
-| $LOG_DIR     | directory to write log files |
-| $LOG_LEVEL   | logging level to use (DEBUG, INFO, etc) |
-| $ROOT        | dist root directory |
+| Variable        | Description |
+|-----------------|-------------|
+| $DEPLOY_ROOT    | file deployment root directory |
+| $ENV            | target environment (e.g. prod or dev) |
+| $IGNORE_MISSING | ignore missing source paths in targets |
+| $LOG_DIR        | directory to write log files |
+| $LOG_LEVEL      | logging level to use (DEBUG, INFO, etc) |
+| $ROOT           | dist root directory |

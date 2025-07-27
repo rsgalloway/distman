@@ -157,6 +157,7 @@ class Distributor(GitRepo):
         force: bool = False,
         all: bool = False,
         yes: bool = False,
+        ignore_missing: bool = config.IGNORE_MISSING,
         dryrun: bool = False,
         versiononly: bool = False,
         verbose: bool = False,
@@ -178,6 +179,7 @@ class Distributor(GitRepo):
         :param force: If True, forces the distribution even if there are uncommitted changes.
         :param all: If True, processes all files, ignoring changes.
         :param yes: If True, automatically confirms prompts.
+        :param ignore_missing: If True, ignores missing source paths.
         :param dryrun: If True, simulates the distribution without making changes.
         :param versiononly: If True, only updates the version without changing the symlink.
         :param verbose: If True, provides detailed output.
@@ -211,8 +213,11 @@ class Distributor(GitRepo):
 
             source = entry.get(config.TAG_SOURCEPATH)
             dest = entry.get(config.TAG_DESTPATH)
-            if source is None or dest is None:
-                log.info(f"Target {name}: Missing source or dest path")
+            if source is None:
+                log.info(f"Target {name}: Missing source path")
+                continue
+            if dest is None:
+                log.info(f"Target {name}: Missing dest path")
                 continue
 
             # get target pipeline and options
@@ -258,8 +263,14 @@ class Distributor(GitRepo):
                 )
 
                 if not os.path.exists(src_path):
-                    log.info(f"Target {name}: Source '{source}' does not exist")
-                    return False
+                    if target_options.get("ignore_missing", ignore_missing):
+                        log.info(
+                            f"Target {name}: Source '{source}' not found, skipping"
+                        )
+                        continue
+                    else:
+                        log.error(f"Target {name}: Source '{source}' does not exist")
+                        return False
 
                 if (
                     not show
