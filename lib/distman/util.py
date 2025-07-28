@@ -721,11 +721,10 @@ def safe_copytree(src: str, dst: str):
     if os.path.abspath(src) == os.path.abspath(dst):
         raise ValueError(f"Source and destination are the same: {src}")
 
-    for file in walk(src, exclude_paths=dst):
+    for file in walk(src, exclude_paths=[dst]):
         relative_path = os.path.relpath(file, src)
         target_path = os.path.join(dst, relative_path)
         os.makedirs(os.path.dirname(target_path), exist_ok=True)
-        log.debug("Copying %s -> %s", file, target_path)
         shutil.copy2(file, target_path)
 
 
