@@ -329,7 +329,7 @@ def test_find_matching_versions(temp_dir):
 
 
 def test_safe_copytree(temp_dir):
-    """Test the safe_copytree function to ensure it correctly copies directory trees."""
+    """Test the safe_copytree function to ensure it correctly copies trees."""
     src_dir = os.path.join(temp_dir, "src")
     dst_dir = os.path.join(temp_dir, "dst")
     os.makedirs(src_dir, exist_ok=True)
@@ -360,6 +360,25 @@ def test_safe_copytree(temp_dir):
         assert f.read() == "This is file 1."
     with open(os.path.join(dst_dir, "subdir", "file2.txt"), "r") as f:
         assert f.read() == "This is file 2."
+
+
+def test_safe_copytree_into_subdir(temp_dir):
+    """Test the safe_copytree function to ensure it does not copy recursively."""
+    src_dir = os.path.join(temp_dir, "src")
+    dst_dir = os.path.join(src_dir, "subdir")  # dst is a subdir of src
+
+    os.makedirs(src_dir, exist_ok=True)
+    with open(os.path.join(src_dir, "file1.txt"), "w") as f:
+        f.write("This is file 1.")
+
+    # perform the copy
+    util.safe_copytree(src_dir, dst_dir)
+
+    assert os.path.exists(os.path.join(dst_dir, "file1.txt"))
+
+    # check the contents of the copied files
+    with open(os.path.join(dst_dir, "file1.txt"), "r") as f:
+        assert f.read() == "This is file 1."
 
 
 def test_safe_copytree_valueerror(temp_dir):
