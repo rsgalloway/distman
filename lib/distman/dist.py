@@ -322,7 +322,7 @@ class Distributor(GitRepo):
 
             # determine if the commit hash will be used for matching versions
             match_options = t.options.get("match")
-            if not match_options or match_options == "commit_hash":
+            if not match_options or match_options == "commit":
                 commit_hash = self.short_head
             else:
                 commit_hash = None
@@ -357,7 +357,7 @@ class Distributor(GitRepo):
             )
 
             if matches and not force:
-                match_file, match_num, _ = matches[-1]
+                match_file, _, _ = matches[-1]
                 if os.path.islink(t.dest) and os.readlink(t.dest).endswith(
                     os.path.basename(match_file)
                 ):
