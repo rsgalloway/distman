@@ -60,8 +60,9 @@ DIST_FILE_VERSION = 1
 DIST_INFO_EXT = ".dist"
 DIR_VERSIONS = "versions"
 
-# build directory settings
+# build and pipeline transform directory settings
 BUILD_DIR = os.getenv("BUILD_DIR", "build")
+TRANSFORM_DIR = os.getenv("TRANSFORM_DIR", ".distman")
 
 # logging settings
 LOG_NAME = "distman"
@@ -98,6 +99,9 @@ IGNORABLE = [
     ".idea",
     ".vscode",
 ]
+
+# ignore missing files in dist file
+IGNORE_MISSING = os.getenv("IGNORE_MISSING", "false").lower() in ("true", "1", "yes")
 
 # git repo settings
 LEN_HASH = 7

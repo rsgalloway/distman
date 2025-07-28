@@ -105,6 +105,12 @@ def parse_args():
         help="dist all files, including ignorable files",
     )
     parser.add_argument(
+        "--ignore-missing",
+        action="store_true",
+        default=config.IGNORE_MISSING,
+        help="ignore missing files in dist file",
+    )
+    parser.add_argument(
         "-f",
         "--force",
         action="store_true",
@@ -135,6 +141,19 @@ def parse_args():
 
     args = parser.parse_args()
     return args
+
+
+def main_legacy():
+    """Main thread with deprecation warning."""
+    import warnings
+
+    warnings.warn(
+        "The 'distman' command is deprecated and will be removed in a future release. "
+        "Please use 'dist' instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return main()
 
 
 def main():
@@ -224,6 +243,7 @@ def main():
             force=args.force,
             all=args.all,
             yes=args.yes,
+            ignore_missing=args.ignore_missing,
             dryrun=args.dryrun,
             versiononly=args.version_only,
             verbose=args.verbose,

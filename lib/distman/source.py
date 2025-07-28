@@ -226,7 +226,7 @@ class GitRepo(Source):
 
         except git.InvalidGitRepositoryError:
             log.warning("WARNING: Not in a git repository")
-            self.repo = None
+            self.repo = False
         except Exception as e:
             log.warning("Error reading git repo: %s", str(e))
 

@@ -72,7 +72,7 @@ def replace_tokens(input: str, output: str, tokens: dict) -> str:
     :return: The path to the output file or directory.
     """
     if os.path.isdir(input):
-        shutil.copytree(input, output, dirs_exist_ok=True)
+        util.safe_copytree(input, output)
         _replace_tokens_in_dir(output, tokens)
     else:
         _replace_tokens_in_file(input, output, tokens)
@@ -147,7 +147,7 @@ def byte_compile(input: str, output: str) -> str:
     :return: The path to the output file or directory after byte-compilation.
     """
     if os.path.isdir(input):
-        shutil.copytree(input, output, dirs_exist_ok=True)
+        util.safe_copytree(input, output)
         return _byte_compile_dir(output)
     elif os.path.isfile(input):
         os.makedirs(os.path.dirname(output), exist_ok=True)
@@ -211,7 +211,7 @@ def minify(input: str, output: str, strict: bool = False) -> str:
     """
 
     if os.path.isdir(input):
-        shutil.copytree(input, output, dirs_exist_ok=True)
+        util.safe_copytree(input, output)
         _minify_dir(output, strict=strict)
     else:
         os.makedirs(os.path.dirname(output), exist_ok=True)
@@ -276,6 +276,19 @@ def _minify_html(input: str) -> str:
         return minified_html
 
 
+def _minify_text(input: str) -> str:
+    """Returns minified text source. Removes extra whitespace and newlines.
+
+    :param input: Path to the input text file.
+    :return: Minified text source as a string.
+    """
+
+    with open(input, "r") as infile:
+        text_content = infile.read()
+        minified_text = re.sub(r"\s+", " ", text_content.strip())
+        return minified_text
+
+
 def _minify_dir(directory: str, strict: bool = False) -> str:
     """Minify all files in a directory.
 
@@ -315,13 +328,19 @@ def _minify_file(input: str, output: str, strict: bool = False) -> str:
             minified = _minify_css(input)
         elif ext in (".html", ".htm"):
             minified = _minify_html(input)
+        elif ext in (".txt"):
+            minified = _minify_text(input)
         else:
             if strict:
                 raise TransformError(f"Unsupported file type for minification: {ext}")
             else:
                 log.warning("Unsupported file type for minification: %s", input)
-                shutil.copy2(input, output)
-                return output
+                if input != output:
+                    os.makedirs(os.path.dirname(output), exist_ok=True)
+                    shutil.copy2(input, output)
+                    return output
+                else:
+                    return input
 
     except Exception as e:
         raise TransformError(e)

@@ -3,7 +3,8 @@
     "targets": {
         "build": {
             "source": "build/*",
-            "destination": "{DEPLOY_ROOT}/lib/python/%1"
+            "destination": "{DEPLOY_ROOT}/lib/python/%1",
+            "options": {"match": "content"}
         },
         "bin": {
             "source": "bin/*",

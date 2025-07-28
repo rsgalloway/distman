@@ -29,11 +29,11 @@ clean:
 
 # Install target to install the builds using distman
 dryrun:
-	distman --dryrun
+	dist --dryrun
 
 # Install target to install the builds using distman
 install: build
-	distman --yes
+	dist --yes
 
 # Phony targets
 .PHONY: build dryrun install clean

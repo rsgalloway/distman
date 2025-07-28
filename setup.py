@@ -40,7 +40,7 @@ with open(os.path.join(here, "README.md")) as f:
 
 setup(
     name="distman",
-    version="0.6.1",
+    version="0.7.0",
     description="Simple software distribution for complex pipelines",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -68,7 +68,8 @@ setup(
     packages=find_packages("lib"),
     entry_points={
         "console_scripts": [
-            "distman = distman.cli:main",
+            "dist = distman.cli:main",
+            "distman = distman.cli:main_legacy",
         ],
     },
     install_requires=[

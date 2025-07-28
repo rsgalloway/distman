@@ -40,6 +40,7 @@ import subprocess
 import importlib
 from typing import Callable, Optional, Dict, List, Tuple, Any
 
+from distman import config, util
 from distman.logger import log
 from distman.transform import TransformError
 
@@ -122,13 +123,16 @@ def run_pipeline(
 
     current = input_path
 
+    # the directory where transformed files will be stored
+    transform_dir = config.TRANSFORM_DIR
+
     for step_name, step in sort_pipeline(pipeline):
-        log.info("Step: '%s'", step_name)
+        log.info("Pipeline Step: '%s'", step_name)
 
         if os.path.isfile(current):
             output = os.path.join(
                 build_dir,
-                "distman",
+                transform_dir,
                 target.name,
                 step_name,
                 os.path.basename(input_path),
@@ -136,9 +140,9 @@ def run_pipeline(
             os.makedirs(os.path.dirname(output), exist_ok=True)
             shutil.copy2(current, output)
         elif os.path.isdir(current):
-            output = os.path.join(build_dir, "distman", target.name, step_name)
+            output = os.path.join(build_dir, transform_dir, target.name, step_name)
             os.makedirs(output, exist_ok=True)
-            shutil.copytree(current, output, dirs_exist_ok=True)
+            util.safe_copytree(current, output)
 
         if "script" in step:
             commands = step["script"]

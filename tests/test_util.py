@@ -326,3 +326,65 @@ def test_find_matching_versions(temp_dir):
     # test with force option, should match commitA
     results = util.find_matching_versions(source_file, target_file, force=True)
     assert len(results) == 2
+
+
+def test_safe_copytree(temp_dir):
+    """Test the safe_copytree function to ensure it correctly copies trees."""
+    src_dir = os.path.join(temp_dir, "src")
+    dst_dir = os.path.join(temp_dir, "dst")
+    os.makedirs(src_dir, exist_ok=True)
+
+    # create some test files and directories
+    with open(os.path.join(src_dir, "file1.txt"), "w") as f:
+        f.write("This is file 1.")
+    os.makedirs(os.path.join(src_dir, "subdir"), exist_ok=True)
+    with open(os.path.join(src_dir, "subdir", "file2.txt"), "w") as f:
+        f.write("This is file 2.")
+
+    assert os.path.exists(os.path.join(src_dir, "file1.txt"))
+    assert os.path.exists(os.path.join(src_dir, "subdir", "file2.txt"))
+
+    # double-check the source directory structure
+    files = [f for f in util.walk(src_dir)]
+    assert len(files) == 2
+
+    # perform the copy
+    util.safe_copytree(src_dir, dst_dir)
+
+    # check if the files were copied correctly
+    assert os.path.exists(os.path.join(dst_dir, "file1.txt"))
+    assert os.path.exists(os.path.join(dst_dir, "subdir", "file2.txt"))
+
+    # check the contents of the copied files
+    with open(os.path.join(dst_dir, "file1.txt"), "r") as f:
+        assert f.read() == "This is file 1."
+    with open(os.path.join(dst_dir, "subdir", "file2.txt"), "r") as f:
+        assert f.read() == "This is file 2."
+
+
+def test_safe_copytree_into_subdir(temp_dir):
+    """Test the safe_copytree function to ensure it does not copy recursively."""
+    src_dir = os.path.join(temp_dir, "src")
+    dst_dir = os.path.join(src_dir, "subdir")  # dst is a subdir of src
+
+    os.makedirs(src_dir, exist_ok=True)
+    with open(os.path.join(src_dir, "file1.txt"), "w") as f:
+        f.write("This is file 1.")
+
+    # perform the copy
+    util.safe_copytree(src_dir, dst_dir)
+
+    assert os.path.exists(os.path.join(dst_dir, "file1.txt"))
+
+    # check the contents of the copied files
+    with open(os.path.join(dst_dir, "file1.txt"), "r") as f:
+        assert f.read() == "This is file 1."
+
+
+def test_safe_copytree_valueerror(temp_dir):
+    """Test the safe_copytree function to ensure it raises ValueError when
+    trying to copy to the same directory."""
+    src_dir = os.path.join(temp_dir, "src")
+
+    with pytest.raises(ValueError):
+        util.safe_copytree(src_dir, src_dir)
