@@ -321,11 +321,16 @@ class Distributor(GitRepo):
             util.create_dest_folder(t.dest, dryrun, yes)
 
             # determine if the commit hash will be used for matching versions
-            match_options = t.options.get("match")
-            if not match_options or match_options == "commit":
+            match_option = t.options.get("match", "commit")
+
+            # FIXME: fallback shim until match option is fully implemented
+            if match_option not in ["commit", "content"]:
+                raise ValueError(f"Unsupported version match option '{match_option}'")
+
+            if match_option == "commit":
                 commit_hash = self.short_head
             else:
-                commit_hash = None
+                commit_hash = None  # don't use commit_hash in version matching
 
             if not dryrun and not show:
                 util.write_dist_info(
