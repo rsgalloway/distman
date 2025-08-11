@@ -77,6 +77,37 @@ def test_get_pipeline_for_target_merges():
     assert "step1" in merged and "step2" in merged
 
 
+def test_get_pipeline_for_env_var(tmp_path):
+    """Test that an environment variable in the pipeline is resolved correctly."""
+    from distman.pipeline import run_pipeline
+
+    f = tmp_path / "test.txt"
+
+    target = Target("test", "input.txt", "test/input.txt", "f")
+    pipeline = {"step1": {"script": "echo {FOO}"}}
+
+    # set the environment variable for the test
+    os.environ["FOO"] = "bar"
+    run_pipeline(target, pipeline, str(f), tmp_path / "build")
+
+
+def test_get_pipeline_for_env_var_fails(tmp_path):
+    """Test that an environment variable in the pipeline fails if not set."""
+    from distman.pipeline import run_pipeline
+
+    f = tmp_path / "test.txt"
+
+    # ensure the environment variable is not set
+    if "FOO" in os.environ:
+        del os.environ["FOO"]
+
+    target = Target("test", "input.txt", "test/input.txt", "f")
+    pipeline = {"step1": {"script": "echo {FOO}"}}
+
+    with pytest.raises(KeyError):
+        run_pipeline(target, pipeline, str(f), tmp_path / "build")
+
+
 def test_black_check_fails(tmp_path):
     """Test that the black_check step fails on unformatted code."""
     from distman.pipeline import run_pipeline, TransformError

@@ -128,6 +128,7 @@ def run_pipeline(
 
     for step_name, step in sort_pipeline(pipeline):
         log.info("Pipeline Step: '%s'", step_name)
+        output = None
 
         if os.path.isfile(current):
             output = os.path.join(
@@ -151,7 +152,9 @@ def run_pipeline(
             if isinstance(commands, str):
                 commands = [commands]
             for cmd in commands:
-                cmd = cmd.format(input=shlex.quote(current), output=shlex.quote(output), **env)
+                cmd = cmd.format(
+                    input=shlex.quote(current), output=shlex.quote(output), **env
+                )
                 run_script_step(cmd, env=env)
 
         elif "func" in step:
