@@ -93,7 +93,7 @@ def test_get_pipeline_for_env_var(tmp_path):
 
 def test_get_pipeline_for_env_var_fails(tmp_path):
     """Test that an environment variable in the pipeline fails if not set."""
-    from distman.pipeline import run_pipeline
+    from distman.pipeline import run_pipeline, TransformError
 
     f = tmp_path / "test.txt"
 
@@ -104,7 +104,7 @@ def test_get_pipeline_for_env_var_fails(tmp_path):
     target = Target("test", "input.txt", "test/input.txt", "f")
     pipeline = {"step1": {"script": "echo {FOO}"}}
 
-    with pytest.raises(KeyError):
+    with pytest.raises(TransformError):
         run_pipeline(target, pipeline, str(f), tmp_path / "build")
 
 

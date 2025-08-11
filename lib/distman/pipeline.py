@@ -152,9 +152,12 @@ def run_pipeline(
             if isinstance(commands, str):
                 commands = [commands]
             for cmd in commands:
-                cmd = cmd.format(
-                    input=shlex.quote(current), output=shlex.quote(output), **env
-                )
+                try:
+                    cmd = cmd.format(
+                        input=shlex.quote(current), output=shlex.quote(output), **env
+                    )
+                except KeyError as e:
+                    raise TransformError(f"Missing key in command format: {e}")
                 run_script_step(cmd, env=env)
 
         elif "func" in step:
