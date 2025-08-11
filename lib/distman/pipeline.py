@@ -128,6 +128,7 @@ def run_pipeline(
 
     for step_name, step in sort_pipeline(pipeline):
         log.info("Pipeline Step: '%s'", step_name)
+        output = None
 
         if os.path.isfile(current):
             output = os.path.join(
@@ -146,11 +147,18 @@ def run_pipeline(
 
         if "script" in step:
             commands = step["script"]
+            env = os.environ.copy()
+            env.update(step.get("env", {}))
             if isinstance(commands, str):
                 commands = [commands]
             for cmd in commands:
-                cmd = cmd.format(input=shlex.quote(current), output=shlex.quote(output))
-                run_script_step(cmd, env=step.get("env", None))
+                try:
+                    cmd = cmd.format(
+                        input=shlex.quote(current), output=shlex.quote(output), **env
+                    )
+                except KeyError as e:
+                    raise TransformError(f"Missing key in command format: {e}")
+                run_script_step(cmd, env=env)
 
         elif "func" in step:
             func = resolve_dotted_path(step["func"])
