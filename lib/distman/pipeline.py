@@ -146,11 +146,13 @@ def run_pipeline(
 
         if "script" in step:
             commands = step["script"]
+            env = os.environ.copy()
+            env.update(step.get("env", {}))
             if isinstance(commands, str):
                 commands = [commands]
             for cmd in commands:
-                cmd = cmd.format(input=shlex.quote(current), output=shlex.quote(output))
-                run_script_step(cmd, env=step.get("env", None))
+                cmd = cmd.format(input=shlex.quote(current), output=shlex.quote(output), **env)
+                run_script_step(cmd, env=env)
 
         elif "func" in step:
             func = resolve_dotted_path(step["func"])
