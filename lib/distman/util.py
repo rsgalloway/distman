@@ -200,9 +200,11 @@ def compare_files(source: str, target: str) -> bool:
     # do binary comparison if there are invalid characters
     except UnicodeDecodeError:
         return filecmp.cmp(source, target, shallow=False)
-    except IsADirectoryError as err:
+    # handle errors related to file access
+    except (NotADirectoryError, IsADirectoryError) as err:
         log.error("Cannot compare source: %s" % err)
         return False
+    # handle case where file does not exist
     except FileNotFoundError:
         return False
 
