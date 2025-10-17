@@ -344,12 +344,33 @@ class Distributor(GitRepo):
                     },
                 )
 
+            source_path = t.source
+
+            # run the pipeline if defined
+            if not dryrun and t.pipeline:
+                try:
+                    source_path = run_pipeline(
+                        target=t,
+                        pipeline=t.pipeline,
+                        input_path=t.source,
+                        build_dir=config.BUILD_DIR,
+                    )
+                except ValidationError as e:
+                    log.error(f"Pipeline validation error: {e}")
+                    raise
+                except TransformError as e:
+                    log.error(f"Pipeline transform error: {e}")
+                    raise
+                except Exception as e:
+                    log.error(f"Pipeline unhandled error: {e}")
+                    raise
+
             version_list = util.get_file_versions(t.dest)
             if show:
                 self.show_distribution_info(t.source, t.dest, version_list, verbose)
                 continue
 
-            source_path = t.source
+            # source_path = t.source
             version_num = version_list[-1][1] + 1 if version_list else 0
 
             # look for matches in existing versions
@@ -383,31 +404,11 @@ class Distributor(GitRepo):
             # get the destination path for the versioned file
             version_dest = get_version_dest(t.dest, version_num, self.short_head)
 
-            if not dryrun:
-                # run the pipeline steps for the target in order
-                if t.pipeline:
-                    try:
-                        source_path = run_pipeline(
-                            target=t,
-                            pipeline=t.pipeline,
-                            input_path=t.source,
-                            build_dir=config.BUILD_DIR,
-                        )
-                    except ValidationError as e:
-                        log.error(f"Pipeline validation error: {e}")
-                        raise
-                    except TransformError as e:
-                        log.error(f"Pipeline transform error: {e}")
-                        raise
-                    except Exception as e:
-                        log.error("Pipeline error: %s", str(e))
-                        raise
-
-                # copy the source file to the versioned destination
-                util.copy_object(source_path, version_dest, all_files=all)
-                if not versiononly:
-                    if not update_symlink(t.dest, version_dest, dryrun):
-                        continue
+            # copy the source file to the versioned destination
+            util.copy_object(source_path, version_dest, all_files=all)
+            if not versiononly:
+                if not update_symlink(t.dest, version_dest, dryrun):
+                    continue
 
             log.info(f"Updated: {t.source} ={t.type}> {version_dest}")
 
