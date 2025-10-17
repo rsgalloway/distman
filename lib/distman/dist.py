@@ -128,7 +128,7 @@ def get_version_dest(dest: str, version_num: int, short_head: Optional[str]) -> 
     )
     if short_head:
         version_dest += f".{short_head}"
-    return version_dest
+    return util.sanitize_path(version_dest)
 
 
 def should_skip_target(target_name: str, pattern: Optional[str]) -> bool:
