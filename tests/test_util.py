@@ -50,17 +50,20 @@ def temp_dir():
 
 
 def test_normalize_path():
-    """Test the normalize_path function to ensure it correctly normalizes
-    paths."""
+    """Test the normalize_path function to ensure it correctly normalizes paths."""
     assert util.normalize_path("./foo/bar/") == os.path.normpath("foo/bar")
     assert util.normalize_path("") == "."
 
 
 def test_sanitize_path():
-    """Test the sanitize_path function to ensure it correctly sanitizes
-    paths."""
+    """Test the sanitize_path function to ensure it correctly sanitizes paths."""
     assert util.sanitize_path("foo\\bar\\") == "foo/bar"
-    assert util.sanitize_path("foo/bar/") == "foo/bar"
+    assert util.sanitize_path("/foo/bar/") == "/foo/bar"
+    assert util.sanitize_path("/foo//bar") == "/foo/bar"
+    assert util.sanitize_path("/path/foo\\bar/") == "/path/foo/bar"
+    assert util.sanitize_path("C:\\path\\to\\file") == "C:/path/to/file"
+    assert util.sanitize_path("\\\\server\\share\\folder\\") == "//server/share/folder"
+    assert util.sanitize_path("") == ""
 
 
 def test_get_path_type(temp_dir):
