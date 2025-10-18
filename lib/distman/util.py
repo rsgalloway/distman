@@ -111,7 +111,7 @@ def copy_file(source: str, dest: str) -> None:
             try:
                 os.symlink(linkto, dest, target_is_directory=os.path.isdir(linkto))
             except OSError as e:
-                log.error("Failed to create symbolic link: %s" % str(e))
+                log.error("Failed to create symbolic link: %s", str(e))
         # copy file, converting line endings to LF and replacing tokens
         else:
             with open(source, "r") as infile, open(dest, "wb") as outfile:
@@ -202,7 +202,7 @@ def compare_files(source: str, target: str) -> bool:
         return filecmp.cmp(source, target, shallow=False)
     # handle errors related to file access
     except (NotADirectoryError, IsADirectoryError) as err:
-        log.error("Cannot compare source: %s" % err)
+        log.error("Cannot compare source: %s", str(err))
         return False
     # handle case where file does not exist
     except FileNotFoundError:
@@ -368,7 +368,10 @@ def sanitize_path(path: str) -> str:
     :param path: file system path.
     :returns: sanitized path.
     """
-    return path.replace("\\", "/").rstrip("/") if path else path
+    path = path.replace("\\", "/")
+    while "//" in path:
+        path = path.replace("//", "/")
+    return path
 
 
 def get_rel_version_path(target: str) -> str:
@@ -423,7 +426,8 @@ def write_dist_info(dest: str, dist_info: dict) -> None:
     :return: None
     """
     distinfo = get_dist_info(dest=dest)
-    log.debug("Writing dist info to %s" % distinfo)
+    log.debug("Writing dist info to %s", distinfo)
+    os.makedirs(os.path.dirname(distinfo), exist_ok=True)
     with open(distinfo, "w") as outFile:
         for key, value in dist_info.items():
             outFile.write(f"{key}: {value}\n")
@@ -441,17 +445,17 @@ def create_dest_folder(dest: str, dryrun: bool = False, yes: bool = False) -> bo
     dest_dir = os.path.dirname(dest)
 
     if not os.path.exists(dest_dir):
-        log.info("Creating destination directory '%s'" % dest_dir)
+        log.info("Creating destination directory '%s'", dest_dir)
         if not dryrun:
             try:
                 os.makedirs(dest_dir)
             except Exception as e:
                 log.info(
-                    "ERROR: Failed to create directory '%s': %s" % (dest_dir, str(e))
+                    "ERROR: Failed to create directory '%s': %s", dest_dir, str(e)
                 )
                 return False
     elif not os.path.isdir(dest_dir):
-        log.info("Directory not found: %s" % dest_dir)
+        log.info("Directory not found: %s", dest_dir)
         return False
 
     # if dist info file does not exist means this is a new target
