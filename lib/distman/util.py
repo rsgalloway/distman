@@ -362,16 +362,17 @@ def normalize_path(path: str) -> str:
 
 
 def sanitize_path(path: str) -> str:
-    """Sanitizes a path by changing separators to forward slashes and removing
-    trailing slashes.
+    """Sanitizes a path by changing separators to forward slashes, removing double
+    slashes and removing trailing slashes.
 
     :param path: file system path.
     :returns: sanitized path.
     """
     path = path.replace("\\", "/")
-    while "//" in path:
-        path = path.replace("//", "/")
-    return path
+    if path[:2] != "//":  # unc paths
+        while "//" in path:
+            path = path.replace("//", "/")
+    return path.rstrip("/")
 
 
 def get_rel_version_path(target: str) -> str:
@@ -450,9 +451,7 @@ def create_dest_folder(dest: str, dryrun: bool = False, yes: bool = False) -> bo
             try:
                 os.makedirs(dest_dir)
             except Exception as e:
-                log.info(
-                    "ERROR: Failed to create directory '%s': %s", dest_dir, str(e)
-                )
+                log.info("ERROR: Failed to create directory '%s': %s", dest_dir, str(e))
                 return False
     elif not os.path.isdir(dest_dir):
         log.info("Directory not found: %s", dest_dir)
