@@ -516,7 +516,7 @@ def expand_wildcard_entry(
     return sorted(results)
 
 
-def get_file_versions(target: str) -> List[Tuple[str, int, str]]:
+def get_file_versions(target: str, limit: int = None) -> List[Tuple[str, int, str]]:
     """Returns a list of all versions of a file in the versions directory:
 
         [("/path/to/dest/versions/target.1.abc123", 1, "abc123"),]
@@ -531,6 +531,7 @@ def get_file_versions(target: str) -> List[Tuple[str, int, str]]:
     is everything after the version number, up to the next dot or dash.
 
     :param target: Path to target destination.
+    :param limit: Maximum number of versions to return.
     :return: List of tuples of (file path, version number, commit string).
     """
     filedir = os.path.join(os.path.dirname(target), config.DIR_VERSIONS)
@@ -541,6 +542,9 @@ def get_file_versions(target: str) -> List[Tuple[str, int, str]]:
     version_list = []
 
     for f in os.listdir(filedir):
+        if limit and len(version_list) >= limit:
+            break
+
         file_name_length = len(filename)
         # get files that match <target>.<version>.<commit>
         if (
@@ -664,11 +668,11 @@ def remove_object(path: str, recurse: bool = False) -> None:
 
 def replace_vars(
     s: str,
-    env=None,
-    defaults=None,
-    open_token=config.PATH_TOKEN_OPEN,
-    close_token=config.PATH_TOKEN_CLOSE,
-    strict=True,
+    env: dict = None,
+    defaults: dict = None,
+    open_token: str = config.PATH_TOKEN_OPEN,
+    close_token: str = config.PATH_TOKEN_CLOSE,
+    strict: bool = True,
 ) -> str:
     """Replaces {VARS} in the input string with values from the environment or defaults.
 

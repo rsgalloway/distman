@@ -45,4 +45,4 @@ try:
 except Exception as e:
     pass
 
-from .dist import Distributor
+from .dist import Distributor  # noqa

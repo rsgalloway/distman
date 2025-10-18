@@ -365,7 +365,8 @@ class Distributor(GitRepo):
                     log.error(f"Pipeline unhandled error: {e}")
                     raise
 
-            version_list = util.get_file_versions(t.dest)
+            # get existing versions for the target
+            version_list = util.get_file_versions(t.dest, limit=config.MAX_VERSIONS)
             if show:
                 self.show_distribution_info(t.source, t.dest, version_list, verbose)
                 continue
@@ -379,10 +380,9 @@ class Distributor(GitRepo):
                 dest=t.dest,
                 commit_hash=commit_hash,
                 version_list=version_list,
-                force=force,
             )
 
-            if matches and not force:
+            if not force and matches:
                 match_file, _, _ = matches[-1]
                 if os.path.islink(t.dest) and os.readlink(t.dest).endswith(
                     os.path.basename(match_file)
@@ -405,10 +405,11 @@ class Distributor(GitRepo):
             version_dest = get_version_dest(t.dest, version_num, self.short_head)
 
             # copy the source file to the versioned destination
-            util.copy_object(source_path, version_dest, all_files=all)
-            if not versiononly:
-                if not update_symlink(t.dest, version_dest, dryrun):
-                    continue
+            if not dryrun:
+                util.copy_object(source_path, version_dest, all_files=all)
+                if not versiononly:
+                    if not update_symlink(t.dest, version_dest, dryrun):
+                        continue
 
             log.info(f"Updated: {t.source} ={t.type}> {version_dest}")
 
