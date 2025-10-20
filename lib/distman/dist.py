@@ -371,7 +371,7 @@ class Distributor(GitRepo):
                 self.show_distribution_info(t.source, t.dest, version_list, verbose)
                 continue
 
-            # source_path = t.source
+            # determine the next version number
             version_num = version_list[-1][1] + 1 if version_list else 0
 
             # look for matches in existing versions
