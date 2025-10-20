@@ -374,15 +374,18 @@ class Distributor(GitRepo):
             # determine the next version number
             version_num = version_list[-1][1] + 1 if version_list else 0
 
-            # look for matches in existing versions
-            matches = util.find_matching_versions(
-                source_path=source_path,
-                dest=t.dest,
-                commit_hash=commit_hash,
-                version_list=version_list,
-            )
+            # look for matches in existing versions unless forced
+            matches = []
+            if not force:
+                matches = util.find_matching_versions(
+                    source_path=source_path,
+                    dest=t.dest,
+                    commit_hash=commit_hash,
+                    version_list=version_list,
+                )
 
-            if not force and matches:
+            # if a match is found, update the symlink if needed
+            if matches:
                 match_file, _, _ = matches[-1]
                 if os.path.islink(t.dest) and os.readlink(t.dest).endswith(
                     os.path.basename(match_file)

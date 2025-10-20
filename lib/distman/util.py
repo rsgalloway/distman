@@ -235,7 +235,6 @@ def find_matching_versions(
     dest: str,
     commit_hash: Optional[str] = None,
     version_list: Optional[List[Tuple[str, int, str]]] = None,
-    force: Optional[bool] = False,
 ) -> List[Tuple[str, int, str]]:
     """Finds all matching versions of a file in the destination directory,
     sorted from oldest to newest.
@@ -246,16 +245,16 @@ def find_matching_versions(
     :param dest: Path to target destination.
     :param commit_hash: Optional commit hash to filter versions.
     :param version_list: List of tuples with version file, number and commit.
-    :param force: Ignore commit_hash and rescan target versions.
     :return: List of tuples with version file, number and commit.
     """
+    log.debug("Find matching versions for %s" % dest)
 
     # refresh version_list from the target destination
-    if version_list is None or force:
+    if version_list is None:
         version_list = get_file_versions(dest)
 
     # match versions by commit hash
-    if not force and commit_hash:
+    if commit_hash:
         results = []
         for version_file, version_num, version_commit in version_list:
             if version_commit == commit_hash:

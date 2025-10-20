@@ -369,10 +369,6 @@ def test_find_matching_versions(temp_dir):
     )
     assert len(results) == 1
 
-    # test with force option, should match commitA
-    results = util.find_matching_versions(source_file, target_file, force=True)
-    assert len(results) == 2
-
 
 def test_safe_copytree(temp_dir):
     """Test the safe_copytree function to ensure it correctly copies trees."""
