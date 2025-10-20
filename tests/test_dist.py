@@ -59,12 +59,27 @@ def temp_dir():
 
 @pytest.fixture
 def mock_dist_dict():
-    """Helper function to create a mock distribution dictionary."""
+    """Helper function to create a mock distribution dict."""
     return {
         "targets": {
             "test_target": {
                 "source": "source_path",
                 "destination": "{DEPLOY_ROOT}/lib/python/source_path",
+            }
+        }
+    }
+
+
+@pytest.fixture
+def mock_dist_dict_with_pipeline():
+    """Helper function to create a mock distribution dict with pipeline steps."""
+    return {
+        "targets": {
+            "test_target": {
+                "source": "source_path",
+                "destination": "{DEPLOY_ROOT}/lib/python/source_path",
+                "options": {"match": "content"},
+                "pipeline": {"formatting": {"script": ["black --check {input}"]}},
             }
         }
     }
@@ -82,9 +97,7 @@ def mock_distributor(mocker, temp_dir, mock_dist_dict):
     mocker.patch("distman.util.get_file_versions", return_value=[])
     mocker.patch("distman.util.link_object", return_value=True)
     mocker.patch("distman.util.remove_object", return_value=True)
-    mocker.patch("distman.util.replace_vars", side_effect=lambda s: s)
     mocker.patch("distman.util.yesNo", return_value=True)
-    mocker.patch("os.makedirs", return_value=None)
     os.environ["DEPLOY_ROOT"] = temp_dir
 
 
@@ -293,10 +306,26 @@ def test_distributor_initialization():
 
 def test_dist_with_valid_target(mock_distributor, mocker, mock_dist_dict):
     """Test the dist method with a valid target."""
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix="source_path") as temp_file:
+        source_path = temp_file.name
+        mock_dist_dict["targets"]["test_target"]["source"] = source_path
+
+        distributor = Distributor()
+        distributor.root = mock_dist_dict
+        result = distributor.dist(target="test_target", yes=True, dryrun=False)
+        os.remove(source_path)
+        assert result is True
+
+
+def test_dist_with_pipeline_steps(
+    mock_distributor, mocker, mock_dist_dict_with_pipeline
+):
+    """Test the dist method with pipeline steps."""
     mocker.patch("os.path.exists", return_value=True)
 
     dist = Distributor()
-    dist.root = mock_dist_dict
+    dist.root = mock_dist_dict_with_pipeline
     result = dist.dist(target="test_target", dryrun=True)
     assert result is True
 

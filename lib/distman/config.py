@@ -71,13 +71,17 @@ LOG_LEVEL_DEFAULT = "INFO"
 LOG_LEVEL = os.getenv("LOG_LEVEL", LOG_LEVEL_DEFAULT)
 LOG_MAX_BYTES = 1_000_000
 LOG_BACKUP_COUNT = 5
+
+# max number of versions to compare when checking for changes
+MAX_VERSIONS = int(os.getenv("MAX_VERSIONS", "10"))
+
+# dry run message
 DRYRUN_MESSAGE = "NOTICE: Dry run (no changes will be made)"
 
 # ignorable files and directories
 IGNORABLE = [
     "*~",
     ".git*",
-    # ".env",
     ".venv",
     "*.bup",
     "*.bak",

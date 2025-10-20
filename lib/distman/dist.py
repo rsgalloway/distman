@@ -128,7 +128,7 @@ def get_version_dest(dest: str, version_num: int, short_head: Optional[str]) -> 
     )
     if short_head:
         version_dest += f".{short_head}"
-    return version_dest
+    return util.sanitize_path(version_dest)
 
 
 def should_skip_target(target_name: str, pattern: Optional[str]) -> bool:
@@ -344,24 +344,48 @@ class Distributor(GitRepo):
                     },
                 )
 
-            version_list = util.get_file_versions(t.dest)
+            source_path = t.source
+
+            # run the pipeline if defined
+            if not dryrun and t.pipeline:
+                try:
+                    source_path = run_pipeline(
+                        target=t,
+                        pipeline=t.pipeline,
+                        input_path=t.source,
+                        build_dir=config.BUILD_DIR,
+                    )
+                except ValidationError as e:
+                    log.error(f"Pipeline validation error: {e}")
+                    raise
+                except TransformError as e:
+                    log.error(f"Pipeline transform error: {e}")
+                    raise
+                except Exception as e:
+                    log.error(f"Pipeline unhandled error: {e}")
+                    raise
+
+            # get existing versions for the target
+            version_list = util.get_file_versions(t.dest, limit=config.MAX_VERSIONS)
             if show:
                 self.show_distribution_info(t.source, t.dest, version_list, verbose)
                 continue
 
-            source_path = t.source
+            # determine the next version number
             version_num = version_list[-1][1] + 1 if version_list else 0
 
-            # look for matches in existing versions
-            matches = util.find_matching_versions(
-                source_path=source_path,
-                dest=t.dest,
-                commit_hash=commit_hash,
-                version_list=version_list,
-                force=force,
-            )
+            # look for matches in existing versions unless forced
+            matches = []
+            if not force:
+                matches = util.find_matching_versions(
+                    source_path=source_path,
+                    dest=t.dest,
+                    commit_hash=commit_hash,
+                    version_list=version_list,
+                )
 
-            if matches and not force:
+            # if a match is found, update the symlink if needed
+            if matches:
                 match_file, _, _ = matches[-1]
                 if os.path.islink(t.dest) and os.readlink(t.dest).endswith(
                     os.path.basename(match_file)
@@ -383,27 +407,8 @@ class Distributor(GitRepo):
             # get the destination path for the versioned file
             version_dest = get_version_dest(t.dest, version_num, self.short_head)
 
+            # copy the source file to the versioned destination
             if not dryrun:
-                # run the pipeline steps for the target in order
-                if t.pipeline:
-                    try:
-                        source_path = run_pipeline(
-                            target=t,
-                            pipeline=t.pipeline,
-                            input_path=t.source,
-                            build_dir=config.BUILD_DIR,
-                        )
-                    except ValidationError as e:
-                        log.error(f"Pipeline validation error: {e}")
-                        raise
-                    except TransformError as e:
-                        log.error(f"Pipeline transform error: {e}")
-                        raise
-                    except Exception as e:
-                        log.error("Pipeline error: %s", str(e))
-                        raise
-
-                # copy the source file to the versioned destination
                 util.copy_object(source_path, version_dest, all_files=all)
                 if not versiononly:
                     if not update_symlink(t.dest, version_dest, dryrun):

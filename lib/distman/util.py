@@ -111,7 +111,7 @@ def copy_file(source: str, dest: str) -> None:
             try:
                 os.symlink(linkto, dest, target_is_directory=os.path.isdir(linkto))
             except OSError as e:
-                log.error("Failed to create symbolic link: %s" % str(e))
+                log.error("Failed to create symbolic link: %s", str(e))
         # copy file, converting line endings to LF and replacing tokens
         else:
             with open(source, "r") as infile, open(dest, "wb") as outfile:
@@ -202,7 +202,7 @@ def compare_files(source: str, target: str) -> bool:
         return filecmp.cmp(source, target, shallow=False)
     # handle errors related to file access
     except (NotADirectoryError, IsADirectoryError) as err:
-        log.error("Cannot compare source: %s" % err)
+        log.error("Cannot compare source: %s", str(err))
         return False
     # handle case where file does not exist
     except FileNotFoundError:
@@ -235,7 +235,6 @@ def find_matching_versions(
     dest: str,
     commit_hash: Optional[str] = None,
     version_list: Optional[List[Tuple[str, int, str]]] = None,
-    force: Optional[bool] = False,
 ) -> List[Tuple[str, int, str]]:
     """Finds all matching versions of a file in the destination directory,
     sorted from oldest to newest.
@@ -246,16 +245,14 @@ def find_matching_versions(
     :param dest: Path to target destination.
     :param commit_hash: Optional commit hash to filter versions.
     :param version_list: List of tuples with version file, number and commit.
-    :param force: Ignore commit_hash and rescan target versions.
     :return: List of tuples with version file, number and commit.
     """
-
     # refresh version_list from the target destination
-    if version_list is None or force:
+    if version_list is None:
         version_list = get_file_versions(dest)
 
     # match versions by commit hash
-    if not force and commit_hash:
+    if commit_hash:
         results = []
         for version_file, version_num, version_commit in version_list:
             if version_commit == commit_hash:
@@ -362,13 +359,17 @@ def normalize_path(path: str) -> str:
 
 
 def sanitize_path(path: str) -> str:
-    """Sanitizes a path by changing separators to forward slashes and removing
-    trailing slashes.
+    """Sanitizes a path by changing separators to forward slashes, removing double
+    slashes and removing trailing slashes.
 
     :param path: file system path.
     :returns: sanitized path.
     """
-    return path.replace("\\", "/").rstrip("/") if path else path
+    path = path.replace("\\", "/")
+    if path[:2] != "//":  # unc paths
+        while "//" in path:
+            path = path.replace("//", "/")
+    return path.rstrip("/")
 
 
 def get_rel_version_path(target: str) -> str:
@@ -423,7 +424,8 @@ def write_dist_info(dest: str, dist_info: dict) -> None:
     :return: None
     """
     distinfo = get_dist_info(dest=dest)
-    log.debug("Writing dist info to %s" % distinfo)
+    log.debug("Writing dist info to %s", distinfo)
+    os.makedirs(os.path.dirname(distinfo), exist_ok=True)
     with open(distinfo, "w") as outFile:
         for key, value in dist_info.items():
             outFile.write(f"{key}: {value}\n")
@@ -441,17 +443,15 @@ def create_dest_folder(dest: str, dryrun: bool = False, yes: bool = False) -> bo
     dest_dir = os.path.dirname(dest)
 
     if not os.path.exists(dest_dir):
-        log.info("Creating destination directory '%s'" % dest_dir)
+        log.info("Creating destination directory '%s'", dest_dir)
         if not dryrun:
             try:
                 os.makedirs(dest_dir)
             except Exception as e:
-                log.info(
-                    "ERROR: Failed to create directory '%s': %s" % (dest_dir, str(e))
-                )
+                log.info("ERROR: Failed to create directory '%s': %s", dest_dir, str(e))
                 return False
     elif not os.path.isdir(dest_dir):
-        log.info("Directory not found: %s" % dest_dir)
+        log.info("Directory not found: %s", dest_dir)
         return False
 
     # if dist info file does not exist means this is a new target
@@ -516,7 +516,7 @@ def expand_wildcard_entry(
     return sorted(results)
 
 
-def get_file_versions(target: str) -> List[Tuple[str, int, str]]:
+def get_file_versions(target: str, limit: int = None) -> List[Tuple[str, int, str]]:
     """Returns a list of all versions of a file in the versions directory:
 
         [("/path/to/dest/versions/target.1.abc123", 1, "abc123"),]
@@ -531,6 +531,7 @@ def get_file_versions(target: str) -> List[Tuple[str, int, str]]:
     is everything after the version number, up to the next dot or dash.
 
     :param target: Path to target destination.
+    :param limit: Maximum number of versions to return.
     :return: List of tuples of (file path, version number, commit string).
     """
     filedir = os.path.join(os.path.dirname(target), config.DIR_VERSIONS)
@@ -540,7 +541,10 @@ def get_file_versions(target: str) -> List[Tuple[str, int, str]]:
     filename = os.path.basename(target)
     version_list = []
 
-    for f in os.listdir(filedir):
+    for f in sorted(os.listdir(filedir)):
+        if limit and len(version_list) >= limit:
+            break
+
         file_name_length = len(filename)
         # get files that match <target>.<version>.<commit>
         if (
@@ -664,11 +668,11 @@ def remove_object(path: str, recurse: bool = False) -> None:
 
 def replace_vars(
     s: str,
-    env=None,
-    defaults=None,
-    open_token=config.PATH_TOKEN_OPEN,
-    close_token=config.PATH_TOKEN_CLOSE,
-    strict=True,
+    env: dict = None,
+    defaults: dict = None,
+    open_token: str = config.PATH_TOKEN_OPEN,
+    close_token: str = config.PATH_TOKEN_CLOSE,
+    strict: bool = True,
 ) -> str:
     """Replaces {VARS} in the input string with values from the environment or defaults.
 

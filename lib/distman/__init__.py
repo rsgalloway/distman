@@ -35,7 +35,7 @@ distman distributes files and directories to versioned destinations.
 
 __author__ = "ryan@rsgalloway.com"
 __prog__ = "distman"
-__version__ = "0.7.1"
+__version__ = "0.7.2"
 
 try:
     import envstack
@@ -45,4 +45,4 @@ try:
 except Exception as e:
     pass
 
-from .dist import Distributor
+from .dist import Distributor  # noqa
