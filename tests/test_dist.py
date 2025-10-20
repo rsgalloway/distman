@@ -321,7 +321,7 @@ def test_dist_with_valid_target(mock_distributor, mocker, mock_dist_dict):
 def test_dist_with_pipeline_steps(
     mock_distributor, mocker, mock_dist_dict_with_pipeline
 ):
-    """Test the dist method with a pipeline steps."""
+    """Test the dist method with pipeline steps."""
     mocker.patch("os.path.exists", return_value=True)
 
     dist = Distributor()
