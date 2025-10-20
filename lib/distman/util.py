@@ -544,7 +544,7 @@ def get_file_versions(target: str, limit: int = None) -> List[Tuple[str, int, st
     filename = os.path.basename(target)
     version_list = []
 
-    for f in os.listdir(filedir):
+    for f in sorted(os.listdir(filedir)):
         if limit and len(version_list) >= limit:
             break
 

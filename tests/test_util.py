@@ -218,9 +218,9 @@ def test_expand_wildcard_entry(temp_dir):
         assert result[1] == expected[1]
 
 
-def test_get_file_versions(temp_dir):
-    """Test the get_file_versions function to ensure it correctly retrieves file
-    versions."""
+def test_get_file_versions_with_limit(temp_dir):
+    """Test the get_file_versions function with a limit on the number of versions
+    returned."""
     versioned_dir = os.path.join(temp_dir, "versions")
     os.makedirs(versioned_dir, exist_ok=True)
 
@@ -228,10 +228,10 @@ def test_get_file_versions(temp_dir):
     base_filename = "testfile.txt"
     versions = [
         "testfile.txt.1.commitA",
+        "testfile.txt.5.commitE",
+        "testfile.txt.3.commitC",
+        "testfile.txt.4.commitD",
         "testfile.txt.2.commitB",
-        "testfile.txt.1.commitC",
-        "testfile.txt.3.commitD",
-        "testfile.txt.2.commitA",
     ]
 
     for version in versions:
@@ -239,11 +239,46 @@ def test_get_file_versions(temp_dir):
             f.write("Versioned content")
 
     expected_results = [
-        (os.path.join(versioned_dir, "testfile.txt.1.commitC"), 1, "commitC"),
         (os.path.join(versioned_dir, "testfile.txt.1.commitA"), 1, "commitA"),
         (os.path.join(versioned_dir, "testfile.txt.2.commitB"), 2, "commitB"),
-        (os.path.join(versioned_dir, "testfile.txt.2.commitA"), 2, "commitA"),
-        (os.path.join(versioned_dir, "testfile.txt.3.commitD"), 3, "commitD"),
+    ]
+
+    target = os.path.join(os.path.dirname(versioned_dir), base_filename)
+    result = util.get_file_versions(target, limit=2)
+
+    assert len(result) == len(expected_results)
+    for res, exp in zip(result, expected_results):
+        assert res[0] == exp[0]
+        assert res[1] == exp[1]
+        assert res[2] == exp[2]
+
+
+def test_get_file_versions_without_limit(temp_dir):
+    """Test the get_file_versions function without a limit on the number of
+    versions returned."""
+    versioned_dir = os.path.join(temp_dir, "versions")
+    os.makedirs(versioned_dir, exist_ok=True)
+
+    # create versioned files
+    base_filename = "testfile.txt"
+    versions = [
+        "testfile.txt.1.commitA",
+        "testfile.txt.4.commitD",
+        "testfile.txt.2.commitB",
+        "testfile.txt.5.commitE",
+        "testfile.txt.3.commitC",
+    ]
+
+    for version in versions:
+        with open(os.path.join(versioned_dir, version), "w") as f:
+            f.write("Versioned content")
+
+    expected_results = [
+        (os.path.join(versioned_dir, "testfile.txt.1.commitA"), 1, "commitA"),
+        (os.path.join(versioned_dir, "testfile.txt.2.commitB"), 2, "commitB"),
+        (os.path.join(versioned_dir, "testfile.txt.3.commitC"), 3, "commitC"),
+        (os.path.join(versioned_dir, "testfile.txt.4.commitD"), 4, "commitD"),
+        (os.path.join(versioned_dir, "testfile.txt.5.commitE"), 5, "commitE"),
     ]
 
     target = os.path.join(os.path.dirname(versioned_dir), base_filename)
@@ -254,6 +289,14 @@ def test_get_file_versions(temp_dir):
         assert res[0] == exp[0]
         assert res[1] == exp[1]
         assert res[2] == exp[2]
+
+
+def test_get_file_versions_no_versions(temp_dir):
+    """Test the get_file_versions function when no versioned files exist."""
+    target = os.path.join(temp_dir, "nonexistent.txt")
+    result = util.get_file_versions(target)
+
+    assert result == []
 
 
 def test_link_object(temp_dir):
