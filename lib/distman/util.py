@@ -247,8 +247,6 @@ def find_matching_versions(
     :param version_list: List of tuples with version file, number and commit.
     :return: List of tuples with version file, number and commit.
     """
-    log.debug("Find matching versions for %s" % dest)
-
     # refresh version_list from the target destination
     if version_list is None:
         version_list = get_file_versions(dest)
