@@ -2,8 +2,8 @@
 *.swp
 *~
 .DS_Store
-dist
-build
+dist/
+build/
 MANIFEST
 __pycache__
 tmp/
