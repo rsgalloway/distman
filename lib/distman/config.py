@@ -45,8 +45,17 @@ ROOT = {
     "linux": f"{HOME}/.local/pipe",
     "windows": "C:\\ProgramData\\pipe",
 }.get(PLATFORM, f"./pipe/{ENV}")
+DEFAULT_CACHE_ROOT = {
+    "darwin": f"{HOME}/Library/Caches/pipe",
+    "linux": f"{HOME}/.cache/pipe",
+    "windows": os.path.join(
+        os.environ.get("LOCALAPPDATA", os.path.join(HOME, "AppData", "Local")), "pipe"
+    ),
+}.get(PLATFORM)
+CACHE_ROOT = os.getenv("CACHE_ROOT", DEFAULT_CACHE_ROOT)
 DEPLOY_ROOT = os.getenv("DEPLOY_ROOT", f"{ROOT}/{ENV}")
 DEFAULT_ENV = {
+    "CACHE_ROOT": CACHE_ROOT,
     "DEPLOY_ROOT": DEPLOY_ROOT,
     "ENV": ENV,
     "HOME": HOME,

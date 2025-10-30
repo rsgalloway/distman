@@ -15,6 +15,7 @@ from pathlib import Path
 from tqdm import tqdm
 from typing import Tuple, Set
 
+from distman import config
 from distman.logger import log, setup_logging
 
 setup_logging()
@@ -175,7 +176,9 @@ def copy_tree_fallback(
             results.append(executor.submit(copy_file_task, s, d))
 
 
-def diff_trees(src_root: Path, dst_root: Path) -> int:
+def diff_trees(
+    src_root: Path = config.DEPLOY_ROOT, dst_root: Path = config.CACHE_ROOT
+) -> int:
     """Compare src and dst recursively. Returns number of differences.
 
     :param src_root: Source directory
@@ -245,7 +248,10 @@ def diff_trees(src_root: Path, dst_root: Path) -> int:
 
 
 def mirror(
-    src_root: Path, dst_root: Path, workers: int = 16, do_delete: bool = False
+    src_root: Path = config.DEPLOY_ROOT,
+    dst_root: Path = config.CACHE_ROOT,
+    workers: int = 16,
+    do_delete: bool = False,
 ) -> None:
     """Mirror src_root to dst_root using multiple threads.
 
@@ -352,6 +358,8 @@ def mirror(
         deleted,
         errors,
     )
+    pbar.n = pbar.total
+    pbar.refresh()
 
 
 def parse_args() -> argparse.Namespace:
@@ -360,18 +368,32 @@ def parse_args() -> argparse.Namespace:
         description="Cross-platform mirror with optional diff."
     )
     ap.add_argument(
-        "--src", required=True, type=Path, help="Source directory (/mnt/tools)"
+        "--src",
+        default=config.DEPLOY_ROOT,
+        type=Path,
+        help="Source directory",
     )
-    ap.add_argument("--dst", required=True, type=Path, help="Destination CACHE_ROOT")
+    ap.add_argument(
+        "--dst",
+        default=config.CACHE_ROOT,
+        type=Path,
+        help="Destination directory",
+    ),
     ap.add_argument(
         "--workers",
         type=int,
         default=min(32, (os.cpu_count() or 8) * 4),
         help="Copy threads (default: 4x CPU, capped at 32)",
     )
-    ap.add_argument("--delete", action="store_true", help="Delete items not in source")
     ap.add_argument(
-        "--diff", action="store_true", help="Show differences only (no copy)"
+        "--delete",
+        action="store_true",
+        help="Delete items not in source",
+    )
+    ap.add_argument(
+        "--diff",
+        action="store_true",
+        help="Show differences only (no copy)",
     )
     return ap.parse_args()
 
