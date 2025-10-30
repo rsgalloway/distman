@@ -12,7 +12,12 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from tqdm import tqdm
 from typing import Tuple, Set
+
+from distman.logger import log, setup_logging
+
+setup_logging()
 
 
 def is_windows() -> bool:
@@ -178,7 +183,7 @@ def diff_trees(src_root: Path, dst_root: Path) -> int:
     :return: Number of differences found
     """
     differences = 0
-    print(f"[diff] Comparing {src_root} -> {dst_root}")
+    log.debug(f"comparing {src_root} -> {dst_root}")
 
     src_entries: Set[Path] = set()
     dst_entries: Set[Path] = set()
@@ -206,10 +211,10 @@ def diff_trees(src_root: Path, dst_root: Path) -> int:
     common = src_entries & dst_entries
 
     for rel in sorted(only_in_src):
-        print(f"+ {rel}")
+        log.info(f"+ {rel}")
         differences += 1
     for rel in sorted(only_in_dst):
-        print(f"- {rel}")
+        log.info(f"- {rel}")
         differences += 1
 
     # now compare shared paths
@@ -219,23 +224,23 @@ def diff_trees(src_root: Path, dst_root: Path) -> int:
         try:
             if s.is_symlink() and d.is_symlink():
                 if os.readlink(s) != os.readlink(d):
-                    print(f"~ {rel} [symlink target differs]")
+                    log.info(f"~ {rel} [symlink target differs]")
                     differences += 1
             elif s.is_dir() and not d.is_dir():
-                print(f"~ {rel} [dir/file type mismatch]")
+                log.warning(f"~ {rel} [dir/file type mismatch]")
                 differences += 1
             elif s.is_file() and d.is_file():
                 if not same_file(s, d):
-                    print(f"~ {rel} [changed]")
+                    log.info(f"~ {rel} [changed]")
                     differences += 1
             elif s.is_symlink() != d.is_symlink():
-                print(f"~ {rel} [symlink vs non-symlink mismatch]")
+                log.warning(f"~ {rel} [symlink vs non-symlink mismatch]")
                 differences += 1
         except Exception as e:
-            print(f"~ {rel} [error: {e}]")
+            log.error(f"~ {rel} [error: {e}]")
             differences += 1
 
-    print(f"[diff] {differences} difference(s) found.")
+    log.debug("diff completed with %d differences", differences)
     return differences
 
 
@@ -260,39 +265,46 @@ def mirror(
     t0 = time.time()
 
     with cf.ThreadPoolExecutor(max_workers=workers) as ex:
-        for root, dirs, files in os.walk(src_root, followlinks=False):
-            root_p = Path(root)
-            rel_root = norm_rel(src_root, root_p)
-            dst_dir = dst_root / rel_root
-            ensure_dir(dst_dir)
+        total_files = sum(
+            len(files) for _, _, files in os.walk(src_root, followlinks=False)
+        )
+        file_tasks = []
 
-            for fname in files:
-                s = root_p / fname
-                d = dst_dir / fname
-                try:
-                    if s.is_symlink():
-                        if create_symlink(s, d, dst_symlinks_ok):
-                            continue
-                        else:
-                            target = s.resolve()
-                            file_tasks.append(ex.submit(copy_file_task, target, d))
-                    else:
-                        file_tasks.append(ex.submit(copy_file_task, s, d))
-                except Exception as e:
-                    print(f"[warn] {s}: {e}", file=sys.stderr)
+        with tqdm(total=total_files, desc="[mirror]") as pbar:
+            for root, dirs, files in os.walk(src_root, followlinks=False):
+                root_p = Path(root)
+                rel_root = norm_rel(src_root, root_p)
+                dst_dir = dst_root / rel_root
+                ensure_dir(dst_dir)
 
-            for dname in list(dirs):
-                sdir = root_p / dname
-                if sdir.is_symlink():
-                    rel = norm_rel(src_root, sdir)
-                    ddst = dst_root / rel
+                for fname in files:
+                    s = root_p / fname
+                    d = dst_dir / fname
                     try:
-                        if create_symlink(sdir, ddst, dst_symlinks_ok):
+                        if s.is_symlink():
+                            if create_symlink(s, d, dst_symlinks_ok):
+                                pbar.update(1)
+                                continue
+                            else:
+                                target = s.resolve()
+                                file_tasks.append(ex.submit(copy_file_task, target, d))
+                        else:
+                            file_tasks.append(ex.submit(copy_file_task, s, d))
+                    except Exception as e:
+                        log.warning(f"{s}: {e}")
+
+                for dname in list(dirs):
+                    sdir = root_p / dname
+                    if sdir.is_symlink():
+                        rel = norm_rel(src_root, sdir)
+                        ddst = dst_root / rel
+                        try:
+                            if create_symlink(sdir, ddst, dst_symlinks_ok):
+                                dirs.remove(dname)
+                                continue
+                        except Exception:
                             dirs.remove(dname)
-                            continue
-                    except Exception:
-                        dirs.remove(dname)
-                        copy_tree_fallback(sdir.resolve(), ddst, ex, file_tasks)
+                            copy_tree_fallback(sdir.resolve(), ddst, ex, file_tasks)
 
         copied = skipped = errors = 0
         for fut in cf.as_completed(file_tasks):
@@ -303,6 +315,7 @@ def mirror(
                 skipped += 1
             elif isinstance(res, str) and res.startswith("error:"):
                 errors += 1
+            pbar.update(1)
 
     deleted = 0
     if do_delete:
@@ -331,8 +344,13 @@ def mirror(
                         pass
 
     dt = time.time() - t0
-    print(
-        f"[mirror] done in {dt:.2f}s  copied={copied}  skipped={skipped}  deleted={deleted}  errors={errors}"
+    log.debug(
+        "done in %.2fs copied=%d skipped=%d deleted=%d errors=%d",
+        dt,
+        copied,
+        skipped,
+        deleted,
+        errors,
     )
 
 
