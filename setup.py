@@ -69,6 +69,7 @@ setup(
     entry_points={
         "console_scripts": [
             "dist = distman.cli:main",
+            "dsync = distman.sync:main",
             "distman = distman.cli:main_legacy",
         ],
     },
