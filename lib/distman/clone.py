@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 __doc__ = """
-Contains cross-platform directory mirroring utilities.
+Contains cross-platform directory cloning utilities.
 """
 
 import argparse
@@ -15,7 +15,7 @@ from pathlib import Path
 from tqdm import tqdm
 from typing import Tuple, Set
 
-from distman import config
+from distman import config, util
 from distman.logger import log, setup_logging
 
 setup_logging()
@@ -29,9 +29,9 @@ def is_windows() -> bool:
 def norm_rel(root: Path, p: Path) -> Path:
     """Normalize path p relative to root.
 
-    :param root: Root directory
-    :param p: Path to normalize
-    :return: Relative path from root to p
+    :param root: Root directory.
+    :param p: Path to normalize.
+    :return: Relative path from root to p.
     """
     return p.relative_to(root)
 
@@ -39,8 +39,8 @@ def norm_rel(root: Path, p: Path) -> Path:
 def file_signature(p: Path) -> Tuple[int, int]:
     """Get file size and modification time in nanoseconds.
 
-    :param p: Path to the file
-    :return: Tuple of (size in bytes, modification time in nanoseconds)
+    :param p: Path to the file.
+    :return: Tuple of (size in bytes, modification time in nanoseconds).
     """
     st = p.stat()
     return (st.st_size, st.st_mtime_ns)
@@ -57,8 +57,8 @@ def ensure_dir(p: Path) -> None:
 def atomic_replace(src_tmp: Path, dst: Path) -> None:
     """Atomically replace dst with src_tmp.
 
-    :param src_tmp: Temporary source file path
-    :param dst: Destination file path
+    :param src_tmp: Temporary source file path.
+    :param dst: Destination file path.
     """
     os.replace(src_tmp, dst)
 
@@ -66,8 +66,8 @@ def atomic_replace(src_tmp: Path, dst: Path) -> None:
 def can_create_symlinks(test_dir: Path) -> bool:
     """Check if symlinks can be created in the given directory.
 
-    :param test_dir: Directory to test symlink creation
-    :return: True if symlinks can be created, False otherwise
+    :param test_dir: Directory to test symlink creation.
+    :return: True if symlinks can be created, False otherwise.
     """
     try:
         ensure_dir(test_dir)
@@ -91,10 +91,10 @@ def can_create_symlinks(test_dir: Path) -> bool:
 def create_symlink(src_link: Path, dst_link: Path, dst_supports_symlinks: bool) -> bool:
     """Create a symlink at dst_link pointing to the same target as src_link.
 
-    :param src_link: Source symlink path
-    :param dst_link: Destination symlink path
-    :param dst_supports_symlinks: Whether the destination supports symlinks
-    :return: True if symlink was created, False otherwise
+    :param src_link: Source symlink path.
+    :param dst_link: Destination symlink path.
+    :param dst_supports_symlinks: Whether the destination supports symlinks.
+    :return: True if symlink was created, False otherwise.
     """
     if not dst_supports_symlinks:
         return False
@@ -121,9 +121,9 @@ def create_symlink(src_link: Path, dst_link: Path, dst_supports_symlinks: bool) 
 def same_file(src: Path, dst: Path) -> bool:
     """Check if two files are the same based on size and modification time.
 
-    :param src: Source file path
-    :param dst: Destination file path
-    :return: True if files are the same, False otherwise
+    :param src: Source file path.
+    :param dst: Destination file path.
+    :return: True if files are the same, False otherwise.
     """
     try:
         s1, m1 = file_signature(src)
@@ -136,9 +136,9 @@ def same_file(src: Path, dst: Path) -> bool:
 def copy_file_task(src: Path, dst: Path) -> str:
     """Copy a single file from src to dst atomically.
 
-    :param src: Source file path
-    :param dst: Destination file path
-    :return: "copied", "skip", or "error:<message>"
+    :param src: Source file path.
+    :param dst: Destination file path.
+    :return: "copied", "skip", or "error:<message>".
     """
     try:
         if dst.exists() and same_file(src, dst):
@@ -162,9 +162,9 @@ def copy_tree_fallback(
 ) -> None:
     """Fallback copy tree that does not handle symlinks.
 
-    :param src_dir: Source directory
-    :param dst_dir: Destination directory
-    :param executor: Executor to submit copy tasks to
+    :param src_dir: Source directory.
+    :param dst_dir: Destination directory.
+    :param executor: Executor to submit copy tasks to.
     """
     for root, dirs, files in os.walk(src_dir, followlinks=False):
         root_p = Path(root)
@@ -181,9 +181,9 @@ def diff_trees(
 ) -> int:
     """Compare src and dst recursively. Returns number of differences.
 
-    :param src_root: Source directory
-    :param dst_root: Destination directory
-    :return: Number of differences found
+    :param src_root: Source directory.
+    :param dst_root: Destination directory.
+    :return: Number of differences found.
     """
     differences = 0
     log.debug(f"comparing {src_root} -> {dst_root}")
@@ -192,15 +192,23 @@ def diff_trees(
     dst_entries: Set[Path] = set()
 
     for root, dirs, files in os.walk(src_root, followlinks=False):
+        if util.is_ignorable(root, include_hidden=True):
+            continue
         rp = Path(root)
         rel_root = norm_rel(src_root, rp)
         src_entries.add(rel_root)
         for f in files:
+            if util.is_ignorable(f, include_hidden=True):
+                continue
             src_entries.add(rel_root / f)
         for d in dirs:
+            if util.is_ignorable(d, include_hidden=True):
+                continue
             src_entries.add(rel_root / d)
 
     for root, dirs, files in os.walk(dst_root, followlinks=False):
+        if util.is_ignorable(root, include_hidden=True):
+            continue
         rp = Path(root)
         rel_root = norm_rel(dst_root, rp)
         dst_entries.add(rel_root)
@@ -247,7 +255,7 @@ def diff_trees(
     return differences
 
 
-def mirror(
+def clone(
     src_root: Path = config.DEPLOY_ROOT,
     dst_root: Path = config.CACHE_ROOT,
     workers: int = 16,
@@ -255,10 +263,10 @@ def mirror(
 ) -> None:
     """Mirror src_root to dst_root using multiple threads.
 
-    :param src_root: Source directory
-    :param dst_root: Destination directory
-    :param workers: Number of worker threads
-    :param do_delete: Whether to delete files in dst not present in src
+    :param src_root: Source directory.
+    :param dst_root: Destination directory.
+    :param workers: Number of worker threads.
+    :param do_delete: Whether to delete files in dst not present in src.
     """
     if not src_root.exists():
         raise SystemExit(f"Source does not exist: {src_root}")
@@ -276,14 +284,20 @@ def mirror(
         )
         file_tasks = []
 
-        with tqdm(total=total_files, desc="[mirror]") as pbar:
+        with tqdm(total=total_files, desc="[clone]") as pbar:
             for root, dirs, files in os.walk(src_root, followlinks=False):
+                if util.is_ignorable(root, include_hidden=True):
+                    pbar.update(1)
+                    continue
                 root_p = Path(root)
                 rel_root = norm_rel(src_root, root_p)
                 dst_dir = dst_root / rel_root
                 ensure_dir(dst_dir)
 
                 for fname in files:
+                    if util.is_ignorable(fname, include_hidden=True):
+                        pbar.update(1)
+                        continue
                     s = root_p / fname
                     d = dst_dir / fname
                     try:
@@ -364,41 +378,41 @@ def mirror(
 
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
-    ap = argparse.ArgumentParser(
-        description="Cross-platform mirror with optional diff."
+    parser = argparse.ArgumentParser(
+        description="Cross-platform clone with optional diff."
     )
-    ap.add_argument(
+    parser.add_argument(
         "--src",
         default=config.DEPLOY_ROOT,
         type=Path,
         help="Source directory",
     )
-    ap.add_argument(
+    parser.add_argument(
         "--dst",
         default=config.CACHE_ROOT,
         type=Path,
         help="Destination directory",
     ),
-    ap.add_argument(
+    parser.add_argument(
         "--workers",
         type=int,
         default=min(32, (os.cpu_count() or 8) * 4),
         help="Copy threads (default: 4x CPU, capped at 32)",
     )
-    ap.add_argument(
+    parser.add_argument(
         "--delete",
         action="store_true",
         help="Delete items not in source",
     )
-    ap.add_argument(
+    parser.add_argument(
         "--diff",
         action="store_true",
         help="Show differences only (no copy)",
     )
-    return ap.parse_args()
+    return parser.parse_args()
 
 
-def main() -> None:
+def main():
     """Main entry point for the dsync utility."""
     args = parse_args()
     src = args.src.resolve()
@@ -407,7 +421,7 @@ def main() -> None:
         diff_trees(src, dst)
         return
     try:
-        mirror(src, dst, workers=args.workers, do_delete=args.delete)
+        clone(src, dst, workers=args.workers, do_delete=args.delete)
     except KeyboardInterrupt:
         print("Interrupted.", file=sys.stderr)
         sys.exit(130)

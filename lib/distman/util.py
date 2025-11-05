@@ -307,14 +307,17 @@ def is_file_hidden(filepath: str) -> bool:
     return name.startswith(".") or has_hidden_attr(filepath)
 
 
-def is_ignorable(filepath: str) -> bool:
+def is_ignorable(filepath: str, include_hidden: bool = False) -> bool:
     """Returns True if path is ignorable. Checks path against patterns
     in the ignorables list, as well as dot files.
 
     :param path: a file system path.
+    :param include_hidden: include hidden files flag.
     :return: True if filepath is ignorable.
     """
-    return is_file_hidden(filepath) or bool(IGNORABLE_PATHS.search(filepath))
+    return (not include_hidden and is_file_hidden(filepath)) or bool(
+        IGNORABLE_PATHS.search(filepath)
+    )
 
 
 def get_root_dir(path: str) -> str:
