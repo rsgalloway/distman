@@ -333,12 +333,13 @@ class Distributor(GitRepo):
                 commit_hash = None  # don't use commit_hash in version matching
 
             if not dryrun and not show:
-                util.write_dist_info(
+                util.write_dist_file(
                     t.dest,
                     {
                         "name": self.name,
                         "origin": self.path,
                         "branch": self.branch_name,
+                        "commit": self.short_head,
                         "source": t.source,
                         "author": self.author,
                     },
@@ -681,7 +682,7 @@ class Distributor(GitRepo):
                     continue
 
                 any_found = True
-                distinfo = util.get_dist_info(dest=dest)
+                dist_file = util.get_dist_file(dest=dest)
                 link_path = util.get_link_full_path(dest)
 
                 if (target_commit or target_version) and link_path in [
@@ -699,12 +700,12 @@ class Distributor(GitRepo):
                             util.remove_object(dest)
                     else:
                         log.info(f"Missing: {dest}")
-                    if os.path.lexists(distinfo):
-                        log.info(f"Delete: {distinfo}")
+                    if os.path.lexists(dist_file):
+                        log.info(f"Delete: {dist_file}")
                         if not dryrun:
-                            os.remove(distinfo)
+                            os.remove(dist_file)
                     else:
-                        log.info(f"Missing: {distinfo}")
+                        log.info(f"Missing: {dist_file}")
 
                 for verfile, _, _ in version_list:
                     log.info(f"Delete: {verfile}")

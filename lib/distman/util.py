@@ -400,7 +400,7 @@ def get_link_full_path(link: str) -> str:
     return os.path.normpath(target)
 
 
-def get_dist_info(dest: str, ext: str = config.DIST_INFO_EXT) -> str:
+def get_dist_file(dest: str, ext: str = config.DIST_INFO_EXT) -> str:
     """Returns the dist info file path, e.g.
 
         /path/to/desploy/prod/.foobar.py.dist
@@ -416,17 +416,17 @@ def get_dist_info(dest: str, ext: str = config.DIST_INFO_EXT) -> str:
     return os.path.join(folder, f".{original_name}{ext}")
 
 
-def write_dist_info(dest: str, dist_info: dict) -> None:
-    """Writes distribution information to a file.
+def write_dist_file(dest: str, dist_info: dict) -> None:
+    """Writes dist info to a file.
 
     :param dest: Path to destination directory.
     :param dist_info: Dictionary of distribution information.
     :return: None
     """
-    distinfo = get_dist_info(dest=dest)
-    log.debug("Writing dist info to %s", distinfo)
-    os.makedirs(os.path.dirname(distinfo), exist_ok=True)
-    with open(distinfo, "w") as outFile:
+    dist_file = get_dist_file(dest=dest)
+    log.debug("Writing dist info to %s", dist_file)
+    os.makedirs(os.path.dirname(dist_file), exist_ok=True)
+    with open(dist_file, "w") as outFile:
         for key, value in dist_info.items():
             outFile.write(f"{key}: {value}\n")
 
@@ -455,7 +455,7 @@ def create_dest_folder(dest: str, dryrun: bool = False, yes: bool = False) -> bo
         return False
 
     # if dist info file does not exist means this is a new target
-    distinfo = get_dist_info(dest)
+    distinfo = get_dist_file(dest)
     if not os.path.exists(distinfo):
         if os.path.exists(dest):
             question = (
