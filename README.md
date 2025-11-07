@@ -198,4 +198,5 @@ variables are supported:
 | $IGNORE_MISSING | ignore missing source paths in targets |
 | $LOG_DIR        | directory to write log files |
 | $LOG_LEVEL      | logging level to use (DEBUG, INFO, etc) |
+| $MAX_VERSIONS   | max number of versions when checking for changes |
 | $ROOT           | dist root directory |
