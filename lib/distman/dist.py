@@ -347,7 +347,7 @@ class Distributor(GitRepo):
             source_path = t.source
 
             # run the pipeline if defined
-            if not dryrun and t.pipeline:
+            if not dryrun and not show and t.pipeline:
                 try:
                     source_path = run_pipeline(
                         target=t,

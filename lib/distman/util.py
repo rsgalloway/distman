@@ -482,7 +482,7 @@ def expand_wildcard_entry(
     """
 
     # convert source glob to regex for extracting capture groups
-    regex_pattern = re.escape(source_pattern)
+    regex_pattern = re.escape(sanitize_path(source_pattern))
     regex_pattern = regex_pattern.replace(r"\*", r"([^/]+)")
     regex_pattern = "^" + regex_pattern + "$"
 
@@ -491,7 +491,7 @@ def expand_wildcard_entry(
     results = []
 
     for path in matched_paths:
-        m = re.match(regex_pattern, path)
+        m = re.match(regex_pattern, sanitize_path(path))
         if not m:
             continue
 
@@ -572,7 +572,8 @@ def get_file_versions(target: str, limit: int = None) -> List[Tuple[str, int, st
                 dash_pos = commit.find("-")
                 if -1 != dash_pos:
                     commit = commit[:dash_pos]
-            version_list.append((filedir + "/" + f, ver, commit))
+            path = sanitize_path(filedir + "/" + f)
+            version_list.append((path, ver, commit))
 
     return sorted(version_list, key=lambda tup: tup[1])
 
