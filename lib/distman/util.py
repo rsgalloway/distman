@@ -572,7 +572,8 @@ def get_file_versions(target: str, limit: int = None) -> List[Tuple[str, int, st
                 dash_pos = commit.find("-")
                 if -1 != dash_pos:
                     commit = commit[:dash_pos]
-            version_list.append((filedir + "/" + f, ver, commit))
+            path = sanitize_path(filedir + "/" + f)
+            version_list.append((path, ver, commit))
 
     return sorted(version_list, key=lambda tup: tup[1])
 
