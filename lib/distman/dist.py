@@ -374,7 +374,7 @@ class Distributor(GitRepo):
 
             # get existing versions for the target
             if show:
-                if verbose:
+                if verbose >= 1:
                     version_list = util.get_file_versions(t.dest)
                 else:
                     version_list = []
