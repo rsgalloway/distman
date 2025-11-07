@@ -62,6 +62,7 @@ def parse_args():
     parser.add_argument(
         "-t",
         "--target",
+        nargs="+",
         metavar="TARGET",
         help="source TARGET in the dist file (supports wildcards)",
     )
@@ -182,7 +183,7 @@ def main():
     # remove target(s), symlink privs not needed
     if args.delete:
         if distributor.delete_target(
-            target=args.target,
+            targets=args.target,
             target_version=args.number,
             target_commit=args.commit,
             yes=args.yes,
@@ -238,7 +239,7 @@ def main():
     # do file distribution
     try:
         if distributor.dist(
-            target=args.target,
+            targets=args.target,
             show=args.show,
             force=args.force,
             all=args.all,

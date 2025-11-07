@@ -131,14 +131,16 @@ def get_version_dest(dest: str, version_num: int, short_head: Optional[str]) -> 
     return util.sanitize_path(version_dest)
 
 
-def should_skip_target(target_name: str, pattern: Optional[str]) -> bool:
-    """Check if a target should be skipped based on the provided pattern.
+def should_skip_target(target_name: str, patterns: Optional[List[str]]) -> bool:
+    """Check if a target should be skipped based on the provided patterns.
 
     :param target_name: The name of the target to check.
-    :param pattern: The pattern to match against the target name.
+    :param patterns: List of patterns to match against the target name.
     :return: True if the target should be skipped, False otherwise.
     """
-    return pattern is not None and not fnmatch.fnmatch(target_name, pattern)
+    return patterns is not None and not any(
+        fnmatch.fnmatch(target_name, pattern) for pattern in patterns
+    )
 
 
 class Distributor(GitRepo):
@@ -152,7 +154,7 @@ class Distributor(GitRepo):
 
     def dist(
         self,
-        target: Optional[str] = None,
+        targets: Optional[List[str]] = None,
         show: bool = False,
         force: bool = False,
         all: bool = False,
@@ -174,7 +176,7 @@ class Distributor(GitRepo):
                 }
             }
 
-        :param target: Optional target pattern to filter targets.
+        :param targets: Optional list of target patterns to filter dist targets.
         :param show: If True, shows distribution information without making changes.
         :param force: If True, forces the distribution even if there are uncommitted changes.
         :param all: If True, processes all files, ignoring changes.
@@ -206,9 +208,10 @@ class Distributor(GitRepo):
         if config.DIST_FILE in changed_files:
             log.warning(f"Uncommitted changes in {config.DIST_FILE}")
 
+        # build the list of targets to process
         target_list: List[Target] = []
         for name, entry in targets_node.items():
-            if should_skip_target(name, target):
+            if should_skip_target(name, targets):
                 continue
 
             source = entry.get(config.TAG_SOURCEPATH)
@@ -424,10 +427,10 @@ class Distributor(GitRepo):
 
         return True
 
-    def reset_file_version(self, target: str, dryrun: bool = False) -> bool:
+    def reset_file_version(self, targets: List[str], dryrun: bool = False) -> bool:
         """Reset the file version for the specified target.
 
-        :param target: The target pattern to filter targets.
+        :param targets: The list of target patterns to filter dist targets.
         :param dryrun: If True, simulates the reset without making changes.
         :return: True if any targets were reset, False otherwise.
         """
@@ -441,7 +444,7 @@ class Distributor(GitRepo):
         target_list = []
 
         for target_name, target_dict in targets_node.items():
-            if should_skip_target(target_name, target):
+            if should_skip_target(target_name, targets):
                 continue
             pair = get_source_and_dest(target_dict)
             if not pair:
@@ -523,14 +526,14 @@ class Distributor(GitRepo):
 
     def change_file_version(
         self,
-        target: str,
+        targets: List[str],
         target_commit: Optional[str] = None,
         target_version: Optional[int] = None,
         dryrun: bool = False,
     ) -> bool:
         """Change the version of a file for the specified target.
 
-        :param target: The target pattern to filter targets.
+        :param targets: The list of target patterns to filter dist targets.
         :param target_commit: Optional commit hash to reset to.
         :param target_version: Optional version number to reset to.
         :param dryrun: If True, simulates the change without making changes.
@@ -546,7 +549,7 @@ class Distributor(GitRepo):
         target_list = []
 
         for target_name, target_dict in targets_node.items():
-            if should_skip_target(target_name, target):
+            if should_skip_target(target_name, targets):
                 continue
 
             pair = get_source_and_dest(target_dict)
@@ -610,7 +613,7 @@ class Distributor(GitRepo):
 
     def delete_target(
         self,
-        target: str,
+        targets: List[str],
         target_version: Optional[int] = None,
         target_commit: Optional[str] = None,
         yes: bool = False,
@@ -618,7 +621,7 @@ class Distributor(GitRepo):
     ) -> bool:
         """Delete the specified target and its versions.
 
-        :param target: The target pattern to filter targets.
+        :param targets: The list of target patterns to filter dist targets.
         :param target_version: Optional version number to delete.
         :param target_commit: Optional commit hash to delete.
         :param yes: If True, automatically confirms prompts.
@@ -635,7 +638,7 @@ class Distributor(GitRepo):
         any_found = False
 
         for target_name, target_dict in targets_node.items():
-            if should_skip_target(target_name, target):
+            if should_skip_target(target_name, targets):
                 continue
 
             pair = get_source_and_dest(target_dict)
@@ -650,7 +653,7 @@ class Distributor(GitRepo):
                         dest = util.sanitize_path(util.replace_vars(dst_path))
                         target_list.append((src_path, dest))
                     except Exception as e:
-                        log.error(f"{e} resolving wildcard target {target}")
+                        log.error(f"{e} resolving wildcard target {target_name}")
                         return False
 
             else:
