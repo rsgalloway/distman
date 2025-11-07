@@ -491,7 +491,7 @@ def expand_wildcard_entry(
     results = []
 
     for path in matched_paths:
-        m = re.match(regex_pattern, path)
+        m = re.match(regex_pattern, sanitize_path(path))
         if not m:
             continue
 
