@@ -482,7 +482,7 @@ def expand_wildcard_entry(
     """
 
     # convert source glob to regex for extracting capture groups
-    regex_pattern = re.escape(source_pattern)
+    regex_pattern = re.escape(sanitize_path(source_pattern))
     regex_pattern = regex_pattern.replace(r"\*", r"([^/]+)")
     regex_pattern = "^" + regex_pattern + "$"
 
