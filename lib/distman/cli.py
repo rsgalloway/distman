@@ -239,7 +239,7 @@ def main():
     # do file distribution
     try:
         if distributor.dist(
-            targets=args.target,
+            target=args.target,
             show=args.show,
             force=args.force,
             all=args.all,
