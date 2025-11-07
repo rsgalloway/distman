@@ -166,7 +166,7 @@ class Distributor(GitRepo):
         ignore_missing: bool = config.IGNORE_MISSING,
         dryrun: bool = False,
         versiononly: bool = False,
-        verbose: bool = False,
+        verbose: int = 0,
     ) -> bool:
         """Distributes files based on targets defined in the dist file.
 
@@ -188,7 +188,7 @@ class Distributor(GitRepo):
         :param ignore_missing: If True, ignores missing source paths.
         :param dryrun: If True, simulates the distribution without making changes.
         :param versiononly: If True, only updates the version without changing the symlink.
-        :param verbose: If True, provides detailed output.
+        :param verbose: Verbosity level.
         :return: True if distribution was successful, False otherwise.
         """
         if not self.root:
@@ -196,7 +196,7 @@ class Distributor(GitRepo):
             return False
         if not self.read_git_info():
             return False
-        if verbose:
+        if verbose >= 2:
             self.log_distribution_info()
 
         targets_node = self.get_targets()
@@ -373,10 +373,15 @@ class Distributor(GitRepo):
                     raise
 
             # get existing versions for the target
-            version_list = util.get_file_versions(t.dest, limit=config.MAX_VERSIONS)
             if show:
+                if verbose:
+                    version_list = util.get_file_versions(t.dest)
+                else:
+                    version_list = []
                 self.show_distribution_info(t.source, t.dest, version_list, verbose)
                 continue
+            else:
+                version_list = util.get_file_versions(t.dest, limit=config.MAX_VERSIONS)
 
             # determine the next version number
             version_num = version_list[-1][1] + 1 if version_list else 0
@@ -500,14 +505,14 @@ class Distributor(GitRepo):
         source: str,
         dest: str,
         version_list: List[Tuple[str, int, str]],
-        verbose: bool,
+        verbose: int = 0,
     ) -> None:
         """Display distribution information for a target.
 
         :param source: The source path of the target.
         :param dest: The destination path of the target.
         :param version_list: List of versioned files with their metadata.
-        :param verbose: If True, shows detailed commit information.
+        :param verbose: Verbosity level.
         :return: None
         """
         if callable(getattr(os, "readlink", None)):
@@ -515,14 +520,14 @@ class Distributor(GitRepo):
                 log.info(f"Missing: {dest}")
             else:
                 target_type = util.get_path_type(source)[0]
-                log.info(f"{source} ={target_type}> {os.readlink(dest)}:")
+                log.info(f"{source} ={target_type}> {os.readlink(dest)}")
         else:
-            log.info(f"{source}:")
+            log.info(f"{source}")
         for version_file, version_num, version_commit in version_list:
             log.info(
                 f"{version_num}: {version_file} - {time.ctime(os.path.getmtime(version_file))}"
             )
-            if self.repo and verbose:
+            if self.repo and verbose >= 2:
                 try:
                     commit = self.repo.commit(version_commit)
                     log.info(f"    {commit.message.strip()}")

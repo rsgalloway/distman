@@ -542,9 +542,6 @@ def get_file_versions(target: str, limit: int = None) -> List[Tuple[str, int, st
     version_list = []
 
     for f in sorted(os.listdir(filedir)):
-        if limit and len(version_list) >= limit:
-            break
-
         file_name_length = len(filename)
         # get files that match <target>.<version>.<commit>
         if (
@@ -575,7 +572,16 @@ def get_file_versions(target: str, limit: int = None) -> List[Tuple[str, int, st
             path = sanitize_path(filedir + "/" + f)
             version_list.append((path, ver, commit))
 
-    return sorted(version_list, key=lambda tup: tup[1])
+    # sort versions by version number
+    sorted_versions = sorted(version_list, key=lambda tup: tup[1])
+
+    # apply limit if specified
+    if limit is None:
+        return sorted_versions
+    elif limit == 0:
+        return []
+    else:
+        return sorted_versions[-limit:]
 
 
 def hashes_equal(hash_str_a: str, hash_str_b: str) -> bool:

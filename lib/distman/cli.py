@@ -131,8 +131,9 @@ def parse_args():
     parser.add_argument(
         "-v",
         "--verbose",
-        action="store_true",
-        help="show verbose information",
+        action="count",
+        default=0,
+        help="output verbosity (-v for INFO, -vv for DEBUG)",
     )
     parser.add_argument(
         "--version",
