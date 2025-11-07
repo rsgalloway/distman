@@ -517,7 +517,8 @@ def expand_wildcard_entry(
 
 
 def get_file_versions(target: str, limit: int = None) -> List[Tuple[str, int, str]]:
-    """Returns a list of all versions of a file in the versions directory:
+    """Returns a list of found versions of a file in the versions directory, sorted
+    in order of version number:
 
         [("/path/to/dest/versions/target.1.abc123", 1, "abc123"),]
 
@@ -575,7 +576,7 @@ def get_file_versions(target: str, limit: int = None) -> List[Tuple[str, int, st
     # sort versions by version number
     sorted_versions = sorted(version_list, key=lambda tup: tup[1])
 
-    # apply limit if specified
+    # apply limit if specified, newest first
     if limit is None:
         return sorted_versions
     elif limit == 0:
