@@ -33,7 +33,7 @@ import fnmatch
 import os
 import time
 from dataclasses import dataclass
-from typing import Optional, Tuple, List
+from typing import List, Optional, Tuple, Union
 
 from distman import config, util
 from distman.logger import log
@@ -131,14 +131,20 @@ def get_version_dest(dest: str, version_num: int, short_head: Optional[str]) -> 
     return util.sanitize_path(version_dest)
 
 
-def should_skip_target(target_name: str, pattern: Optional[str]) -> bool:
-    """Check if a target should be skipped based on the provided pattern.
+def should_skip_target(
+    target_name: str, patterns: Optional[Union[str, List[str]]]
+) -> bool:
+    """Check if a target should be skipped based on the provided patterns.
 
     :param target_name: The name of the target to check.
-    :param pattern: The pattern to match against the target name.
+    :param patterns: One or more patterns to match against the target name.
     :return: True if the target should be skipped, False otherwise.
     """
-    return pattern is not None and not fnmatch.fnmatch(target_name, pattern)
+    if isinstance(patterns, str):
+        patterns = [patterns]
+    return patterns is not None and not any(
+        fnmatch.fnmatch(target_name, pattern) for pattern in patterns
+    )
 
 
 class Distributor(GitRepo):
@@ -152,7 +158,7 @@ class Distributor(GitRepo):
 
     def dist(
         self,
-        target: Optional[str] = None,
+        target: Optional[Union[str, List[str]]] = None,
         show: bool = False,
         force: bool = False,
         all: bool = False,
@@ -160,7 +166,7 @@ class Distributor(GitRepo):
         ignore_missing: bool = config.IGNORE_MISSING,
         dryrun: bool = False,
         versiononly: bool = False,
-        verbose: bool = False,
+        verbose: int = 0,
     ) -> bool:
         """Distributes files based on targets defined in the dist file.
 
@@ -174,7 +180,7 @@ class Distributor(GitRepo):
                 }
             }
 
-        :param target: Optional target pattern to filter targets.
+        :param target: One or more target patterns to filter dist targets.
         :param show: If True, shows distribution information without making changes.
         :param force: If True, forces the distribution even if there are uncommitted changes.
         :param all: If True, processes all files, ignoring changes.
@@ -182,7 +188,7 @@ class Distributor(GitRepo):
         :param ignore_missing: If True, ignores missing source paths.
         :param dryrun: If True, simulates the distribution without making changes.
         :param versiononly: If True, only updates the version without changing the symlink.
-        :param verbose: If True, provides detailed output.
+        :param verbose: Verbosity level.
         :return: True if distribution was successful, False otherwise.
         """
         if not self.root:
@@ -190,7 +196,7 @@ class Distributor(GitRepo):
             return False
         if not self.read_git_info():
             return False
-        if verbose:
+        if verbose >= 2:
             self.log_distribution_info()
 
         targets_node = self.get_targets()
@@ -206,6 +212,7 @@ class Distributor(GitRepo):
         if config.DIST_FILE in changed_files:
             log.warning(f"Uncommitted changes in {config.DIST_FILE}")
 
+        # build the list of targets to process
         target_list: List[Target] = []
         for name, entry in targets_node.items():
             if should_skip_target(name, target):
@@ -348,7 +355,7 @@ class Distributor(GitRepo):
             source_path = t.source
 
             # run the pipeline if defined
-            if not dryrun and t.pipeline:
+            if not dryrun and not show and t.pipeline:
                 try:
                     source_path = run_pipeline(
                         target=t,
@@ -367,10 +374,15 @@ class Distributor(GitRepo):
                     raise
 
             # get existing versions for the target
-            version_list = util.get_file_versions(t.dest, limit=config.MAX_VERSIONS)
             if show:
+                if verbose >= 1:
+                    version_list = util.get_file_versions(t.dest)
+                else:
+                    version_list = []
                 self.show_distribution_info(t.source, t.dest, version_list, verbose)
                 continue
+            else:
+                version_list = util.get_file_versions(t.dest, limit=config.MAX_VERSIONS)
 
             # determine the next version number
             version_num = version_list[-1][1] + 1 if version_list else 0
@@ -425,10 +437,14 @@ class Distributor(GitRepo):
 
         return True
 
-    def reset_file_version(self, target: str, dryrun: bool = False) -> bool:
+    def reset_file_version(
+        self,
+        target: Optional[Union[str, List[str]]] = None,
+        dryrun: bool = False,
+    ) -> bool:
         """Reset the file version for the specified target.
 
-        :param target: The target pattern to filter targets.
+        :param target: One or more target patterns to filter dist targets.
         :param dryrun: If True, simulates the reset without making changes.
         :return: True if any targets were reset, False otherwise.
         """
@@ -490,14 +506,14 @@ class Distributor(GitRepo):
         source: str,
         dest: str,
         version_list: List[Tuple[str, int, str]],
-        verbose: bool,
+        verbose: int = 0,
     ) -> None:
         """Display distribution information for a target.
 
         :param source: The source path of the target.
         :param dest: The destination path of the target.
         :param version_list: List of versioned files with their metadata.
-        :param verbose: If True, shows detailed commit information.
+        :param verbose: Verbosity level.
         :return: None
         """
         if callable(getattr(os, "readlink", None)):
@@ -505,14 +521,14 @@ class Distributor(GitRepo):
                 log.info(f"Missing: {dest}")
             else:
                 target_type = util.get_path_type(source)[0]
-                log.info(f"{source} ={target_type}> {os.readlink(dest)}:")
+                log.info(f"{source} ={target_type}> {os.readlink(dest)}")
         else:
-            log.info(f"{source}:")
+            log.info(f"{source}")
         for version_file, version_num, version_commit in version_list:
             log.info(
                 f"{version_num}: {version_file} - {time.ctime(os.path.getmtime(version_file))}"
             )
-            if self.repo and verbose:
+            if self.repo and verbose >= 2:
                 try:
                     commit = self.repo.commit(version_commit)
                     log.info(f"    {commit.message.strip()}")
@@ -524,14 +540,14 @@ class Distributor(GitRepo):
 
     def change_file_version(
         self,
-        target: str,
+        target: Optional[Union[str, List[str]]] = None,
         target_commit: Optional[str] = None,
         target_version: Optional[int] = None,
         dryrun: bool = False,
     ) -> bool:
         """Change the version of a file for the specified target.
 
-        :param target: The target pattern to filter targets.
+        :param target: One or more target patterns to filter dist targets.
         :param target_commit: Optional commit hash to reset to.
         :param target_version: Optional version number to reset to.
         :param dryrun: If True, simulates the change without making changes.
@@ -611,7 +627,7 @@ class Distributor(GitRepo):
 
     def delete_target(
         self,
-        target: str,
+        target: Optional[Union[str, List[str]]] = None,
         target_version: Optional[int] = None,
         target_commit: Optional[str] = None,
         yes: bool = False,
@@ -619,7 +635,7 @@ class Distributor(GitRepo):
     ) -> bool:
         """Delete the specified target and its versions.
 
-        :param target: The target pattern to filter targets.
+        :param target: One or more target patterns to filter dist targets.
         :param target_version: Optional version number to delete.
         :param target_commit: Optional commit hash to delete.
         :param yes: If True, automatically confirms prompts.
@@ -651,7 +667,7 @@ class Distributor(GitRepo):
                         dest = util.sanitize_path(util.replace_vars(dst_path))
                         target_list.append((src_path, dest))
                     except Exception as e:
-                        log.error(f"{e} resolving wildcard target {target}")
+                        log.error(f"{e} resolving wildcard target {target_name}")
                         return False
 
             else:

@@ -239,8 +239,8 @@ def test_get_file_versions_with_limit(temp_dir):
             f.write("Versioned content")
 
     expected_results = [
-        (os.path.join(versioned_dir, "testfile.txt.1.commitA"), 1, "commitA"),
-        (os.path.join(versioned_dir, "testfile.txt.2.commitB"), 2, "commitB"),
+        (os.path.join(versioned_dir, "testfile.txt.4.commitD"), 4, "commitD"),
+        (os.path.join(versioned_dir, "testfile.txt.5.commitE"), 5, "commitE"),
     ]
 
     target = os.path.join(os.path.dirname(versioned_dir), base_filename)

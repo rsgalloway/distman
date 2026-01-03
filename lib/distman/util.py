@@ -485,7 +485,7 @@ def expand_wildcard_entry(
     """
 
     # convert source glob to regex for extracting capture groups
-    regex_pattern = re.escape(source_pattern)
+    regex_pattern = re.escape(sanitize_path(source_pattern))
     regex_pattern = regex_pattern.replace(r"\*", r"([^/]+)")
     regex_pattern = "^" + regex_pattern + "$"
 
@@ -494,7 +494,7 @@ def expand_wildcard_entry(
     results = []
 
     for path in matched_paths:
-        m = re.match(regex_pattern, path)
+        m = re.match(regex_pattern, sanitize_path(path))
         if not m:
             continue
 
@@ -520,7 +520,8 @@ def expand_wildcard_entry(
 
 
 def get_file_versions(target: str, limit: int = None) -> List[Tuple[str, int, str]]:
-    """Returns a list of all versions of a file in the versions directory:
+    """Returns a list of found versions of a file in the versions directory, sorted
+    in order of version number:
 
         [("/path/to/dest/versions/target.1.abc123", 1, "abc123"),]
 
@@ -545,9 +546,6 @@ def get_file_versions(target: str, limit: int = None) -> List[Tuple[str, int, st
     version_list = []
 
     for f in sorted(os.listdir(filedir)):
-        if limit and len(version_list) >= limit:
-            break
-
         file_name_length = len(filename)
         # get files that match <target>.<version>.<commit>
         if (
@@ -575,9 +573,19 @@ def get_file_versions(target: str, limit: int = None) -> List[Tuple[str, int, st
                 dash_pos = commit.find("-")
                 if -1 != dash_pos:
                     commit = commit[:dash_pos]
-            version_list.append((filedir + "/" + f, ver, commit))
+            path = sanitize_path(filedir + "/" + f)
+            version_list.append((path, ver, commit))
 
-    return sorted(version_list, key=lambda tup: tup[1])
+    # sort versions by version number
+    sorted_versions = sorted(version_list, key=lambda tup: tup[1])
+
+    # apply limit if specified, newest first
+    if limit is None:
+        return sorted_versions
+    elif limit == 0:
+        return []
+    else:
+        return sorted_versions[-limit:]
 
 
 def hashes_equal(hash_str_a: str, hash_str_b: str) -> bool:
