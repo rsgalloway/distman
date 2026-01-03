@@ -215,15 +215,17 @@ def copy_tree_fallback(
 
 
 def diff_sort_key(rel: Path):
+    """Sort key for diffing paths, prioritizing versioned files.
+
+    :param rel: Relative path to analyze.
+    :return: Tuple for sorting: (parent_path, name, version, commit, full_rel_path)
+    """
     parts = rel.parts
     if "versions" in parts:
         i = parts.index("versions")
         if i + 1 < len(parts):
             obj = parts[i + 1]
             parsed = util.parse_versioned_filename(obj, obj.split(".")[0])
-            # The prefix to pass should be the "name" portion before ".<ver>..."
-            # Safer: derive it by splitting from the right once we detect digits:
-            # but simplest: use parsed name if it matches.
             if parsed:
                 name, ver, commit = parsed
                 parent = Path(*parts[: i + 1])  # path up to ".../versions"
