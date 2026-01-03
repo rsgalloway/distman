@@ -638,6 +638,7 @@ def parse_args() -> argparse.Namespace:
         help="Delete items not in source",
     )
     parser.add_argument(
+        "-d",
         "--diff",
         action="store_true",
         help="Show differences only (no copy)",
