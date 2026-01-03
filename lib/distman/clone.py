@@ -249,10 +249,21 @@ def diff_trees(
     dst_entries: Set[Path] = set()
 
     for root, dirs, files in os.walk(src_root, followlinks=False):
-        if util.is_ignorable(root, include_hidden=True):
-            continue
         rp = Path(root)
         rel_root = norm_rel(src_root, rp)
+
+        # If the directory itself is ignorable, skip it entirely
+        if util.is_ignorable(str(rel_root), include_hidden=True):
+            dirs[:] = []
+            continue
+
+        # Remove ignorable subdirs so we never descend into them
+        dirs[:] = [
+            d
+            for d in dirs
+            if not util.is_ignorable(str(rel_root / d), include_hidden=True)
+        ]
+
         src_entries.add(rel_root)
         for f in files:
             if util.is_ignorable(f, include_hidden=True):
@@ -264,10 +275,21 @@ def diff_trees(
             src_entries.add(rel_root / d)
 
     for root, dirs, files in os.walk(dst_root, followlinks=False):
-        if util.is_ignorable(root, include_hidden=True):
-            continue
         rp = Path(root)
         rel_root = norm_rel(dst_root, rp)
+
+        # If the directory itself is ignorable, skip it entirely
+        if util.is_ignorable(str(rel_root), include_hidden=True):
+            dirs[:] = []
+            continue
+
+        # Remove ignorable subdirs so we never descend into them
+        dirs[:] = [
+            d
+            for d in dirs
+            if not util.is_ignorable(str(rel_root / d), include_hidden=True)
+        ]
+
         dst_entries.add(rel_root)
         for f in files:
             dst_entries.add(rel_root / f)
