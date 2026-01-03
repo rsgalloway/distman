@@ -13,7 +13,7 @@ import tempfile
 import time
 from pathlib import Path
 from tqdm import tqdm
-from typing import Tuple, Set
+from typing import Optional, Tuple, Set
 
 from distman import config, util
 from distman.logger import log, setup_logging
@@ -261,84 +261,234 @@ def clone(
     workers: int = 16,
     do_delete: bool = False,
 ) -> None:
-    """Mirror src_root to dst_root using multiple threads.
+    """Clone src_root to dst_root using multiple threads.
 
-    :param src_root: Source directory.
-    :param dst_root: Destination directory.
-    :param workers: Number of worker threads.
-    :param do_delete: Whether to delete files in dst not present in src.
+    Latest-only behavior:
+      - Do NOT traverse any 'versions/' directory by default.
+      - Recreate symlinks outside 'versions/'.
+      - Copy ONLY the version objects referenced by those symlinks.
+
+    Progress behavior:
+      - Plan all file copy ops first (accurate totals).
+      - tqdm total == (#symlink ops + #file copy ops).
     """
     if not src_root.exists():
         raise SystemExit(f"Source does not exist: {src_root}")
     ensure_dir(dst_root)
+
     dst_symlinks_ok = True
     if is_windows():
         dst_symlinks_ok = can_create_symlinks(dst_root)
 
-    file_tasks = []
     t0 = time.time()
 
-    with cf.ThreadPoolExecutor(max_workers=workers) as ex:
-        total_files = sum(
-            len(files) for _, _, files in os.walk(src_root, followlinks=False)
-        )
-        file_tasks = []
+    # ------------------------------------------------------------------
+    # Planning phase
+    # ------------------------------------------------------------------
+    # file_ops: list[(src_file, dst_file)]
+    file_ops = []
+    # link_ops: list[(src_link, dst_link)]
+    link_ops = []
+    # version_objects: set[Path]  (absolute paths under src_root/.../versions/...)
+    version_objects: Set[Path] = set()
 
-        with tqdm(total=total_files, desc="[clone]") as pbar:
-            for root, dirs, files in os.walk(src_root, followlinks=False):
-                if util.is_ignorable(root, include_hidden=True):
+    def _skip_versions_dir(dirs: list) -> None:
+        # Prevent walking into ANY directory literally named 'versions'
+        # at any depth.
+        if "versions" in dirs:
+            dirs.remove("versions")
+
+    def _link_points_into_versions(src_link: Path) -> Optional[Path]:
+        """If src_link points to a versions object, return absolute path to that object, else None."""
+        try:
+            target_text = os.readlink(src_link)
+        except OSError:
+            return None
+
+        # distman convention is a relative link like "versions/name.N.hash"
+        # Normalize slashes for simple checks.
+        norm = target_text.replace("\\", "/")
+        if not norm.startswith("versions/"):
+            return None
+
+        # Keep it cheap: avoid resolve() unless needed.
+        candidate = src_link.parent / target_text
+        return candidate
+
+    # Walk src_root excluding versions/
+    for root, dirs, files in os.walk(src_root, followlinks=False):
+        _skip_versions_dir(dirs)
+
+        # util.is_ignorable() expects path-ish; keep your existing behavior
+        if util.is_ignorable(root, include_hidden=True):
+            # Don't descend into ignored dirs
+            dirs[:] = []
+            continue
+
+        root_p = Path(root)
+        rel_root = norm_rel(src_root, root_p)
+        dst_dir = dst_root / rel_root
+        ensure_dir(dst_dir)
+
+        # Handle files at this level
+        for fname in files:
+            if util.is_ignorable(fname, include_hidden=True):
+                continue
+
+            s = root_p / fname
+            d = dst_dir / fname
+
+            if s.is_symlink():
+                link_ops.append((s, d))
+
+                vo = _link_points_into_versions(s)
+                if vo is not None:
+                    # Track the referenced version object (file or dir)
+                    version_objects.add(vo)
+                else:
+                    # If it points elsewhere, we still try to preserve the link
+                    # (no extra payload copying planned).
+                    pass
+            else:
+                file_ops.append((s, d))
+
+        # Handle directory entries (symlink dirs appear here)
+        for dname in list(dirs):
+            if util.is_ignorable(dname, include_hidden=True):
+                dirs.remove(dname)
+                continue
+
+            sdir = root_p / dname
+            if sdir.is_symlink():
+                # Don't descend into symlinked dirs
+                dirs.remove(dname)
+
+                ddst = dst_dir / dname
+                link_ops.append((sdir, ddst))
+
+                vo = _link_points_into_versions(sdir)
+                if vo is not None:
+                    version_objects.add(vo)
+                else:
+                    # Link to non-versions path; preserve link if possible
+                    pass
+
+    # Expand version_objects -> individual file copy ops
+    # Note: version object can be a file or directory.
+    expanded_version_count = 0
+    for vo in sorted(version_objects):
+        try:
+            # Normalize / resolve only enough to determine file vs dir.
+            # Avoid .resolve() here; it can be expensive on high latency FS.
+            if not vo.exists():
+                # If link target is broken, skip it but keep the link op.
+                log.warning(f"version object does not exist: {vo}")
+                continue
+
+            rel = vo.relative_to(src_root)
+            dst_vo = dst_root / rel
+
+            if vo.is_file():
+                file_ops.append((vo, dst_vo))
+                expanded_version_count += 1
+            elif vo.is_dir():
+                for r2, d2, f2 in os.walk(vo, followlinks=False):
+                    rp2 = Path(r2)
+                    rel2 = rp2.relative_to(vo)
+                    out_dir = dst_vo / rel2
+                    ensure_dir(out_dir)
+
+                    for fn in f2:
+                        sp = rp2 / fn
+                        dp = out_dir / fn
+                        # We generally do not expect symlinks inside version payloads,
+                        # but handle them safely.
+                        if sp.is_symlink():
+                            # Best-effort: preserve if possible; otherwise copy target contents.
+                            link_ops.append((sp, dp))
+                            tgt = _link_points_into_versions(sp)
+                            if tgt is not None:
+                                version_objects.add(tgt)
+                            else:
+                                # If symlinks unsupported, we will dereference later in execution.
+                                pass
+                        else:
+                            file_ops.append((sp, dp))
+                            expanded_version_count += 1
+            else:
+                log.warning(f"version object is neither file nor dir: {vo}")
+        except Exception as e:
+            log.warning(f"failed to expand version object {vo}: {e}")
+
+    # Progress total: count link creations + file copies.
+    # (We update once per link op, and once per completed copy task.)
+    total_ops = len(link_ops) + len(file_ops)
+
+    # ------------------------------------------------------------------
+    # Execution phase
+    # ------------------------------------------------------------------
+    copied = skipped = errors = 0
+
+    with cf.ThreadPoolExecutor(max_workers=workers) as ex, tqdm(
+        total=total_ops, desc="[clone]", unit="op"
+    ) as pbar:
+        # 1) Create / preserve symlinks (fast ops; update progress immediately)
+        for s_link, d_link in link_ops:
+            try:
+                if create_symlink(s_link, d_link, dst_symlinks_ok):
                     pbar.update(1)
                     continue
-                root_p = Path(root)
-                rel_root = norm_rel(src_root, root_p)
-                dst_dir = dst_root / rel_root
-                ensure_dir(dst_dir)
 
-                for fname in files:
-                    if util.is_ignorable(fname, include_hidden=True):
-                        pbar.update(1)
-                        continue
-                    s = root_p / fname
-                    d = dst_dir / fname
-                    try:
-                        if s.is_symlink():
-                            if create_symlink(s, d, dst_symlinks_ok):
-                                pbar.update(1)
-                                continue
-                            else:
-                                target = s.resolve()
-                                file_tasks.append(ex.submit(copy_file_task, target, d))
-                        else:
-                            file_tasks.append(ex.submit(copy_file_task, s, d))
-                    except Exception as e:
-                        log.warning(f"{s}: {e}")
+                # Fallback: dst doesn't support symlinks.
+                # Dereference and copy contents into the link path.
+                target = s_link.parent / os.readlink(s_link)
+                if target.exists():
+                    if target.is_dir():
+                        # Copy directory contents into d_link
+                        ensure_dir(d_link)
+                        for r2, _, f2 in os.walk(target, followlinks=False):
+                            rp2 = Path(r2)
+                            rel2 = rp2.relative_to(target)
+                            out_dir = d_link / rel2
+                            ensure_dir(out_dir)
+                            for fn in f2:
+                                file_ops.append((rp2 / fn, out_dir / fn))
+                        # We added more file ops; adjust progress total
+                        pbar.total += sum(
+                            1 for _ in os.walk(target, followlinks=False) for __ in _[2]
+                        )
+                        pbar.refresh()
+                    else:
+                        file_ops.append((target, d_link))
+                        pbar.total += 1
+                        pbar.refresh()
+                pbar.update(1)
+            except Exception as e:
+                log.warning(f"{s_link}: {e}")
+                pbar.update(1)
 
-                for dname in list(dirs):
-                    sdir = root_p / dname
-                    if sdir.is_symlink():
-                        rel = norm_rel(src_root, sdir)
-                        ddst = dst_root / rel
-                        try:
-                            if create_symlink(sdir, ddst, dst_symlinks_ok):
-                                dirs.remove(dname)
-                                continue
-                        except Exception:
-                            dirs.remove(dname)
-                            copy_tree_fallback(sdir.resolve(), ddst, ex, file_tasks)
-
-        copied = skipped = errors = 0
-        for fut in cf.as_completed(file_tasks):
-            res = fut.result()
-            if res == "copied":
-                copied += 1
-            elif res == "skip":
-                skipped += 1
-            elif isinstance(res, str) and res.startswith("error:"):
+        # 2) Copy files concurrently (accurate progress = completions)
+        futures = [ex.submit(copy_file_task, s, d) for (s, d) in file_ops]
+        for fut in cf.as_completed(futures):
+            try:
+                res = fut.result()
+                if res == "copied":
+                    copied += 1
+                elif res == "skip":
+                    skipped += 1
+                elif isinstance(res, str) and res.startswith("error:"):
+                    errors += 1
+            except Exception:
                 errors += 1
             pbar.update(1)
 
+    # ------------------------------------------------------------------
+    # Optional delete (NOTE: this does NOT prune old versions; it mirrors existence only)
+    # ------------------------------------------------------------------
     deleted = 0
     if do_delete:
+        # With "latest-only" cloning, you probably want a separate `prune` command
+        # to remove unreferenced cached versions. This delete mirrors src existence.
         for root, dirs, files in os.walk(dst_root, topdown=False):
             root_p = Path(root)
             rel_root = norm_rel(dst_root, root_p)
@@ -372,8 +522,6 @@ def clone(
         deleted,
         errors,
     )
-    pbar.n = pbar.total
-    pbar.refresh()
 
 
 def parse_args() -> argparse.Namespace:
