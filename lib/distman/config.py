@@ -52,7 +52,7 @@ DEFAULT_CACHE_ROOT = {
         os.environ.get("LOCALAPPDATA", os.path.join(HOME, "AppData", "Local")), "pipe"
     ),
 }.get(PLATFORM)
-CACHE_ROOT = os.getenv("CACHE_ROOT", DEFAULT_CACHE_ROOT)
+CACHE_ROOT = os.getenv("CACHE_ROOT", f"{DEFAULT_CACHE_ROOT}/{ENV}")
 DEPLOY_ROOT = os.getenv("DEPLOY_ROOT", f"{ROOT}/{ENV}")
 DEFAULT_ENV = {
     "CACHE_ROOT": CACHE_ROOT,
