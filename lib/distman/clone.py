@@ -157,6 +157,44 @@ def copy_file_task(src: Path, dst: Path) -> str:
         return f"error:{e}"
 
 
+def collapse_dirs(dirs: Set[Path], root: Path) -> Set[Path]:
+    """If a directory is present, drop all children under it.
+
+    :param dirs: Set of relative paths.
+    :param root: Root directory to check for directories.
+    :return: Collapsed set of missing relative paths.
+    """
+
+    # Identify which missing paths are dirs in the tree we are reporting from.
+    paths = set()
+    for rel in dirs:
+        try:
+            if (root / rel).is_dir():
+                paths.add(rel)
+        except Exception:
+            # If we can't stat it, don't treat as dir for collapsing.
+            pass
+
+    if not paths:
+        return dirs
+
+    # Keep rel only if no missing dir is a parent of rel (excluding itself).
+    collapsed = set()
+    for rel in dirs:
+        parent = rel.parent
+        skip = False
+        while parent != parent.parent:  # until '.'
+            if parent in paths:
+                skip = True
+                break
+            if parent == Path("."):
+                break
+            parent = parent.parent
+        if not skip:
+            collapsed.add(rel)
+    return collapsed
+
+
 def copy_tree_fallback(
     src_dir: Path, dst_dir: Path, executor: cf.Executor, results: list
 ) -> None:
@@ -219,6 +257,12 @@ def diff_trees(
 
     only_in_src = src_entries - dst_entries
     only_in_dst = dst_entries - src_entries
+
+    # Collapse missing dirs to avoid noisy output
+    only_in_src = collapse_dirs(only_in_src, src_root)
+    only_in_dst = collapse_dirs(only_in_dst, dst_root)
+
+    # Find common entries
     common = src_entries & dst_entries
 
     for rel in sorted(only_in_src):
