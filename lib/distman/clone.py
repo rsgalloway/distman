@@ -214,6 +214,23 @@ def copy_tree_fallback(
             results.append(executor.submit(copy_file_task, s, d))
 
 
+def diff_sort_key(rel: Path):
+    parts = rel.parts
+    if "versions" in parts:
+        i = parts.index("versions")
+        if i + 1 < len(parts):
+            obj = parts[i + 1]
+            parsed = util.parse_versioned_filename(obj, obj.split(".")[0])
+            # The prefix to pass should be the "name" portion before ".<ver>..."
+            # Safer: derive it by splitting from the right once we detect digits:
+            # but simplest: use parsed name if it matches.
+            if parsed:
+                name, ver, commit = parsed
+                parent = Path(*parts[: i + 1])  # path up to ".../versions"
+                return (str(parent), name, ver, commit, str(rel))
+    return ("", "", -1, "", str(rel))
+
+
 def diff_trees(
     src_root: Path = config.DEPLOY_ROOT, dst_root: Path = config.CACHE_ROOT
 ) -> int:
@@ -265,10 +282,10 @@ def diff_trees(
     # Find common entries
     common = src_entries & dst_entries
 
-    for rel in sorted(only_in_src):
+    for rel in sorted(only_in_src, key=diff_sort_key):
         log.info(f"+ {rel}")
         differences += 1
-    for rel in sorted(only_in_dst):
+    for rel in sorted(only_in_dst, key=diff_sort_key):
         log.info(f"- {rel}")
         differences += 1
 

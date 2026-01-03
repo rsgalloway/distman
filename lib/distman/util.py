@@ -230,6 +230,42 @@ def compare_objects(path1: str, path2: str) -> bool:
     return True
 
 
+def parse_versioned_filename(name: str, prefix: str) -> Optional[Tuple[str, int, str]]:
+    """
+    Parse '<prefix>.<version>.<commit>[.*]' and return (prefix, version, commit).
+    Returns None if it doesn't match.
+    """
+    if not name.startswith(prefix + "."):
+        return None
+
+    rest = name[len(prefix) + 1 :]
+    if not rest or not rest[0].isnumeric():
+        return None
+
+    dot_pos = rest.find(".")
+    if dot_pos != -1:
+        ver_s = rest[:dot_pos]
+        tail = rest[dot_pos + 1 :]
+    else:
+        ver_s = rest
+        tail = ""
+
+    try:
+        ver = int(ver_s)
+    except ValueError:
+        return None
+
+    commit = ""
+    if tail:
+        dot2 = tail.find(".")
+        commit = tail if dot2 == -1 else tail[:dot2]
+        dash = commit.find("-")
+        if dash != -1:
+            commit = commit[:dash]
+
+    return (prefix, ver, commit)
+
+
 def find_matching_versions(
     source_path: str,
     dest: str,
@@ -554,25 +590,10 @@ def get_file_versions(target: str, limit: int = None) -> List[Tuple[str, int, st
             and f[file_name_length] == "."
             and str(f[file_name_length + 1]).isnumeric()
         ):
-            # parse the number from the rest of the file name
-            info = f[file_name_length + 1 :]
-            dot_pos = info.find(".")
-            if -1 != dot_pos:
-                ver = int(info[:dot_pos])
-            else:
-                ver = int(info)
-            commit = ""
-            if -1 != dot_pos:
-                # trim potential remaining dotted portions
-                dot_pos2 = info.find(".", dot_pos + 1)
-                if -1 == dot_pos2:
-                    commit = info[dot_pos + 1 :]
-                else:
-                    commit = info[dot_pos + 1 : dot_pos2]
-                # trim '-forced' if present
-                dash_pos = commit.find("-")
-                if -1 != dash_pos:
-                    commit = commit[:dash_pos]
+            parsed = parse_versioned_filename(f, filename)
+            if not parsed:
+                continue
+            _, ver, commit = parsed
             path = sanitize_path(filedir + "/" + f)
             version_list.append((path, ver, commit))
 
