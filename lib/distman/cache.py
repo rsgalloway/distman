@@ -729,7 +729,7 @@ def build_parser(prog: str = "cache") -> argparse.ArgumentParser:
         "-t",
         "--ttl",
         type=float,
-        default=60.0,
+        default=config.CACHE_TTL,
         help="TTL (seconds) for remote epoch checks (0 = always check)",
     )
     parser.add_argument(

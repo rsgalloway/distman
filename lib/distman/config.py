@@ -53,6 +53,7 @@ CACHE_DIR = {
     ),
 }.get(PLATFORM)
 CACHE_ROOT = os.getenv("CACHE_ROOT", f"{CACHE_DIR}/{ENV}")
+CACHE_TTL = int(os.getenv("CACHE_TTL", 60))
 DEPLOY_ROOT = os.getenv("DEPLOY_ROOT", f"{ROOT}/{ENV}")
 DEFAULT_ENV = {
     "CACHE_ROOT": CACHE_ROOT,
