@@ -690,7 +690,7 @@ def clone(
     )
 
 
-def build_parser(prog: str = "cache") -> argparse.Namespace:
+def build_parser(prog: str = "cache") -> argparse.ArgumentParser:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
         prog=prog,
@@ -763,23 +763,24 @@ def run(args: argparse.Namespace) -> int:
         diff_trees(src, dst)
         return 0
 
-    # TTL gate: local-only, extremely fast
-    if not _ttl_expired(dst, args.ttl) and not args.force:
-        print("cache is fresh")
-        return 0
+    if not args.dryrun and not args.force:
+        if not _ttl_expired(dst, args.ttl):
+            print("cache check skipped (TTL not expired)")
+            return 0
 
+    # check epochs to determine staleness
     deploy_epoch = _read_deploy_epoch(src)
     cache_epoch = _read_cache_epoch(dst)
-
-    _mark_checked(dst)
-
     stale = deploy_epoch != cache_epoch
 
     if args.dryrun:
         print("cache is %s" % ("stale" if stale else "fresh"))
         return STALE_EXIT if stale else 0
 
+    # if fresh, mark checked and exit
     if not stale and not args.force:
+        _mark_checked(dst)
+        print("cache is fresh")
         return 0
 
     # do the clone if stale
@@ -790,6 +791,7 @@ def run(args: argparse.Namespace) -> int:
         _write_cache_epoch(dst, deploy_epoch)
 
     _mark_checked(dst)
+
     return 0
 
 
