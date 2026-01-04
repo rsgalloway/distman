@@ -797,6 +797,6 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     args = parse_args(argv)
 
-    setup_logging(dryrun=args.dryrun)
+    setup_logging()
 
     return run(args)
