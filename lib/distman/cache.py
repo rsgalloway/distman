@@ -246,20 +246,20 @@ def collapse_dirs(dirs: Set[Path], root: Path) -> Set[Path]:
     :return: Collapsed set of missing relative paths.
     """
 
-    # Identify which missing paths are dirs in the tree we are reporting from.
+    # identify which missing paths are dirs in the tree we are reporting from
     paths = set()
     for rel in dirs:
         try:
             if (root / rel).is_dir():
                 paths.add(rel)
         except Exception:
-            # If we can't stat it, don't treat as dir for collapsing.
+            # ignore errors
             pass
 
     if not paths:
         return dirs
 
-    # Keep rel only if no missing dir is a parent of rel (excluding itself).
+    # keep rel only if no missing dir is a parent of rel (excluding itself)
     collapsed = set()
     for rel in dirs:
         parent = rel.parent
@@ -447,19 +447,14 @@ def cache(
 
     t0 = time.time()
 
-    # ------------------------------------------------------------------
-    # Planning phase
-    # ------------------------------------------------------------------
-    # file_ops: list[(src_file, dst_file)]
+    # planning phase
     file_ops = []
-    # link_ops: list[(src_link, dst_link)]
     link_ops = []
     # version_objects: set[Path]  (absolute paths under src_root/.../versions/...)
     version_objects: Set[Path] = set()
 
     def _skip_versions_dir(dirs: list) -> None:
-        # Prevent walking into ANY directory literally named 'versions'
-        # at any depth.
+        # prevent walking into any directory, named 'versions' at any depth
         if "versions" in dirs:
             dirs.remove("versions")
 
@@ -471,22 +466,22 @@ def cache(
             return None
 
         # distman convention is a relative link like "versions/name.N.hash"
-        # Normalize slashes for simple checks.
+        # normalize slashes for simple checks
         norm = target_text.replace("\\", "/")
         if not norm.startswith("versions/"):
             return None
 
-        # Keep it cheap: avoid resolve() unless needed.
+        # keep it cheap: avoid resolve() unless needed
         candidate = src_link.parent / target_text
         return candidate
 
-    # Walk src_root excluding versions/
+    # walk src_root excluding versions/
     for root, dirs, files in os.walk(src_root, followlinks=False):
         _skip_versions_dir(dirs)
 
-        # util.is_ignorable() expects path-ish; keep your existing behavior
+        # util.is_ignorable() expects path-ish; keep existing behavior
         if util.is_ignorable(root, include_hidden=True):
-            # Don't descend into ignored dirs
+            # don't descend into ignored dirs
             dirs[:] = []
             continue
 
@@ -495,7 +490,7 @@ def cache(
         dst_dir = dst_root / rel_root
         ensure_dir(dst_dir)
 
-        # Handle files at this level
+        # handle files at this level
         for fname in files:
             if util.is_ignorable(fname, include_hidden=True):
                 continue
@@ -508,16 +503,16 @@ def cache(
 
                 vo = _link_points_into_versions(s)
                 if vo is not None:
-                    # Track the referenced version object (file or dir)
+                    # track the referenced version object (file or dir)
                     version_objects.add(vo)
                 else:
-                    # If it points elsewhere, we still try to preserve the link
+                    # if it points elsewhere, we still try to preserve the link
                     # (no extra payload copying planned).
                     pass
             else:
                 file_ops.append((s, d))
 
-        # Handle directory entries (symlink dirs appear here)
+        # handle directory entries (symlink dirs appear here)
         for dname in list(dirs):
             if util.is_ignorable(dname, include_hidden=True):
                 dirs.remove(dname)
@@ -525,7 +520,7 @@ def cache(
 
             sdir = root_p / dname
             if sdir.is_symlink():
-                # Don't descend into symlinked dirs
+                # don't descend into symlinked dirs
                 dirs.remove(dname)
 
                 ddst = dst_dir / dname
@@ -535,18 +530,18 @@ def cache(
                 if vo is not None:
                     version_objects.add(vo)
                 else:
-                    # Link to non-versions path; preserve link if possible
+                    # link to non-versions path; preserve link if possible
                     pass
 
-    # Expand version_objects -> individual file copy ops
+    # expand version_objects -> individual file copy ops
     # Note: version object can be a file or directory.
     expanded_version_count = 0
     for vo in sorted(version_objects):
         try:
-            # Normalize / resolve only enough to determine file vs dir.
-            # Avoid .resolve() here; it can be expensive on high latency FS.
+            # normalize / resolve only enough to determine file vs dir
+            # avoid .resolve() here; it can be expensive on high latency FS
             if not vo.exists():
-                # If link target is broken, skip it but keep the link op.
+                # if link target is broken, skip it but keep the link op
                 log.warning(f"version object does not exist: {vo}")
                 continue
 
@@ -566,16 +561,15 @@ def cache(
                     for fn in f2:
                         sp = rp2 / fn
                         dp = out_dir / fn
-                        # We generally do not expect symlinks inside version payloads,
-                        # but handle them safely.
+                        # safely handle symlinks inside versioned dirs
                         if sp.is_symlink():
-                            # Best-effort: preserve if possible; otherwise copy target contents.
+                            # best-effort: preserve if possible; otherwise copy target contents
                             link_ops.append((sp, dp))
                             tgt = _link_points_into_versions(sp)
                             if tgt is not None:
                                 version_objects.add(tgt)
                             else:
-                                # If symlinks unsupported, we will dereference later in execution.
+                                # if symlinks unsupported, we will dereference later in execution
                                 pass
                         else:
                             file_ops.append((sp, dp))
@@ -585,31 +579,28 @@ def cache(
         except Exception as e:
             log.warning(f"failed to expand version object {vo}: {e}")
 
-    # Progress total: count link creations + file copies.
-    # (We update once per link op, and once per completed copy task.)
+    # progress total: count link creations + file copies
     total_ops = len(link_ops) + len(file_ops)
 
-    # ------------------------------------------------------------------
-    # Execution phase
-    # ------------------------------------------------------------------
+    # execution phase
     copied = skipped = errors = 0
 
     with cf.ThreadPoolExecutor(max_workers=workers) as ex, tqdm(
         total=total_ops, desc="[cache]", unit="op"
     ) as pbar:
-        # 1) Create / preserve symlinks (fast ops; update progress immediately)
+        # create / preserve symlinks (fast ops; update progress immediately)
         for s_link, d_link in link_ops:
             try:
                 if create_symlink(s_link, d_link, dst_symlinks_ok):
                     pbar.update(1)
                     continue
 
-                # Fallback: dst doesn't support symlinks.
-                # Dereference and copy contents into the link path.
+                # fallback: dst doesn't support symlinks.
+                # dereference and copy contents into the link path.
                 target = s_link.parent / os.readlink(s_link)
                 if target.exists():
                     if target.is_dir():
-                        # Copy directory contents into d_link
+                        # copy directory contents into d_link
                         ensure_dir(d_link)
                         for r2, _, f2 in os.walk(target, followlinks=False):
                             rp2 = Path(r2)
@@ -618,7 +609,7 @@ def cache(
                             ensure_dir(out_dir)
                             for fn in f2:
                                 file_ops.append((rp2 / fn, out_dir / fn))
-                        # We added more file ops; adjust progress total
+                        # we added more file ops; adjust progress total
                         pbar.total += sum(
                             1 for _ in os.walk(target, followlinks=False) for __ in _[2]
                         )
@@ -632,7 +623,7 @@ def cache(
                 log.warning(f"{s_link}: {e}")
                 pbar.update(1)
 
-        # 2) Copy files concurrently (accurate progress = completions)
+        # copy files concurrently (accurate progress = completions)
         futures = [ex.submit(copy_file_task, s, d) for (s, d) in file_ops]
         for fut in cf.as_completed(futures):
             try:
@@ -685,7 +676,12 @@ def build_parser(prog: str = "cache") -> argparse.ArgumentParser:
     parser.add_argument(
         "--delete",
         action="store_true",
-        help="Delete items not in source",
+        help="Delete the cache",
+    )
+    parser.add_argument(
+        "--prune",
+        action="store_true",
+        help="Prune the cache",
     )
     parser.add_argument(
         "--diff",
