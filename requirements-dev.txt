@@ -1,5 +1,4 @@
 black==24.8.0
-envstack>=0.8.9
 gitdb==4.0.11
 GitPython==3.1.43
 smmap==5.0.1

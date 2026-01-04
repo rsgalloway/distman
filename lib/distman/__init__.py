@@ -36,13 +36,3 @@ distman distributes files and directories to versioned destinations.
 __author__ = "ryan@rsgalloway.com"
 __prog__ = "distman"
 __version__ = "0.8.0"
-
-try:
-    import envstack
-
-    envstack.init(__prog__)
-
-except Exception as e:
-    pass
-
-from .dist import Distributor  # noqa
