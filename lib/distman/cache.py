@@ -733,6 +733,12 @@ def build_parser(prog: str = "cache") -> argparse.Namespace:
         help="TTL (seconds) for remote epoch checks (0 = always check)",
     )
     parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="Force clone even if cache appears fresh (overrides TTL and epoch check)",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="Only check if cache is stale (exit 10 if stale)",
@@ -757,7 +763,7 @@ def run(args: argparse.Namespace) -> int:
         return 0
 
     # TTL gate: local-only, extremely fast
-    if not _ttl_expired(dst, args.ttl):
+    if not args.force and _ttl_expired(dst, args.ttl):
         print("cache within TTL; assuming fresh")
         return 0
 
@@ -772,7 +778,7 @@ def run(args: argparse.Namespace) -> int:
         print("cache is %s" % ("stale" if stale else "fresh"))
         return STALE_EXIT if stale else 0
 
-    if not stale:
+    if not stale and not args.force:
         return 0
 
     # do the clone if stale
@@ -780,8 +786,6 @@ def run(args: argparse.Namespace) -> int:
 
     # after clone, sync epoch into cache
     if deploy_epoch:
-        print("-- dst", dst)
-        print("-- updating cache epoch to", deploy_epoch)
         _write_cache_epoch(dst, deploy_epoch)
 
     _mark_checked(dst)
