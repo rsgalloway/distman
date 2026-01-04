@@ -132,7 +132,7 @@ def test_check_returns_zero_when_fresh(tmp_path):
     assert cache.run(args) == 0
 
 
-def test_clone_not_called_when_fresh(tmp_path, monkeypatch):
+def test_cache_not_called_when_fresh(tmp_path, monkeypatch):
     deploy = tmp_path / "deploy"
     cache_root = tmp_path / "cache"
     deploy.mkdir()
@@ -143,11 +143,11 @@ def test_clone_not_called_when_fresh(tmp_path, monkeypatch):
 
     called = False
 
-    def fake_clone(*a, **kw):
+    def fake_cache(*a, **kw):
         nonlocal called
         called = True
 
-    monkeypatch.setattr(cache, "clone", fake_clone)
+    monkeypatch.setattr(cache, "cache", fake_cache)
 
     args = cache.build_parser().parse_args(
         [
@@ -164,7 +164,7 @@ def test_clone_not_called_when_fresh(tmp_path, monkeypatch):
     assert called is False
 
 
-def test_epoch_written_after_clone(tmp_path, monkeypatch):
+def test_epoch_written_after_cache(tmp_path, monkeypatch):
     deploy = tmp_path / "deploy"
     cache_root = tmp_path / "cache"
     deploy.mkdir()
@@ -173,7 +173,7 @@ def test_epoch_written_after_clone(tmp_path, monkeypatch):
     print("-" * 20)
     write_epoch(deploy, "999")
 
-    monkeypatch.setattr(cache, "clone", lambda *a, **k: None)
+    monkeypatch.setattr(cache, "cache", lambda *a, **k: None)
 
     args = cache.build_parser().parse_args(
         [

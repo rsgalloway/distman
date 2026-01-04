@@ -421,11 +421,10 @@ def diff_trees(
     return differences
 
 
-def clone(
+def cache(
     src_root: Path = config.DEPLOY_ROOT,
     dst_root: Path = config.CACHE_ROOT,
     workers: int = 16,
-    do_delete: bool = False,
 ) -> None:
     """Clone src_root to dst_root using multiple threads.
 
@@ -648,44 +647,12 @@ def clone(
                 errors += 1
             pbar.update(1)
 
-    # ------------------------------------------------------------------
-    # Optional delete (NOTE: this does NOT prune old versions; it mirrors existence only)
-    # ------------------------------------------------------------------
-    deleted = 0
-    if do_delete:
-        # With "latest-only" cloning, you probably want a separate `prune` command
-        # to remove unreferenced cached versions. This delete mirrors src existence.
-        for root, dirs, files in os.walk(dst_root, topdown=False):
-            root_p = Path(root)
-            rel_root = norm_rel(dst_root, root_p)
-            for name in files:
-                rel = rel_root / name
-                if not (src_root / rel).exists():
-                    try:
-                        (root_p / name).unlink(missing_ok=True)
-                        deleted += 1
-                    except Exception:
-                        pass
-            for name in dirs:
-                rel = rel_root / name
-                p = root_p / name
-                if not (src_root / rel).exists():
-                    try:
-                        if p.is_symlink():
-                            p.unlink(missing_ok=True)
-                        else:
-                            shutil.rmtree(p, ignore_errors=True)
-                        deleted += 1
-                    except Exception:
-                        pass
-
     dt = time.time() - t0
     log.debug(
-        "done in %.2fs copied=%d skipped=%d deleted=%d errors=%d",
+        "done in %.2fs copied=%d skipped=%d errors=%d",
         dt,
         copied,
         skipped,
-        deleted,
         errors,
     )
 
@@ -694,7 +661,7 @@ def build_parser(prog: str = "cache") -> argparse.ArgumentParser:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
         prog=prog,
-        description="Cross-platform clone with optional diff.",
+        description="Cross-platform caching with optional diff.",
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
@@ -736,7 +703,7 @@ def build_parser(prog: str = "cache") -> argparse.ArgumentParser:
         "-f",
         "--force",
         action="store_true",
-        help="Force clone even if cache appears fresh (overrides TTL and epoch check)",
+        help="Force cache even if cache appears fresh (overrides TTL and epoch check)",
     )
     parser.add_argument(
         "-d",
@@ -783,10 +750,10 @@ def run(args: argparse.Namespace) -> int:
         print("cache is fresh")
         return 0
 
-    # do the clone if stale
-    clone(src, dst, workers=args.workers, do_delete=args.delete)
+    # do the cache if stale
+    cache(src, dst, workers=args.workers, do_delete=args.delete)
 
-    # after clone, sync epoch into cache
+    # after cache, sync epoch into cache
     if deploy_epoch:
         _write_cache_epoch(dst, deploy_epoch)
 
