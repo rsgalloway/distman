@@ -41,7 +41,7 @@ import tempfile
 import time
 from pathlib import Path
 from tqdm import tqdm
-from typing import List, Optional, Tuple, Set
+from typing import List, Optional, Sequence, Tuple, Set
 
 from distman import config, util
 from distman.logger import log, setup_logging
@@ -690,10 +690,12 @@ def clone(
     )
 
 
-def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+def build_parser(prog: str = "cache") -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Cross-platform clone with optional diff."
+        prog=prog,
+        description="Cross-platform clone with optional diff.",
+        formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
         "--src",
@@ -735,12 +737,17 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Only check if cache is stale (exit 10 if stale)",
     )
-    return parser.parse_args(argv)
+    return parser
 
 
-def main(argv: Optional[List[str]] = None) -> int:
-    """Main entry point for clone utility."""
-    args = parse_args(argv)
+def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+    """Parse arguments for the cache utility."""
+    parser = build_parser()
+    return parser.parse_args(list(argv) if argv is not None else None)
+
+
+def run(args: argparse.Namespace) -> int:
+    """Run the cache utility based on parsed arguments."""
 
     src = args.src.resolve()
     dst = args.dst.resolve()
@@ -751,7 +758,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # TTL gate: local-only, extremely fast
     if not _ttl_expired(dst, args.ttl):
-        log.debug("cache within TTL; assuming fresh")
+        print("cache within TTL; assuming fresh")
         return 0
 
     deploy_epoch = _read_deploy_epoch(src)
@@ -760,9 +767,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     _mark_checked(dst)
 
     stale = deploy_epoch != cache_epoch
-    log.debug("cache is %s" % ("stale" if stale else "fresh"))
 
     if args.check:
+        print("cache is %s" % ("stale" if stale else "fresh"))
         return STALE_EXIT if stale else 0
 
     if not stale:
@@ -777,3 +784,13 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     _mark_checked(dst)
     return 0
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    """Main entry point for cache utility."""
+
+    args = parse_args(argv)
+
+    setup_logging(dryrun=args.dryrun)
+
+    return run(args)

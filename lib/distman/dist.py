@@ -742,13 +742,13 @@ class Distributor(GitRepo):
         return any_found
 
 
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def build_parser(prog: str = "dist") -> argparse.ArgumentParser:
     """Parse arguments for the deploy/version-management CLI (legacy 'dist' behavior)."""
     from distman import __version__
 
     parser = argparse.ArgumentParser(
-        prog="dist",
-        description="dist: distribute files based on a dist.json",
+        prog=prog,
+        description="dist: distribute files based on a dist.json file",
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
@@ -840,14 +840,17 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         version=f"distman {__version__}",
     )
 
+    return parser
+
+
+def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+    """Parse arguments for the dist utlility."""
+    parser = build_parser()
     return parser.parse_args(list(argv) if argv is not None else None)
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
-    """CLI entrypoint for deploy/version-management."""
-    args = parse_args(argv)
-
-    setup_logging(dryrun=args.dryrun)
+def run(args: argparse.Namespace) -> int:
+    """Run the dist utility with the provided arguments."""
 
     # validate
     if not os.path.isdir(args.location):
@@ -923,3 +926,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except KeyboardInterrupt:
         print("Stopping dist...")
         return 2
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    """Main entry point for dist utility."""
+
+    args = parse_args(argv)
+
+    setup_logging(dryrun=args.dryrun)
+
+    return run(args)

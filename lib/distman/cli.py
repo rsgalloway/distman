@@ -45,31 +45,19 @@ import argparse
 import sys
 from typing import List, Optional
 
+from distman import cache, dist
 from distman.logger import setup_logging
 
 
-def _build_parser() -> argparse.ArgumentParser:
+def build_parser() -> argparse.ArgumentParser:
     """Build the top-level argument parser."""
 
     from distman import __version__
 
     parser = argparse.ArgumentParser(
         prog="distman",
-        description="distman: distribution + caching utilities",
+        description="distman: file distribution manager",
         formatter_class=argparse.RawTextHelpFormatter,
-    )
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="count",
-        default=0,
-        help="output verbosity (-v for INFO, -vv for DEBUG)",
-    )
-    parser.add_argument(
-        "-d",
-        "--dryrun",
-        action="store_true",
-        help="dry run (where supported)",
     )
     parser.add_argument(
         "--version",
@@ -79,30 +67,21 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub = parser.add_subparsers(dest="command", metavar="<command>", required=True)
 
-    # dist subcommand: we intentionally do NOT define all dist flags here.
-    # We pass through unknown args to distman.dist.main for full backward compat.
     p_dist = sub.add_parser(
         "dist",
-        help="deploy / manage versions (same behavior as the 'dist' command)",
-        add_help=False,  # let the underlying dist parser handle -h/--help
-    )
-    p_dist.add_argument(
-        "argv",
-        nargs=argparse.REMAINDER,
-        help="arguments passed to the dist command (use: distman dist -- -h)",
-    )
-
-    # cache subcommand: same pass-through behavior to distman.cache.main
-    p_cache = sub.add_parser(
-        "cache",
-        help="cache/clone deployment root locally (same behavior as the 'distcache' command)",
+        help="File distribution management",
+        parents=[dist.build_parser(prog="distman dist")],
         add_help=False,
     )
-    p_cache.add_argument(
-        "argv",
-        nargs=argparse.REMAINDER,
-        help="arguments passed to the cache command (use: distman cache -- -h)",
+    p_dist.set_defaults(_handler="dist")
+
+    p_cache = sub.add_parser(
+        "cache",
+        help="Cache management",
+        parents=[cache.build_parser(prog="distman cache")],
+        add_help=False,
     )
+    p_cache.set_defaults(_handler="cache")
 
     return parser
 
@@ -111,24 +90,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     """distman suite entrypoint."""
     argv = list(sys.argv[1:] if argv is None else argv)
 
-    parser = _build_parser()
+    parser = build_parser()
     args = parser.parse_args(argv)
 
-    # setup logging once here
     setup_logging(dryrun=getattr(args, "dryrun", False))
 
     if args.command == "dist":
-        from distman import dist
-
-        # strip optional "--" that users may insert for clarity:
-        passthru = args.argv[1:] if (args.argv and args.argv[0] == "--") else args.argv
-        return dist.main(passthru)
+        return dist.run(args)
 
     if args.command == "cache":
-        from distman import cache
-
-        passthru = args.argv[1:] if (args.argv and args.argv[0] == "--") else args.argv
-        return cache.main(passthru)
+        return cache.run(args)
 
     parser.error("Unknown command")
     return 2
