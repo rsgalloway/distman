@@ -39,7 +39,8 @@ import shutil
 import pytest
 from unittest.mock import patch
 
-from distman import config, Distributor, util
+from distman import config, util
+from distman.dist import Distributor
 from distman.dist import (
     get_source_and_dest,
     confirm,
