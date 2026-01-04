@@ -95,6 +95,7 @@ DRYRUN_MESSAGE = "NOTICE: Dry run (no changes will be made)"
 IGNORABLE = [
     "*~",
     ".git*",
+    ".distman",
     ".venv",
     "*.bup",
     "*.bak",
