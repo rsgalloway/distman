@@ -570,7 +570,7 @@ def clone(
     copied = skipped = errors = 0
 
     with cf.ThreadPoolExecutor(max_workers=workers) as ex, tqdm(
-        total=total_ops, desc="[clone]", unit="op"
+        total=total_ops, desc="[cache]", unit="op"
     ) as pbar:
         # 1) Create / preserve symlinks (fast ops; update progress immediately)
         for s_link, d_link in link_ops:
