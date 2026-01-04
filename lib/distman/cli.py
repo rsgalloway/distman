@@ -41,7 +41,8 @@ import argparse
 import os
 import sys
 
-from distman import Distributor, config, util
+from distman import config, util
+from distman.dist import Distributor
 from distman.logger import setup_logging
 
 
