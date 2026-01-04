@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Copyright (c) 2024-2025, Ryan Galloway (ryan@rsgalloway.com)
 #
@@ -30,104 +30,33 @@
 #
 
 __doc__ = """
-Command line interface for distman: simple software distribution system.
+distman: suite entrypoint
 
 Usage:
+    distman dist  [DIST OPTIONS...]
+    distman cache [CACHE OPTIONS...]
 
-    $ distman [LOCATION] [OPTIONS]
+Convenience shims can map:
+    dist      -> distman dist
+    distcache -> distman cache
 """
 
 import argparse
-import os
 import sys
+from typing import List, Optional
 
-from distman import config, util
-from distman.dist import Distributor
 from distman.logger import setup_logging
 
 
-def parse_args():
-    """Parse command line arguments."""
+def _build_parser() -> argparse.ArgumentParser:
+    """Build the top-level argument parser."""
+
     from distman import __version__
 
     parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawTextHelpFormatter
-    )
-    parser.add_argument(
-        "location",
-        metavar="LOCATION",
-        nargs="?",
-        default=".",
-        help="directory containing dist file (default is cwd)",
-    )
-    parser.add_argument(
-        "-t",
-        "--target",
-        nargs="+",
-        metavar="TARGET",
-        help="source TARGET in the dist file (supports wildcards)",
-    )
-    parser.add_argument(
-        "-s",
-        "--show",
-        action="store_true",
-        help="show current distributed versions only",
-    )
-    parser.add_argument(
-        "-c",
-        "--commit",
-        metavar="HASH",
-        help="change TARGET version number to point to commit HASH",
-    )
-    parser.add_argument(
-        "-n",
-        "--number",
-        metavar="NUMBER",
-        help="change TARGET version number to point to NUMBER",
-    )
-    parser.add_argument(
-        "--reset",
-        action="store_true",
-        help="reset version for TARGET to point to latest version",
-    )
-    parser.add_argument(
-        "--delete",
-        action="store_true",
-        help="delete dist TARGET from deployment folder",
-    )
-    parser.add_argument(
-        "-y",
-        "--yes",
-        action="store_true",
-        help="answer yes to all questions, skipping user interaction",
-    )
-    parser.add_argument(
-        "--all",
-        action="store_true",
-        help="dist all files, including ignorable files",
-    )
-    parser.add_argument(
-        "--ignore-missing",
-        action="store_true",
-        default=config.IGNORE_MISSING,
-        help="ignore missing files in dist file",
-    )
-    parser.add_argument(
-        "-f",
-        "--force",
-        action="store_true",
-        help="force action, e.g. disting uncommitted file changes",
-    )
-    parser.add_argument(
-        "--version-only",
-        action="store_true",
-        help="distribute files only, do not create links",
-    )
-    parser.add_argument(
-        "-d",
-        "--dryrun",
-        action="store_true",
-        help="do a dry run, no actions will be performed",
+        prog="distman",
+        description="distman: distribution + caching utilities",
+        formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
         "-v",
@@ -137,128 +66,73 @@ def parse_args():
         help="output verbosity (-v for INFO, -vv for DEBUG)",
     )
     parser.add_argument(
+        "-d",
+        "--dryrun",
+        action="store_true",
+        help="dry run (where supported)",
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"distman {__version__}",
     )
 
-    args = parser.parse_args()
-    return args
+    sub = parser.add_subparsers(dest="command", metavar="<command>", required=True)
 
-
-def main_legacy():
-    """Main thread with deprecation warning."""
-    import warnings
-
-    warnings.warn(
-        "The 'distman' command is deprecated and will be removed in a future release. "
-        "Please use 'dist' instead.",
-        DeprecationWarning,
-        stacklevel=2,
+    # dist subcommand: we intentionally do NOT define all dist flags here.
+    # We pass through unknown args to distman.dist.main for full backward compat.
+    p_dist = sub.add_parser(
+        "dist",
+        help="deploy / manage versions (same behavior as the 'dist' command)",
+        add_help=False,  # let the underlying dist parser handle -h/--help
     )
-    return main()
+    p_dist.add_argument(
+        "argv",
+        nargs=argparse.REMAINDER,
+        help="arguments passed to the dist command (use: distman dist -- -h)",
+    )
+
+    # cache subcommand: same pass-through behavior to distman.cache.main
+    p_cache = sub.add_parser(
+        "cache",
+        help="cache/clone deployment root locally (same behavior as the 'distcache' command)",
+        add_help=False,
+    )
+    p_cache.add_argument(
+        "argv",
+        nargs=argparse.REMAINDER,
+        help="arguments passed to the cache command (use: distman cache -- -h)",
+    )
+
+    return parser
 
 
-def main():
-    """Main thread."""
+def main(argv: Optional[List[str]] = None) -> int:
+    """distman suite entrypoint."""
+    argv = list(sys.argv[1:] if argv is None else argv)
 
-    args = parse_args()
+    parser = _build_parser()
+    args = parser.parse_args(argv)
 
-    # set up logging handlers
-    setup_logging(dryrun=args.dryrun)
+    # setup logging once here
+    setup_logging(dryrun=getattr(args, "dryrun", False))
 
-    # validate arguments
-    if not os.path.isdir(args.location):
-        print("%s is not a directory" % args.location)
-        return 1
-    if sum([bool(args.commit), bool(args.number), bool(args.reset)]) > 1:
-        print("--commit,--number and --reset are mutually exclusive")
-        return 1
+    if args.command == "dist":
+        from distman import dist
 
-    # create distributor object
-    distributor = Distributor()
+        # strip optional "--" that users may insert for clarity:
+        passthru = args.argv[1:] if (args.argv and args.argv[0] == "--") else args.argv
+        return dist.main(passthru)
 
-    # process the requested location
-    if not distributor.read_dist_file(args.location):
-        return 1
+    if args.command == "cache":
+        from distman import cache
 
-    # remove target(s), symlink privs not needed
-    if args.delete:
-        if distributor.delete_target(
-            target=args.target,
-            target_version=args.number,
-            target_commit=args.commit,
-            yes=args.yes,
-            dryrun=args.dryrun,
-        ):
-            return 0
-        else:
-            return 1
+        passthru = args.argv[1:] if (args.argv and args.argv[0] == "--") else args.argv
+        return cache.main(passthru)
 
-    # on windows make sure SeCreateSymbolicLinkPrivilege privilege is held
-    # (must be done after Distributor object is created)
-    if os.name == "nt":
-        if not util.check_symlinks():
-            return 1
-
-    # change target version
-    if args.number or args.commit or args.reset:
-        if args.reset:
-            if distributor.reset_file_version(
-                args.target,
-                dryrun=args.dryrun,
-            ):
-                return 0
-            else:
-                return 1
-
-        elif args.number:
-            target_file = args.target
-            target_version = args.number
-            try:
-                target_version = int(target_version)
-            except Exception:
-                print("Invalid version number: %s" % args.number[1])
-                return 2
-            target_commit = ""
-
-        else:
-            target_file = args.target
-            target_commit = args.commit
-            target_version = args.number
-            if len(target_commit) < config.LEN_MINHASH:
-                print("Hashes must be at least %d characters" % config.LEN_MINHASH)
-                return 2
-
-        # do target version change
-        if distributor.change_file_version(
-            target_file, target_commit, target_version, dryrun=args.dryrun
-        ):
-            return 0
-        else:
-            return 1
-
-    # do file distribution
-    try:
-        if distributor.dist(
-            target=args.target,
-            show=args.show,
-            force=args.force,
-            all=args.all,
-            yes=args.yes,
-            ignore_missing=args.ignore_missing,
-            dryrun=args.dryrun,
-            versiononly=args.version_only,
-            verbose=args.verbose,
-        ):
-            return 0
-
-    except KeyboardInterrupt:
-        print("Stopping dist...")
-        return 2
-
-    return 1
+    parser.error("Unknown command")
+    return 2
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

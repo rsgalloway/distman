@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Copyright (c) 2024-2025, Ryan Galloway (ryan@rsgalloway.com)
 #
@@ -29,14 +29,15 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
+import argparse
 import fnmatch
 import os
 import time
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Sequence, Tuple, Union
 
 from distman import config, util
-from distman.logger import log
+from distman.logger import log, setup_logging
 from distman.pipeline import (
     validate_pipeline_spec,
     get_pipeline_for_target,
@@ -739,3 +740,186 @@ class Distributor(GitRepo):
             log.info("No targets found to delete")
 
         return any_found
+
+
+def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+    """Parse arguments for the deploy/version-management CLI (legacy 'dist' behavior)."""
+    from distman import __version__
+
+    parser = argparse.ArgumentParser(
+        prog="dist",
+        description="dist: distribute files based on a dist.json",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    parser.add_argument(
+        "location",
+        metavar="LOCATION",
+        nargs="?",
+        default=".",
+        help="directory containing dist file (default is cwd)",
+    )
+    parser.add_argument(
+        "-t",
+        "--target",
+        nargs="+",
+        metavar="TARGET",
+        help="source TARGET in the dist file (supports wildcards)",
+    )
+    parser.add_argument(
+        "-s",
+        "--show",
+        action="store_true",
+        help="show current distributed versions only",
+    )
+    parser.add_argument(
+        "-c",
+        "--commit",
+        metavar="HASH",
+        help="change TARGET version number to point to commit HASH",
+    )
+    parser.add_argument(
+        "-n",
+        "--number",
+        metavar="NUMBER",
+        help="change TARGET version number to point to NUMBER",
+    )
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="reset version for TARGET to point to latest version",
+    )
+    parser.add_argument(
+        "--delete",
+        action="store_true",
+        help="delete dist TARGET from deployment folder",
+    )
+    parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="answer yes to all questions, skipping user interaction",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="dist all files, including ignorable files",
+    )
+    parser.add_argument(
+        "--ignore-missing",
+        action="store_true",
+        default=config.IGNORE_MISSING,
+        help="ignore missing files in dist file",
+    )
+    parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="force action, e.g. disting uncommitted file changes",
+    )
+    parser.add_argument(
+        "--version-only",
+        action="store_true",
+        help="distribute files only, do not create links",
+    )
+    parser.add_argument(
+        "-d",
+        "--dryrun",
+        action="store_true",
+        help="do a dry run, no actions will be performed",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="output verbosity (-v for INFO, -vv for DEBUG)",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"distman {__version__}",
+    )
+
+    return parser.parse_args(list(argv) if argv is not None else None)
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    """CLI entrypoint for deploy/version-management."""
+    args = parse_args(argv)
+
+    setup_logging(dryrun=args.dryrun)
+
+    # validate
+    if not os.path.isdir(args.location):
+        print(f"{args.location} is not a directory")
+        return 1
+    if sum([bool(args.commit), bool(args.number), bool(args.reset)]) > 1:
+        print("--commit,--number and --reset are mutually exclusive")
+        return 1
+
+    distributor = Distributor()
+
+    if not distributor.read_dist_file(args.location):
+        return 1
+
+    # delete target(s)
+    if args.delete:
+        ok = distributor.delete_target(
+            target=args.target,
+            target_version=args.number,
+            target_commit=args.commit,
+            yes=args.yes,
+            dryrun=args.dryrun,
+        )
+        return 0 if ok else 1
+
+    # windows: ensure symlink privilege
+    if os.name == "nt":
+        if not util.check_symlinks():
+            return 1
+
+    # change/reset versions
+    if args.number or args.commit or args.reset:
+        if args.reset:
+            ok = distributor.reset_file_version(args.target, dryrun=args.dryrun)
+            return 0 if ok else 1
+
+        if args.number:
+            try:
+                target_version = int(args.number)
+            except Exception:
+                print(f"Invalid version number: {args.number}")
+                return 2
+            target_commit = ""
+        else:
+            target_version = args.number
+            target_commit = args.commit
+            if len(target_commit) < config.LEN_MINHASH:
+                print(f"Hashes must be at least {config.LEN_MINHASH} characters")
+                return 2
+
+        ok = distributor.change_file_version(
+            target=args.target,
+            target_commit=target_commit,
+            target_version=target_version,
+            dryrun=args.dryrun,
+        )
+        return 0 if ok else 1
+
+    # run dist
+    try:
+        ok = distributor.dist(
+            target=args.target,
+            show=args.show,
+            force=args.force,
+            all=args.all,
+            yes=args.yes,
+            ignore_missing=args.ignore_missing,
+            dryrun=args.dryrun,
+            versiononly=args.version_only,
+            verbose=args.verbose,
+        )
+        return 0 if ok else 1
+    except KeyboardInterrupt:
+        print("Stopping dist...")
+        return 2

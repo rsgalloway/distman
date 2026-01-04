@@ -1,4 +1,33 @@
 #!/usr/bin/env python3
+#
+# Copyright (c) 2024-2025, Ryan Galloway (ryan@rsgalloway.com)
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+#  - Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
+#
+#  - Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
+#
+#  - Neither the name of the software nor the names of its contributors
+#    may be used to endorse or promote products derived from this software
+#    without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+#
 
 __doc__ = """
 Contains cross-platform directory cloning utilities.
@@ -12,15 +41,12 @@ import tempfile
 import time
 from pathlib import Path
 from tqdm import tqdm
-from typing import Optional, Tuple, Set
+from typing import List, Optional, Tuple, Set
 
 from distman import config, util
 from distman.logger import log, setup_logging
 
 setup_logging()
-
-import time
-from typing import Optional, Tuple
 
 STALE_EXIT = 10
 
@@ -664,7 +690,7 @@ def clone(
     )
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
         description="Cross-platform clone with optional diff."
@@ -709,12 +735,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Only check if cache is stale (exit 10 if stale)",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
-def main() -> int:
+def main(argv: Optional[List[str]] = None) -> int:
     """Main entry point for clone utility."""
-    args = parse_args()
+    args = parse_args(argv)
 
     src = args.src.resolve()
     dst = args.dst.resolve()

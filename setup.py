@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Copyright (c) 2024-2025, Ryan Galloway (ryan@rsgalloway.com)
 #
@@ -68,7 +68,8 @@ setup(
     packages=find_packages("lib"),
     entry_points={
         "console_scripts": [
-            "dist = distman.cli:main",
+            "distman = distman.cli:main",
+            "dist = distman.dist:main",
             "distcache = distman.cache:main",
         ],
     },
