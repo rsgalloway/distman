@@ -762,8 +762,6 @@ def run(args: argparse.Namespace) -> int:
         return 0
 
     deploy_epoch = _read_deploy_epoch(src)
-    print("src:", src)
-    print("epoch:", deploy_epoch)
     cache_epoch = _read_cache_epoch(dst)
 
     _mark_checked(dst)
