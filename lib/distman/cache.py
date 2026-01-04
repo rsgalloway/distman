@@ -762,6 +762,8 @@ def run(args: argparse.Namespace) -> int:
         return 0
 
     deploy_epoch = _read_deploy_epoch(src)
+    print("src:", src)
+    print("epoch:", deploy_epoch)
     cache_epoch = _read_cache_epoch(dst)
 
     _mark_checked(dst)
@@ -780,6 +782,8 @@ def run(args: argparse.Namespace) -> int:
 
     # after clone, sync epoch into cache
     if deploy_epoch:
+        print("-- dst", dst)
+        print("-- updating cache epoch to", deploy_epoch)
         _write_cache_epoch(dst, deploy_epoch)
 
     _mark_checked(dst)

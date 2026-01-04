@@ -482,10 +482,13 @@ def write_dist_file(dest: str, dist_info: dict) -> None:
             outFile.write(f"{key}: {value}\n")
 
 
-def write_epoch_file(deploy_root: str = None, dryrun: bool = False) -> Path:
+def write_epoch_file(
+    deploy_root: str = None, epoch: str = None, dryrun: bool = False
+) -> Path:
     """Ensure ${DEPLOY_ROOT}/.distman/epoch exists and updates it atomically.
 
     :param deploy_root: optional deploy root path.
+    :param epoch: optional epoch string to write.
     :param dryrun: dry run flag.
     :return: Path to epoch file.
     """
@@ -497,13 +500,14 @@ def write_epoch_file(deploy_root: str = None, dryrun: bool = False) -> Path:
     epoch_path.parent.mkdir(parents=True, exist_ok=True)
 
     # write an always-changing value
-    value = f"{time.time_ns()}\n"
+    if epoch is None:
+        epoch = f"{time.time_ns()}\n"
 
     # atomic replace so readers never see partial writes
     tmp_fd, tmp_name = tempfile.mkstemp(prefix=".epoch.", dir=str(epoch_path.parent))
     try:
         with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-            f.write(value)
+            f.write(epoch)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_name, str(epoch_path))
@@ -512,7 +516,7 @@ def write_epoch_file(deploy_root: str = None, dryrun: bool = False) -> Path:
             if os.path.exists(tmp_name):
                 os.remove(tmp_name)
         except Exception:
-            pass
+            log.warning("Failed to remove temporary epoch file: %s", tmp_name)
 
     return epoch_path
 

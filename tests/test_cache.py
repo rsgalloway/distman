@@ -170,6 +170,7 @@ def test_epoch_written_after_clone(tmp_path, monkeypatch):
     deploy.mkdir()
     cache_root.mkdir()
 
+    print("-" * 20)
     write_epoch(deploy, "999")
 
     monkeypatch.setattr(cache, "clone", lambda *a, **k: None)
@@ -187,7 +188,11 @@ def test_epoch_written_after_clone(tmp_path, monkeypatch):
 
     cache.run(args)
 
-    assert cache._read_cache_epoch(cache_root) == "999"
+    value = cache._read_cache_epoch(cache_root)
+    print("cache_root", cache_root)
+    print("value", value)
+    print("-" * 20)
+    assert value == "999"
 
 
 def test_diff_ignores_pycache(tmp_path, caplog):
