@@ -46,8 +46,7 @@ from typing import List, Optional, Sequence, Tuple, Set
 from distman import config, util
 from distman.logger import log, setup_logging
 
-setup_logging()
-
+# exit code when cache is stale
 STALE_EXIT = 10
 
 
