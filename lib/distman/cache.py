@@ -721,12 +721,12 @@ def build_parser(prog: str = "cache") -> argparse.Namespace:
         help="Delete items not in source",
     )
     parser.add_argument(
-        "-d",
         "--diff",
         action="store_true",
         help="Show differences only (no copy)",
     )
     parser.add_argument(
+        "-t",
         "--ttl",
         type=float,
         default=60.0,
@@ -739,9 +739,10 @@ def build_parser(prog: str = "cache") -> argparse.Namespace:
         help="Force clone even if cache appears fresh (overrides TTL and epoch check)",
     )
     parser.add_argument(
-        "--check",
+        "-d",
+        "--dryrun",
         action="store_true",
-        help="Only check if cache is stale (exit 10 if stale)",
+        help="Dry run (no changes made)",
     )
     return parser
 
@@ -763,8 +764,8 @@ def run(args: argparse.Namespace) -> int:
         return 0
 
     # TTL gate: local-only, extremely fast
-    if not args.force and _ttl_expired(dst, args.ttl):
-        print("cache within TTL; assuming fresh")
+    if not _ttl_expired(dst, args.ttl) and not args.force:
+        print("cache is fresh")
         return 0
 
     deploy_epoch = _read_deploy_epoch(src)
@@ -774,7 +775,7 @@ def run(args: argparse.Namespace) -> int:
 
     stale = deploy_epoch != cache_epoch
 
-    if args.check:
+    if args.dryrun:
         print("cache is %s" % ("stale" if stale else "fresh"))
         return STALE_EXIT if stale else 0
 

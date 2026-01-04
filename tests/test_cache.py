@@ -98,7 +98,7 @@ def test_check_returns_stale_exit_code(tmp_path, monkeypatch):
             str(deploy),
             "--dst",
             str(cache_root),
-            "--check",
+            "--dryrun",
             "--ttl",
             "0",
         ]
@@ -123,7 +123,7 @@ def test_check_returns_zero_when_fresh(tmp_path):
             str(deploy),
             "--dst",
             str(cache_root),
-            "--check",
+            "--dryrun",
             "--ttl",
             "0",
         ]
