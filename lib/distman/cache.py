@@ -648,6 +648,186 @@ def cache(
     )
 
 
+def _is_dangerous_cache_root(p: Path) -> bool:
+    """Best-effort guard against nuking the wrong directory."""
+    try:
+        rp = p.resolve()
+    except Exception:
+        rp = p
+
+    # Refuse filesystem roots.
+    # POSIX: "/" has parts == ("/",) or similar; Windows: p == p.anchor.
+    if rp == Path(rp.anchor):
+        return True
+
+    # Refuse very short paths like "/mnt" or "C:\"
+    if len(rp.parts) <= 2:
+        return True
+
+    return False
+
+
+def delete_cache(cache_root: Path, dryrun: bool = False) -> int:
+    """Delete the entire cache_root directory tree.
+
+    :param cache_root: Root of the cache directory to delete.
+    :param dryrun: If True, only print what would be deleted.
+    """
+    if not cache_root.exists():
+        log.error("cache does not exist")
+        return 0
+
+    if _is_dangerous_cache_root(cache_root):
+        raise SystemExit(f"refusing to delete dangerous cache root: {cache_root}")
+
+    if dryrun:
+        log.info(f"would delete cache: {cache_root}")
+        return 0
+
+    shutil.rmtree(cache_root, ignore_errors=False)
+    log.info(f"deleted cache: {cache_root}")
+    return 0
+
+
+def prune_cache(cache_root: Path, dryrun: bool = False) -> int:
+    """Prune unreferenced version objects from cache_root.
+
+    Strategy:
+      - Find all 'versions/' directories under cache_root.
+      - Determine which version objects are referenced by symlinks *outside* versions/.
+      - Remove unreferenced entries directly under each versions/ directory.
+
+    :param cache_root: Root of the cache directory to prune.
+    :param dryrun: If True, only print what would be pruned.
+    """
+    cache_root = cache_root.resolve()
+    if not cache_root.exists():
+        log.error("cache does not exist")
+        return 0
+
+    referenced: Set[Path] = set()
+
+    def _rel(p: Path) -> str:
+        """Relative path string for ignorable checks."""
+        try:
+            return str(p.relative_to(cache_root))
+        except Exception:
+            return str(p)
+
+    def _is_under_versions(p: Path) -> bool:
+        try:
+            rel = p.relative_to(cache_root)
+        except Exception:
+            return False
+        return "versions" in rel.parts
+
+    # gather all symlinks outside of any 'versions/' subtree
+    for root, dirs, files in os.walk(cache_root, followlinks=False):
+        root_p = Path(root)
+
+        if _is_under_versions(root_p):
+            dirs[:] = []
+            continue
+
+        # ignore ignorable dirs (relative to cache_root)
+        if util.is_ignorable(_rel(root_p), include_hidden=True):
+            dirs[:] = []
+            continue
+
+        # filter ignorable subdirs
+        rel_root = Path(_rel(root_p))  # purely for joining relative strings
+        kept_dirs = []
+        for d in dirs:
+            if util.is_ignorable(str(rel_root / d), include_hidden=True):
+                continue
+            kept_dirs.append(d)
+        dirs[:] = kept_dirs
+
+        # file symlinks
+        for fn in files:
+            if util.is_ignorable(fn, include_hidden=True):
+                continue
+            p = root_p / fn
+            if not p.is_symlink():
+                continue
+
+            try:
+                t = os.readlink(p).replace("\\", "/")
+            except OSError:
+                continue
+
+            if not t.startswith("versions/"):
+                continue
+
+            # construct the absolute target path within the cache tree
+            target = (p.parent / Path(t)).resolve()
+            # ensure it lands under cache_root; otherwise ignore
+            try:
+                target.relative_to(cache_root)
+            except Exception:
+                continue
+            referenced.add(target)
+
+        # directory symlinks (they show up in dirs list, but we can check via Path)
+        for d in list(dirs):
+            p = root_p / d
+            if not p.is_symlink():
+                continue
+
+            try:
+                t = os.readlink(p).replace("\\", "/")
+            except OSError:
+                continue
+
+            if not t.startswith("versions/"):
+                continue
+
+            target = (p.parent / Path(t)).resolve()
+            try:
+                target.relative_to(cache_root)
+            except Exception:
+                continue
+            referenced.add(target)
+
+    # walk every versions dir and delete unreferenced entries directly under it
+    removed = 0
+    for root, dirs, files in os.walk(cache_root, followlinks=False):
+        root_p = Path(root)
+        if root_p.name != "versions":
+            continue
+
+        # only prune direct children of versions/
+        try:
+            children = list(root_p.iterdir())
+        except Exception:
+            continue
+
+        for child in children:
+            child_abs = child.resolve()
+
+            # if this exact version-object is referenced, keep it
+            if child_abs in referenced:
+                continue
+
+            # otherwise, prune
+            if dryrun:
+                print(f"would prune: {child_abs.relative_to(cache_root)}")
+                removed += 1
+                continue
+
+            try:
+                if child.is_dir() and not child.is_symlink():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+                removed += 1
+            except Exception as e:
+                log.warning(f"failed to prune {child_abs}: {e}")
+
+    log.info(f"pruned {removed} unreferenced version object(s)")
+    return 0
+
+
 def build_parser(prog: str = "cache") -> argparse.ArgumentParser:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
@@ -722,10 +902,16 @@ def run(args: argparse.Namespace) -> int:
     src = args.src.resolve()
     dst = args.dst.resolve()
 
+    # handle delete/prune/diff modes
+    if args.delete:
+        return delete_cache(dst, dryrun=args.dryrun)
+    if args.prune:
+        return prune_cache(dst, dryrun=args.dryrun)
     if args.diff:
         diff_trees(src, dst)
         return 0
 
+    # TTL gate (skip remote checks)
     if not args.dryrun and not args.force:
         if not _ttl_expired(dst, args.ttl):
             print("cache check skipped (TTL not expired)")
@@ -747,7 +933,7 @@ def run(args: argparse.Namespace) -> int:
         return 0
 
     # do the cache if stale
-    cache(src, dst, workers=args.workers, do_delete=args.delete)
+    cache(src, dst, workers=args.workers)
 
     # after cache, sync epoch into cache
     if deploy_epoch:
