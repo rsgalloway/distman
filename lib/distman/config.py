@@ -45,14 +45,14 @@ ROOT = {
     "linux": f"{HOME}/.local/pipe",
     "windows": "C:\\ProgramData\\pipe",
 }.get(PLATFORM, f"./pipe/{ENV}")
-DEFAULT_CACHE_ROOT = {
+CACHE_DIR = {
     "darwin": f"{HOME}/Library/Caches/pipe",
     "linux": f"{HOME}/.cache/pipe",
     "windows": os.path.join(
         os.environ.get("LOCALAPPDATA", os.path.join(HOME, "AppData", "Local")), "pipe"
     ),
 }.get(PLATFORM)
-CACHE_ROOT = os.getenv("CACHE_ROOT", f"{DEFAULT_CACHE_ROOT}/{ENV}")
+CACHE_ROOT = os.getenv("CACHE_ROOT", f"{CACHE_DIR}/{ENV}")
 DEPLOY_ROOT = os.getenv("DEPLOY_ROOT", f"{ROOT}/{ENV}")
 DEFAULT_ENV = {
     "CACHE_ROOT": CACHE_ROOT,
@@ -102,7 +102,7 @@ IGNORABLE = [
     "*.lock",
     # "*.dist-info",  # required by importlib-metadata
     # "*.egg-info",  # required by setuptools
-    # "*.pyc",
+    # "*.pyc",  # we might want to dist compiled files
     # "*.pyd",
     # "*.pyo",
     "*.swp",
