@@ -208,6 +208,7 @@ class Distributor(GitRepo):
         global_pipeline = self.root.get(config.TAG_PIPELINE)
         validate_pipeline_spec(global_pipeline, context="global")
         global_options = self.root.get(config.TAG_OPTIONS, {})
+        did_mutate = False
 
         if config.DIST_FILE in changed_files:
             log.warning(f"Uncommitted changes in {config.DIST_FILE}")
@@ -351,6 +352,7 @@ class Distributor(GitRepo):
                         "author": self.author,
                     },
                 )
+                did_mutate = True
 
             source_path = t.source
 
@@ -415,6 +417,7 @@ class Distributor(GitRepo):
                 ):
                     if update_symlink(t.dest, match_file, dryrun):
                         log.info(f"Updated: {t.source} ={t.type}> {match_file}")
+                        did_mutate = True
                     continue
 
             # get the destination path for the versioned file
@@ -423,6 +426,7 @@ class Distributor(GitRepo):
             # copy the source file to the versioned destination
             if not dryrun:
                 util.copy_object(source_path, version_dest, all_files=all)
+                did_mutate = True
                 if not versiononly:
                     if not update_symlink(t.dest, version_dest, dryrun):
                         continue
@@ -434,6 +438,9 @@ class Distributor(GitRepo):
                 self.repo.close()
             except Exception:
                 pass
+
+        if did_mutate and not dryrun and not show:
+            util.write_epoch_file(config.DEPLOY_ROOT)
 
         return True
 

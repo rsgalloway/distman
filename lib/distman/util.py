@@ -41,6 +41,8 @@ import os
 import re
 import shutil
 import tempfile
+import time
+from pathlib import Path
 from typing import List, Tuple, Generator, Optional
 
 from distman import config
@@ -311,6 +313,16 @@ def get_effective_options(global_options: dict, target_options: dict) -> dict:
     return effective
 
 
+def get_epoch_path(deploy_root: str = None) -> Path:
+    """Returns the path to the epoch file.
+
+    :param deploy_root: optional deploy root path.
+    :return: Path to epoch file.
+    """
+    root = Path(deploy_root or config.DEPLOY_ROOT)
+    return root / config.DISTMAN_META_DIR / config.DISTMAN_EPOCH_FILE
+
+
 def get_user() -> str:
     """Returns the current user name.
 
@@ -468,6 +480,59 @@ def write_dist_file(dest: str, dist_info: dict) -> None:
     with open(dist_file, "w") as outFile:
         for key, value in dist_info.items():
             outFile.write(f"{key}: {value}\n")
+
+
+def write_epoch_file(deploy_root: str = None, dryrun: bool = False) -> Path:
+    """Ensure ${DEPLOY_ROOT}/.distman/epoch exists and updates it atomically.
+
+    :param deploy_root: optional deploy root path.
+    :param dryrun: dry run flag.
+    :return: Path to epoch file.
+    """
+    epoch_path = get_epoch_path(deploy_root)
+    if dryrun:
+        log.debug(f"[dryrun] bump epoch: {epoch_path}")
+        return epoch_path
+
+    epoch_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # write an always-changing value
+    value = f"{time.time_ns()}\n"
+
+    # atomic replace so readers never see partial writes
+    tmp_fd, tmp_name = tempfile.mkstemp(prefix=".epoch.", dir=str(epoch_path.parent))
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+            f.write(value)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, str(epoch_path))
+    finally:
+        try:
+            if os.path.exists(tmp_name):
+                os.remove(tmp_name)
+        except Exception:
+            pass
+
+    return epoch_path
+
+
+def read_epoch_file(deploy_root: str = None) -> Optional[str]:
+    """Read an epoch file and return its contents as a stripped string.
+
+    :param deploy_root: optional deploy or cache root path.
+    :return: epoch string, or None if file does not exist or cannot be read.
+    """
+    epoch_path = get_epoch_path(deploy_root)
+    try:
+        fd = os.open(epoch_path, os.O_RDONLY)
+        data = os.read(fd, 64)
+        os.close(fd)
+        return data.decode("utf-8").strip()
+    except FileNotFoundError:
+        return None
+    except Exception:
+        return None
 
 
 def create_dest_folder(dest: str, dryrun: bool = False, yes: bool = False) -> bool:

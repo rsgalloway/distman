@@ -8,7 +8,6 @@ import argparse
 import concurrent.futures as cf
 import os
 import shutil
-import sys
 import tempfile
 import time
 from pathlib import Path
@@ -19,6 +18,62 @@ from distman import config, util
 from distman.logger import log, setup_logging
 
 setup_logging()
+
+import time
+from typing import Optional, Tuple
+
+STALE_EXIT = 10
+
+
+def _cache_meta_dir(cache_root: Path) -> Path:
+    """Get the .distman metadata directory under cache_root."""
+    return cache_root / ".distman"
+
+
+def _last_check_path(cache_root: Path) -> Path:
+    """Get the path to the last_check file under cache metadata."""
+    return _cache_meta_dir(cache_root) / "last_check"
+
+
+def _ttl_expired(cache_root: Path, ttl: float) -> bool:
+    """Check if the TTL has expired since the last check.
+
+    :param cache_root: Root of the cache directory.
+    :param ttl: Time-to-live in seconds.
+    :return: True if TTL has expired or no last check recorded, False otherwise.
+    """
+    if ttl <= 0:
+        return True
+
+    p = _last_check_path(cache_root)
+    try:
+        last = float(p.read_text().strip())
+    except Exception:
+        return True
+
+    return (time.time() - last) >= ttl
+
+
+def _mark_checked(cache_root: Path) -> None:
+    """Mark the current time as the last check time."""
+    p = _last_check_path(cache_root)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(f"{time.time()}\n", encoding="utf-8")
+
+
+def _read_deploy_epoch(deploy_root: Path) -> Optional[str]:
+    """Read the epoch from the deploy directory."""
+    return util.read_epoch_file(deploy_root)
+
+
+def _read_cache_epoch(cache_root: Path) -> Optional[str]:
+    """Read the epoch from the cache directory."""
+    return util.read_epoch_file(cache_root)
+
+
+def _write_cache_epoch(cache_root: Path, epoch: str) -> None:
+    """Write the epoch to the cache directory."""
+    util.write_epoch_file(cache_root, epoch)
 
 
 def is_windows() -> bool:
@@ -643,19 +698,56 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Show differences only (no copy)",
     )
+    parser.add_argument(
+        "--ttl",
+        type=float,
+        default=60.0,
+        help="TTL (seconds) for remote epoch checks (0 = always check)",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Only check if cache is stale (exit 10 if stale)",
+    )
     return parser.parse_args()
 
 
-def main():
-    """Main entry point for the dsync utility."""
+def main() -> int:
+    """Main entry point for clone utility."""
     args = parse_args()
+
     src = args.src.resolve()
     dst = args.dst.resolve()
+
     if args.diff:
         diff_trees(src, dst)
-        return
-    try:
-        clone(src, dst, workers=args.workers, do_delete=args.delete)
-    except KeyboardInterrupt:
-        print("Interrupted.", file=sys.stderr)
-        sys.exit(130)
+        return 0
+
+    # TTL gate: local-only, extremely fast
+    if not _ttl_expired(dst, args.ttl):
+        log.debug("cache within TTL; assuming fresh")
+        return 0
+
+    deploy_epoch = _read_deploy_epoch(src)
+    cache_epoch = _read_cache_epoch(dst)
+
+    _mark_checked(dst)
+
+    stale = deploy_epoch != cache_epoch
+    log.debug("cache is %s" % ("stale" if stale else "fresh"))
+
+    if args.check:
+        return STALE_EXIT if stale else 0
+
+    if not stale:
+        return 0
+
+    # do the clone if stale
+    clone(src, dst, workers=args.workers, do_delete=args.delete)
+
+    # after clone, sync epoch into cache
+    if deploy_epoch:
+        _write_cache_epoch(dst, deploy_epoch)
+
+    _mark_checked(dst)
+    return 0

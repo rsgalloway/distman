@@ -69,6 +69,10 @@ DIST_FILE_VERSION = 1
 DIST_INFO_EXT = ".dist"
 DIR_VERSIONS = "versions"
 
+# epoch file settings
+DISTMAN_META_DIR = os.getenv("DISTMAN_META_DIR", ".distman")
+DISTMAN_EPOCH_FILE = "epoch"
+
 # build and pipeline transform directory settings
 BUILD_DIR = os.getenv("BUILD_DIR", "build")
 TRANSFORM_DIR = os.getenv("TRANSFORM_DIR", ".distman")
