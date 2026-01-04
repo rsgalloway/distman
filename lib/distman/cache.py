@@ -506,7 +506,7 @@ def cache(
                     version_objects.add(vo)
                 else:
                     # if it points elsewhere, we still try to preserve the link
-                    # (no extra payload copying planned).
+                    # (no extra payload copying planned)
                     pass
             else:
                 file_ops.append((s, d))
@@ -533,7 +533,7 @@ def cache(
                     pass
 
     # expand version_objects -> individual file copy ops
-    # Note: version object can be a file or directory.
+    # note: version object can be a file or directory
     expanded_version_count = 0
     for vo in sorted(version_objects):
         try:
@@ -594,8 +594,8 @@ def cache(
                     pbar.update(1)
                     continue
 
-                # fallback: dst doesn't support symlinks.
-                # dereference and copy contents into the link path.
+                # fallback: dst doesn't support symlinks
+                # dereference and copy contents into the link path
                 target = s_link.parent / os.readlink(s_link)
                 if target.exists():
                     if target.is_dir():
@@ -654,12 +654,11 @@ def _is_dangerous_cache_root(p: Path) -> bool:
     except Exception:
         rp = p
 
-    # Refuse filesystem roots.
-    # POSIX: "/" has parts == ("/",) or similar; Windows: p == p.anchor.
+    # refuse filesystem roots
     if rp == Path(rp.anchor):
         return True
 
-    # Refuse very short paths like "/mnt" or "C:\"
+    # refuse very short paths like "/mnt" or "C:\"
     if len(rp.parts) <= 2:
         return True
 
