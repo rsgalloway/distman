@@ -359,10 +359,12 @@ def diff_trees(
 
         dst_entries.add(rel_root)
         for f in files:
+            if util.is_ignorable(f, include_hidden=True):
+                continue
             dst_entries.add(rel_root / f)
         for d in dirs:
-            dst_entries.add(rel_root / d)
-
+            if util.is_ignorable(d, include_hidden=True):
+                continue
     only_in_src = src_entries - dst_entries
     only_in_dst = dst_entries - src_entries
 
