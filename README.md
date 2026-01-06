@@ -26,16 +26,6 @@ The easiest way to install:
 $ pip install -U distman
 ```
 
-Alternatively, use the provided Makefile to build the requirements and dist to
-the deplyoment area:
-
-```bash
-$ make install
-```
-
-Files, directories and links can be distributed from any folder or git repo
-containing a `dist.json` file.
-
 ## Quickstart
 
 `distman` looks for a dist file called `dist.json` at the root of a directory or
@@ -183,6 +173,24 @@ about the source files. For example, if the source file is called `foobar.py`
 then the dist info file that will be created will be called `.foobar.py.dist`.
 The dist info files will be created at the deployment root.
 
+## Caching
+
+In high-latency environments (for example, remote users accessing a shared
+deployment root over VPN, SMB, or NFS), loading tools and libraries directly
+from `${DEPLOY_ROOT}` can introduce noticeable startup delays.
+
+To address this, distman provides an optional local cache mechanism that
+mirrors the currently active versions of deployed files to a local filesystem
+location.
+
+### Cache command
+
+To check or update the cache:
+
+```bash
+$ distman cache [OPTIONS]
+```
+
 ## Config
 
 Most configuration is done in the `distman.env`
@@ -194,6 +202,8 @@ variables are supported:
 | Variable        | Description |
 |-----------------|-------------|
 | $DEPLOY_ROOT    | file deployment root directory |
+| $CACHE_ROOT     | local cache root directory |
+| $CACHE_TTL      | time-to-live (seconds) for cache checks |
 | $ENV            | target environment (e.g. prod or dev) |
 | $IGNORE_MISSING | ignore missing source paths in targets |
 | $LOG_DIR        | directory to write log files |

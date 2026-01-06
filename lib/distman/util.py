@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Copyright (c) 2024-2025, Ryan Galloway (ryan@rsgalloway.com)
 #
@@ -41,6 +41,8 @@ import os
 import re
 import shutil
 import tempfile
+import time
+from pathlib import Path
 from typing import List, Tuple, Generator, Optional
 
 from distman import config
@@ -230,6 +232,42 @@ def compare_objects(path1: str, path2: str) -> bool:
     return True
 
 
+def parse_versioned_filename(name: str, prefix: str) -> Optional[Tuple[str, int, str]]:
+    """
+    Parse '<prefix>.<version>.<commit>[.*]' and return (prefix, version, commit).
+    Returns None if it doesn't match.
+    """
+    if not name.startswith(prefix + "."):
+        return None
+
+    rest = name[len(prefix) + 1 :]
+    if not rest or not rest[0].isnumeric():
+        return None
+
+    dot_pos = rest.find(".")
+    if dot_pos != -1:
+        ver_s = rest[:dot_pos]
+        tail = rest[dot_pos + 1 :]
+    else:
+        ver_s = rest
+        tail = ""
+
+    try:
+        ver = int(ver_s)
+    except ValueError:
+        return None
+
+    commit = ""
+    if tail:
+        dot2 = tail.find(".")
+        commit = tail if dot2 == -1 else tail[:dot2]
+        dash = commit.find("-")
+        if dash != -1:
+            commit = commit[:dash]
+
+    return (prefix, ver, commit)
+
+
 def find_matching_versions(
     source_path: str,
     dest: str,
@@ -275,6 +313,16 @@ def get_effective_options(global_options: dict, target_options: dict) -> dict:
     return effective
 
 
+def get_epoch_path(deploy_root: str = None) -> Path:
+    """Returns the path to the epoch file.
+
+    :param deploy_root: optional deploy root path.
+    :return: Path to epoch file.
+    """
+    root = Path(deploy_root or config.DEPLOY_ROOT)
+    return root / config.DISTMAN_META_DIR / config.DISTMAN_EPOCH_FILE
+
+
 def get_user() -> str:
     """Returns the current user name.
 
@@ -307,14 +355,17 @@ def is_file_hidden(filepath: str) -> bool:
     return name.startswith(".") or has_hidden_attr(filepath)
 
 
-def is_ignorable(filepath: str) -> bool:
+def is_ignorable(filepath: str, include_hidden: bool = False) -> bool:
     """Returns True if path is ignorable. Checks path against patterns
     in the ignorables list, as well as dot files.
 
     :param path: a file system path.
+    :param include_hidden: include hidden files flag.
     :return: True if filepath is ignorable.
     """
-    return is_file_hidden(filepath) or bool(IGNORABLE_PATHS.search(filepath))
+    return (not include_hidden and is_file_hidden(filepath)) or bool(
+        IGNORABLE_PATHS.search(filepath)
+    )
 
 
 def get_root_dir(path: str) -> str:
@@ -400,7 +451,7 @@ def get_link_full_path(link: str) -> str:
     return os.path.normpath(target)
 
 
-def get_dist_info(dest: str, ext: str = config.DIST_INFO_EXT) -> str:
+def get_dist_file(dest: str, ext: str = config.DIST_INFO_EXT) -> str:
     """Returns the dist info file path, e.g.
 
         /path/to/desploy/prod/.foobar.py.dist
@@ -416,19 +467,78 @@ def get_dist_info(dest: str, ext: str = config.DIST_INFO_EXT) -> str:
     return os.path.join(folder, f".{original_name}{ext}")
 
 
-def write_dist_info(dest: str, dist_info: dict) -> None:
-    """Writes distribution information to a file.
+def write_dist_file(dest: str, dist_info: dict) -> None:
+    """Writes dist info to a file.
 
     :param dest: Path to destination directory.
     :param dist_info: Dictionary of distribution information.
     :return: None
     """
-    distinfo = get_dist_info(dest=dest)
-    log.debug("Writing dist info to %s", distinfo)
-    os.makedirs(os.path.dirname(distinfo), exist_ok=True)
-    with open(distinfo, "w") as outFile:
+    dist_file = get_dist_file(dest=dest)
+    log.debug("Writing dist info to %s", dist_file)
+    os.makedirs(os.path.dirname(dist_file), exist_ok=True)
+    with open(dist_file, "w") as outFile:
         for key, value in dist_info.items():
             outFile.write(f"{key}: {value}\n")
+
+
+def write_epoch_file(
+    deploy_root: str = None, epoch: str = None, dryrun: bool = False
+) -> Path:
+    """Ensure ${DEPLOY_ROOT}/.distman/epoch exists and updates it atomically.
+
+    :param deploy_root: optional deploy root path.
+    :param epoch: optional epoch string to write.
+    :param dryrun: dry run flag.
+    :return: Path to epoch file.
+    """
+    epoch_path = get_epoch_path(deploy_root)
+    if dryrun:
+        log.debug(f"[dryrun] bump epoch: {epoch_path}")
+        return epoch_path
+
+    epoch_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # write an always-changing value
+    if epoch is None:
+        epoch = f"{time.time_ns()}\n"
+
+    # atomic replace so readers never see partial writes
+    tmp_fd, tmp_name = tempfile.mkstemp(prefix=".epoch.", dir=str(epoch_path.parent))
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+            f.write(epoch)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, str(epoch_path))
+    except Exception as e:
+        log.error("Failed to write epoch file: %s", str(e))
+    finally:
+        try:
+            if os.path.exists(tmp_name):
+                os.remove(tmp_name)
+        except Exception:
+            log.warning("Failed to remove temporary epoch file: %s", tmp_name)
+
+    return epoch_path
+
+
+def read_epoch_file(deploy_root: str = None) -> Optional[str]:
+    """Read an epoch file and return its contents as a stripped string.
+
+    :param deploy_root: optional deploy or cache root path.
+    :return: epoch string, or None if file does not exist or cannot be read.
+    """
+    epoch_path = get_epoch_path(deploy_root)
+    try:
+        fd = os.open(epoch_path, os.O_RDONLY)
+        data = os.read(fd, 64)
+        os.close(fd)
+        return data.decode("utf-8").strip()
+    except FileNotFoundError:
+        return None
+    except Exception:
+        return None
 
 
 def create_dest_folder(dest: str, dryrun: bool = False, yes: bool = False) -> bool:
@@ -455,7 +565,7 @@ def create_dest_folder(dest: str, dryrun: bool = False, yes: bool = False) -> bo
         return False
 
     # if dist info file does not exist means this is a new target
-    distinfo = get_dist_info(dest)
+    distinfo = get_dist_file(dest)
     if not os.path.exists(distinfo):
         if os.path.exists(dest):
             question = (
@@ -551,25 +661,10 @@ def get_file_versions(target: str, limit: int = None) -> List[Tuple[str, int, st
             and f[file_name_length] == "."
             and str(f[file_name_length + 1]).isnumeric()
         ):
-            # parse the number from the rest of the file name
-            info = f[file_name_length + 1 :]
-            dot_pos = info.find(".")
-            if -1 != dot_pos:
-                ver = int(info[:dot_pos])
-            else:
-                ver = int(info)
-            commit = ""
-            if -1 != dot_pos:
-                # trim potential remaining dotted portions
-                dot_pos2 = info.find(".", dot_pos + 1)
-                if -1 == dot_pos2:
-                    commit = info[dot_pos + 1 :]
-                else:
-                    commit = info[dot_pos + 1 : dot_pos2]
-                # trim '-forced' if present
-                dash_pos = commit.find("-")
-                if -1 != dash_pos:
-                    commit = commit[:dash_pos]
+            parsed = parse_versioned_filename(f, filename)
+            if not parsed:
+                continue
+            _, ver, commit = parsed
             path = sanitize_path(filedir + "/" + f)
             version_list.append((path, ver, commit))
 

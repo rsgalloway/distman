@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Copyright (c) 2024-2025, Ryan Galloway (ryan@rsgalloway.com)
 #
@@ -40,7 +40,7 @@ with open(os.path.join(here, "README.md")) as f:
 
 setup(
     name="distman",
-    version="0.7.3",
+    version="0.8.0",
     description="Simple software distribution for complex pipelines",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -68,8 +68,9 @@ setup(
     packages=find_packages("lib"),
     entry_points={
         "console_scripts": [
-            "dist = distman.cli:main",
-            "distman = distman.cli:main_legacy",
+            "distman = distman.cli:main",
+            "dist = distman.dist:main",
+            "distcache = distman.cache:main",
         ],
     },
     install_requires=[

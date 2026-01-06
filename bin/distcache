@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 
 __doc__ = """
-Contains a distable executable for the distman cli.py module.
+Contains a distable executable for the distman cache.py module.
 """
 
 import re
 import sys
-from distman.cli import main
+from distman.cache import main
 
 if __name__ == "__main__":
     sys.argv[0] = re.sub(r"(-script\.pyw|\.exe)?$", "", sys.argv[0])

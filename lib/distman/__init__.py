@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Copyright (c) 2024-2025, Ryan Galloway (ryan@rsgalloway.com)
 #
@@ -35,14 +35,4 @@ distman distributes files and directories to versioned destinations.
 
 __author__ = "ryan@rsgalloway.com"
 __prog__ = "distman"
-__version__ = "0.7.3"
-
-try:
-    import envstack
-
-    envstack.init(__prog__)
-
-except Exception as e:
-    pass
-
-from .dist import Distributor  # noqa
+__version__ = "0.8.0"

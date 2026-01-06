@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Copyright (c) 2024-2025, Ryan Galloway (ryan@rsgalloway.com)
 #
@@ -45,8 +45,18 @@ ROOT = {
     "linux": f"{HOME}/.local/pipe",
     "windows": "C:\\ProgramData\\pipe",
 }.get(PLATFORM, f"./pipe/{ENV}")
+CACHE_DIR = {
+    "darwin": f"{HOME}/Library/Caches/pipe",
+    "linux": f"{HOME}/.cache/pipe",
+    "windows": os.path.join(
+        os.environ.get("LOCALAPPDATA", os.path.join(HOME, "AppData", "Local")), "pipe"
+    ),
+}.get(PLATFORM)
+CACHE_ROOT = os.getenv("CACHE_ROOT", f"{CACHE_DIR}/{ENV}")
+CACHE_TTL = int(os.getenv("CACHE_TTL", 600))
 DEPLOY_ROOT = os.getenv("DEPLOY_ROOT", f"{ROOT}/{ENV}")
 DEFAULT_ENV = {
+    "CACHE_ROOT": CACHE_ROOT,
     "DEPLOY_ROOT": DEPLOY_ROOT,
     "ENV": ENV,
     "HOME": HOME,
@@ -59,6 +69,10 @@ DIST_FILE = "dist.json"
 DIST_FILE_VERSION = 1
 DIST_INFO_EXT = ".dist"
 DIR_VERSIONS = "versions"
+
+# epoch file settings
+DISTMAN_META_DIR = os.getenv("DISTMAN_META_DIR", ".distman")
+DISTMAN_EPOCH_FILE = "epoch"
 
 # build and pipeline transform directory settings
 BUILD_DIR = os.getenv("BUILD_DIR", "build")
@@ -82,6 +96,7 @@ DRYRUN_MESSAGE = "NOTICE: Dry run (no changes will be made)"
 IGNORABLE = [
     "*~",
     ".git*",
+    ".distman",
     ".venv",
     "*.bup",
     "*.bak",
@@ -89,7 +104,7 @@ IGNORABLE = [
     "*.lock",
     # "*.dist-info",  # required by importlib-metadata
     # "*.egg-info",  # required by setuptools
-    # "*.pyc",
+    # "*.pyc",  # we might want to dist compiled files
     # "*.pyd",
     # "*.pyo",
     "*.swp",
