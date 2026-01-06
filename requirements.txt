@@ -4,3 +4,4 @@ smmap==5.0.1
 dataclasses; python_version < '3.7'
 htmlmin==0.1.12
 jsmin==3.0.1
+tqdm==4.67.1

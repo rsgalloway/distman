@@ -40,7 +40,7 @@ with open(os.path.join(here, "README.md")) as f:
 
 setup(
     name="distman",
-    version="0.8.0",
+    version="0.8.1",
     description="Simple software distribution for complex pipelines",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -49,10 +49,6 @@ setup(
     url="http://github.com/rsgalloway/distman",
     license="BSD 3-Clause License",
     classifiers=[
-        # How mature is this project? Common values are
-        #   3 - Alpha
-        #   4 - Beta
-        #   5 - Production/Stable
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
         "Topic :: Software Development :: Libraries",
@@ -74,9 +70,10 @@ setup(
         ],
     },
     install_requires=[
-        "GitPython==3.1.43",
-        "htmlmin==0.1.12",
-        "jsmin==3.0.1",
+        "GitPython>=3.1,<4.0",
+        "htmlmin>=0.1,<1.0",
+        "jsmin>=3.0,<4.0",
+        "tqdm>=4.67,<5.0",
     ],
     extras_require={
         ":python_version<'3.7'": ["dataclasses"]
