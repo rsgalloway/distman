@@ -29,6 +29,10 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
+__doc__ = """
+Contains the Distributor class for distributing files.
+"""
+
 import argparse
 import fnmatch
 import os
@@ -844,7 +848,7 @@ def build_parser(prog: str = "dist") -> argparse.ArgumentParser:
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
-    """Parse arguments for the dist utlility."""
+    """Parse arguments for the dist utility."""
     parser = build_parser()
     return parser.parse_args(list(argv) if argv is not None else None)
 
