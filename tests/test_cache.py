@@ -36,7 +36,7 @@ Contains tests for the cache module.
 import time
 from pathlib import Path
 
-from distman import cache
+from distman import cache, util
 
 
 def test_ttl_expired_no_last_check(tmp_path):
@@ -73,7 +73,7 @@ def test_cache_stale_when_epochs_differ(tmp_path):
     write_epoch(deploy, "123")
     write_epoch(cache_root, "456")
 
-    assert cache._read_deploy_epoch(deploy) != cache._read_cache_epoch(cache_root)
+    assert util.read_epoch_file(deploy) != util.read_epoch_file(cache_root)
 
 
 def test_cache_fresh_when_epochs_match(tmp_path):
@@ -86,7 +86,7 @@ def test_cache_fresh_when_epochs_match(tmp_path):
     write_epoch(deploy, "123")
     write_epoch(cache_root, "123")
 
-    assert cache._read_deploy_epoch(deploy) == cache._read_cache_epoch(cache_root)
+    assert util.read_epoch_file(deploy) == util.read_epoch_file(cache_root)
 
 
 def test_check_returns_stale_exit_code(tmp_path, monkeypatch):
@@ -197,7 +197,7 @@ def test_epoch_written_after_cache(tmp_path, monkeypatch):
 
     cache.run(args)
 
-    value = cache._read_cache_epoch(cache_root)
+    value = util.read_epoch_file(cache_root)
     assert value == "999"
 
 
