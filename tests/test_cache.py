@@ -40,10 +40,12 @@ from distman import cache
 
 
 def test_ttl_expired_no_last_check(tmp_path):
+    """If there is no last check file, the TTL is considered expired."""
     assert cache._ttl_expired(tmp_path, ttl=60) is True
 
 
 def test_ttl_not_expired(tmp_path):
+    """If the last check time is recent enough, the TTL is not expired."""
     p = cache._last_check_path(tmp_path)
     p.parent.mkdir(parents=True)
     p.write_text(str(time.time()))
@@ -51,15 +53,18 @@ def test_ttl_not_expired(tmp_path):
 
 
 def test_ttl_zero_always_expired(tmp_path):
+    """A TTL of zero means the cache is always expired."""
     assert cache._ttl_expired(tmp_path, ttl=0) is True
 
 
 def write_epoch(root: Path, value: str):
+    """Writes the epoch value to the .distman/epoch file in the given root."""
     (root / ".distman").mkdir(exist_ok=True)
     (root / ".distman" / "epoch").write_text(value)
 
 
 def test_cache_stale_when_epochs_differ(tmp_path):
+    """If the epochs differ, the cache is considered stale."""
     deploy = tmp_path / "deploy"
     cache_root = tmp_path / "cache"
     deploy.mkdir()
@@ -72,6 +77,7 @@ def test_cache_stale_when_epochs_differ(tmp_path):
 
 
 def test_cache_fresh_when_epochs_match(tmp_path):
+    """If the epochs match, the cache is considered fresh."""
     deploy = tmp_path / "deploy"
     cache_root = tmp_path / "cache"
     deploy.mkdir()
@@ -84,6 +90,7 @@ def test_cache_fresh_when_epochs_match(tmp_path):
 
 
 def test_check_returns_stale_exit_code(tmp_path, monkeypatch):
+    """If the cache is stale, the stale exit code is returned."""
     deploy = tmp_path / "deploy"
     cache_root = tmp_path / "cache"
     deploy.mkdir()
@@ -109,6 +116,7 @@ def test_check_returns_stale_exit_code(tmp_path, monkeypatch):
 
 
 def test_check_returns_zero_when_fresh(tmp_path):
+    """If the cache is fresh, zero is returned."""
     deploy = tmp_path / "deploy"
     cache_root = tmp_path / "cache"
     deploy.mkdir()
@@ -133,6 +141,7 @@ def test_check_returns_zero_when_fresh(tmp_path):
 
 
 def test_cache_not_called_when_fresh(tmp_path, monkeypatch):
+    """If the cache is fresh, the cache function is not called."""
     deploy = tmp_path / "deploy"
     cache_root = tmp_path / "cache"
     deploy.mkdir()
@@ -165,12 +174,12 @@ def test_cache_not_called_when_fresh(tmp_path, monkeypatch):
 
 
 def test_epoch_written_after_cache(tmp_path, monkeypatch):
+    """If the cache is stale, after caching the epoch is written to the cache."""
     deploy = tmp_path / "deploy"
     cache_root = tmp_path / "cache"
     deploy.mkdir()
     cache_root.mkdir()
 
-    print("-" * 20)
     write_epoch(deploy, "999")
 
     monkeypatch.setattr(cache, "cache", lambda *a, **k: None)
@@ -189,13 +198,11 @@ def test_epoch_written_after_cache(tmp_path, monkeypatch):
     cache.run(args)
 
     value = cache._read_cache_epoch(cache_root)
-    print("cache_root", cache_root)
-    print("value", value)
-    print("-" * 20)
     assert value == "999"
 
 
 def test_diff_ignores_pycache(tmp_path, caplog):
+    """The diff_trees function ignores __pycache__ directories."""
     src = tmp_path / "src"
     dst = tmp_path / "dst"
     src.mkdir()
