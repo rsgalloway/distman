@@ -39,6 +39,7 @@ import os
 import shutil
 import tempfile
 import time
+from datetime import datetime
 from pathlib import Path
 from tqdm import tqdm
 from typing import List, Optional, Sequence, Tuple, Set
@@ -86,21 +87,6 @@ def _mark_checked(cache_root: Path) -> None:
     p.write_text(f"{time.time()}\n", encoding="utf-8")
 
 
-def _read_deploy_epoch(deploy_root: Path) -> Optional[str]:
-    """Read the epoch from the deploy directory."""
-    return util.read_epoch_file(deploy_root)
-
-
-def _read_cache_epoch(cache_root: Path) -> Optional[str]:
-    """Read the epoch from the cache directory."""
-    return util.read_epoch_file(cache_root)
-
-
-def _write_cache_epoch(cache_root: Path, epoch: str) -> None:
-    """Write the epoch to the cache directory."""
-    util.write_epoch_file(cache_root, epoch)
-
-
 def is_windows() -> bool:
     """Check if the current operating system is Windows."""
     return os.name == "nt"
@@ -143,6 +129,7 @@ def atomic_replace(src_tmp: Path, dst: Path) -> None:
     os.replace(src_tmp, dst)
 
 
+# TODO: consolidate with util.check_symlinks
 def can_create_symlinks(test_dir: Path) -> bool:
     """Check if symlinks can be created in the given directory.
 
@@ -420,10 +407,36 @@ def diff_trees(
     return differences
 
 
+def print_staleness(
+    src_epoch: int, dst_epoch: int, threshold: int = config.CACHE_TTL
+) -> None:
+    """Prints whether the data is stale or fresh based on the given epoch times.
+
+    :param src_epoch: Epoch time (ns) of the source tree.
+    :param dst_epoch: Epoch time (ns) of the destination tree.
+    :param threshold: Threshold in seconds to consider stale.
+    """
+    if src_epoch is None:
+        print("missing source epoch file")
+        return
+
+    age = int(src_epoch) - int(dst_epoch)
+
+    # print staleness status (with last update time if stale, epoch is in ns)
+    if age > threshold:
+        stale_time = datetime.fromtimestamp(int(dst_epoch) / 1e9).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+        print(f"cache is stale (last update {stale_time})")
+    else:
+        print("cache is fresh")
+
+
 def cache(
     src_root: Path = config.DEPLOY_ROOT,
     dst_root: Path = config.CACHE_ROOT,
     workers: int = 16,
+    force: bool = False,
 ) -> None:
     """Clone src_root to dst_root using multiple threads.
 
@@ -432,9 +445,10 @@ def cache(
       - Recreate symlinks outside 'versions/'.
       - Copy ONLY the version objects referenced by those symlinks.
 
-    Progress behavior:
-      - Plan all file copy ops first (accurate totals).
-      - tqdm total == (#symlink ops + #file copy ops).
+    Optimizations:
+      - Planning phase shows an indeterminate tqdm (Option C).
+      - If a referenced version object already exists in cache, skip copying it.
+      - No dynamic mutation of file_ops during execution (avoids missed copies).
     """
     if not src_root.exists():
         raise SystemExit(f"Source does not exist: {src_root}")
@@ -446,161 +460,172 @@ def cache(
 
     t0 = time.time()
 
-    # planning phase
-    file_ops = []
-    link_ops = []
-    # version_objects: set[Path]  (absolute paths under src_root/.../versions/...)
+    file_ops: List[Tuple[Path, Path]] = []
+    link_ops: List[Tuple[Path, Path]] = []
+
+    # absolute paths under src_root/.../versions/...
     version_objects: Set[Path] = set()
 
     def _skip_versions_dir(dirs: list) -> None:
-        # prevent walking into any directory, named 'versions' at any depth
         if "versions" in dirs:
             dirs.remove("versions")
 
     def _link_points_into_versions(src_link: Path) -> Optional[Path]:
-        """If src_link points to a versions object, return absolute path to that object, else None."""
         try:
             target_text = os.readlink(src_link)
         except OSError:
             return None
-
-        # distman convention is a relative link like "versions/name.N.hash"
-        # normalize slashes for simple checks
         norm = target_text.replace("\\", "/")
         if not norm.startswith("versions/"):
             return None
+        return src_link.parent / target_text
 
-        # keep it cheap: avoid resolve() unless needed
-        candidate = src_link.parent / target_text
-        return candidate
+    # indeterminate tqdm: just show activity while we scan.
+    with tqdm(
+        desc=f"[walking {src_root}]",
+        unit="op",
+        leave=False,
+        position=0,
+    ) as plan:
+        for root, dirs, files in os.walk(src_root, followlinks=False):
+            _skip_versions_dir(dirs)
 
-    # walk src_root excluding versions/
-    for root, dirs, files in os.walk(src_root, followlinks=False):
-        _skip_versions_dir(dirs)
-
-        # util.is_ignorable() expects path-ish; keep existing behavior
-        if util.is_ignorable(root, include_hidden=True):
-            # don't descend into ignored dirs
-            dirs[:] = []
-            continue
-
-        root_p = Path(root)
-        rel_root = norm_rel(src_root, root_p)
-        dst_dir = dst_root / rel_root
-        ensure_dir(dst_dir)
-
-        # handle files at this level
-        for fname in files:
-            if util.is_ignorable(fname, include_hidden=True):
+            if util.is_ignorable(root, include_hidden=True):
+                dirs[:] = []
                 continue
 
-            s = root_p / fname
-            d = dst_dir / fname
+            root_p = Path(root)
+            rel_root = norm_rel(src_root, root_p)
+            dst_dir = dst_root / rel_root
+            ensure_dir(dst_dir)
 
-            if s.is_symlink():
-                link_ops.append((s, d))
+            for fname in files:
+                plan.update(1)
 
-                vo = _link_points_into_versions(s)
-                if vo is not None:
-                    # track the referenced version object (file or dir)
-                    version_objects.add(vo)
+                if util.is_ignorable(fname, include_hidden=True):
+                    continue
+
+                s = root_p / fname
+                d = dst_dir / fname
+
+                if s.is_symlink():
+                    link_ops.append((s, d))
+                    vo = _link_points_into_versions(s)
+                    if vo is not None:
+                        version_objects.add(vo)
                 else:
-                    # if it points elsewhere, we still try to preserve the link
-                    # (no extra payload copying planned)
-                    pass
-            else:
-                file_ops.append((s, d))
+                    file_ops.append((s, d))
 
-        # handle directory entries (symlink dirs appear here)
-        for dname in list(dirs):
-            if util.is_ignorable(dname, include_hidden=True):
-                dirs.remove(dname)
-                continue
+            for dname in list(dirs):
+                plan.update(1)
 
-            sdir = root_p / dname
-            if sdir.is_symlink():
-                # don't descend into symlinked dirs
-                dirs.remove(dname)
+                if util.is_ignorable(dname, include_hidden=True):
+                    dirs.remove(dname)
+                    continue
 
-                ddst = dst_dir / dname
-                link_ops.append((sdir, ddst))
+                sdir = root_p / dname
+                if sdir.is_symlink():
+                    dirs.remove(dname)
+                    ddst = dst_dir / dname
+                    link_ops.append((sdir, ddst))
 
-                vo = _link_points_into_versions(sdir)
-                if vo is not None:
-                    version_objects.add(vo)
-                else:
-                    # link to non-versions path; preserve link if possible
-                    pass
+                    vo = _link_points_into_versions(sdir)
+                    if vo is not None:
+                        version_objects.add(vo)
 
-    # expand version_objects -> individual file copy ops
-    # note: version object can be a file or directory
-    expanded_version_count = 0
-    for vo in sorted(version_objects):
-        try:
-            # normalize / resolve only enough to determine file vs dir
-            # avoid .resolve() here; it can be expensive on high latency FS
-            if not vo.exists():
-                # if link target is broken, skip it but keep the link op
-                log.warning(f"version object does not exist: {vo}")
-                continue
+        # check/expand referenced version objects
+        vos = list(sorted(version_objects))
 
-            rel = vo.relative_to(src_root)
-            dst_vo = dst_root / rel
+        missing = 0
+        planned_files = 0
+        planned_links = 0
 
-            if vo.is_file():
-                file_ops.append((vo, dst_vo))
-                expanded_version_count += 1
-            elif vo.is_dir():
-                for r2, d2, f2 in os.walk(vo, followlinks=False):
-                    rp2 = Path(r2)
-                    rel2 = rp2.relative_to(vo)
-                    out_dir = dst_vo / rel2
-                    ensure_dir(out_dir)
+        # optional: change description so the user sees a phase shift
+        plan.set_description_str(f"[comparing {dst_root}]")
 
-                    for fn in f2:
-                        sp = rp2 / fn
-                        dp = out_dir / fn
-                        # safely handle symlinks inside versioned dirs
-                        if sp.is_symlink():
-                            # best-effort: preserve if possible; otherwise copy target contents
-                            link_ops.append((sp, dp))
-                            tgt = _link_points_into_versions(sp)
-                            if tgt is not None:
-                                version_objects.add(tgt)
+        for vo in vos:
+            plan.update(1)  # "checked ref"
+
+            try:
+                # local-first shortcut to avoid remote stat in the common case
+                rel = vo.relative_to(src_root)
+                dst_vo = dst_root / rel
+
+                if not force and dst_vo.exists():
+                    continue
+
+                # remote existence check (can be slow over VPN)
+                if not vo.exists():
+                    continue
+
+                missing += 1
+                plan.set_postfix_str(
+                    f"refs={len(vos)} missing={missing} files={planned_files} links={planned_links}"
+                )
+
+                if vo.is_file():
+                    file_ops.append((vo, dst_vo))
+                    planned_files += 1
+                    continue
+
+                if vo.is_dir():
+                    for r2, _, f2 in os.walk(vo, followlinks=False):
+                        rp2 = Path(r2)
+                        rel2 = rp2.relative_to(vo)
+                        out_dir = dst_vo / rel2
+                        ensure_dir(out_dir)
+
+                        plan.update(1)  # directory planned
+
+                        for fn in f2:
+                            sp = rp2 / fn
+                            dp = out_dir / fn
+                            if sp.is_symlink():
+                                link_ops.append((sp, dp))
+                                planned_links += 1
                             else:
-                                # if symlinks unsupported, we will dereference later in execution
-                                pass
-                        else:
-                            file_ops.append((sp, dp))
-                            expanded_version_count += 1
-            else:
-                log.warning(f"version object is neither file nor dir: {vo}")
-        except Exception as e:
-            log.warning(f"failed to expand version object {vo}: {e}")
+                                file_ops.append((sp, dp))
+                                planned_files += 1
 
-    # progress total: count link creations + file copies
+                            # rate-limit UI updates to keep planning fast
+                            if (planned_files + planned_links) % 200 == 0:
+                                plan.set_postfix_str(
+                                    f"refs={len(vos)} missing={missing} files={planned_files} links={planned_links}"
+                                )
+
+            except Exception as e:
+                log.warning(f"failed to expand version object {vo}: {e}")
+
+        plan.set_postfix_str(
+            f"refs={len(vos)} missing={missing} files={planned_files} links={planned_links}"
+        )
+
+    # total ops known: links + file copies
     total_ops = len(link_ops) + len(file_ops)
-
-    # execution phase
     copied = skipped = errors = 0
 
+    # execute links first (no dynamic file_ops mutation anymore)
     with cf.ThreadPoolExecutor(max_workers=workers) as ex, tqdm(
-        total=total_ops, desc="[cache]", unit="op"
+        total=total_ops,
+        desc=f"[caching {src_root}]",
+        unit="op",
+        leave=True,
+        position=0,
     ) as pbar:
-        # create / preserve symlinks (fast ops; update progress immediately)
+        # 1) create/preserve symlinks
         for s_link, d_link in link_ops:
             try:
                 if create_symlink(s_link, d_link, dst_symlinks_ok):
                     pbar.update(1)
                     continue
 
-                # fallback: dst doesn't support symlinks
-                # dereference and copy contents into the link path
+                # fallback: no symlink support -> dereference and copy content into link path
                 target = s_link.parent / os.readlink(s_link)
+
                 if target.exists():
                     if target.is_dir():
-                        # copy directory contents into d_link
-                        ensure_dir(d_link)
+                        # best effort: copy directory tree contents into d_link
+                        # NOTE: This is rare in your use-case; keep it simple.
                         for r2, _, f2 in os.walk(target, followlinks=False):
                             rp2 = Path(r2)
                             rel2 = rp2.relative_to(target)
@@ -608,21 +633,22 @@ def cache(
                             ensure_dir(out_dir)
                             for fn in f2:
                                 file_ops.append((rp2 / fn, out_dir / fn))
-                        # we added more file ops; adjust progress total
-                        pbar.total += sum(
-                            1 for _ in os.walk(target, followlinks=False) for __ in _[2]
-                        )
-                        pbar.refresh()
                     else:
                         file_ops.append((target, d_link))
-                        pbar.total += 1
-                        pbar.refresh()
                 pbar.update(1)
             except Exception as e:
                 log.warning(f"{s_link}: {e}")
                 pbar.update(1)
 
-        # copy files concurrently (accurate progress = completions)
+        # if we appended fallback file_ops above, adjust total and refresh
+        # (still safe because we haven't launched futures yet)
+        new_total = len(link_ops) + len(file_ops)
+        if new_total != total_ops:
+            pbar.total = new_total
+            pbar.refresh()
+            total_ops = new_total
+
+        # 2) copy files concurrently
         futures = [ex.submit(copy_file_task, s, d) for (s, d) in file_ops]
         for fut in cf.as_completed(futures):
             try:
@@ -639,11 +665,7 @@ def cache(
 
     dt = time.time() - t0
     log.debug(
-        "done in %.2fs copied=%d skipped=%d errors=%d",
-        dt,
-        copied,
-        skipped,
-        errors,
+        "done in %.2fs copied=%d skipped=%d errors=%d", dt, copied, skipped, errors
     )
 
 
@@ -822,7 +844,7 @@ def prune_cache(cache_root: Path, dryrun: bool = False) -> int:
             except Exception as e:
                 log.warning(f"failed to prune {child_abs}: {e}")
 
-    log.info(f"pruned {removed} unreferenced version object(s)")
+    log.info(f"pruned {removed} unreferenced versions")
     return 0
 
 
@@ -857,6 +879,7 @@ def build_parser(prog: str = "cache") -> argparse.ArgumentParser:
         help="Delete the cache",
     )
     parser.add_argument(
+        "-p",
         "--prune",
         action="store_true",
         help="Prune the cache",
@@ -900,6 +923,10 @@ def run(args: argparse.Namespace) -> int:
     src = args.src.resolve()
     dst = args.dst.resolve()
 
+    if not os.path.exists(src):
+        log.error(f"source does not exist: {src}")
+        return 1
+
     # handle delete/prune/diff modes
     if args.delete:
         return delete_cache(dst, dryrun=args.dryrun)
@@ -912,31 +939,47 @@ def run(args: argparse.Namespace) -> int:
     # TTL gate (skip remote checks)
     if not args.dryrun and not args.force:
         if not _ttl_expired(dst, args.ttl):
-            print("cache check skipped (TTL not expired)")
+            print("cache check skipped (use -t 0 to override TTL)")
             return 0
 
     # check epochs to determine staleness
-    deploy_epoch = _read_deploy_epoch(src)
-    cache_epoch = _read_cache_epoch(dst)
-    stale = deploy_epoch != cache_epoch
+    deploy_epoch = util.read_epoch_file(src)
+    cache_epoch = util.read_epoch_file(dst)
+    if cache_epoch is None:
+        stale = True
+    elif deploy_epoch is None:
+        stale = True
+    elif deploy_epoch == cache_epoch:
+        stale = False
+    else:
+        stale = True
 
     if args.dryrun:
-        print("cache is %s" % ("stale" if stale else "fresh"))
+        print_staleness(deploy_epoch, cache_epoch)
         return STALE_EXIT if stale else 0
 
     # if fresh, mark checked and exit
     if not stale and not args.force:
         _mark_checked(dst)
-        print("cache is fresh")
+        print_staleness(deploy_epoch, cache_epoch)
         return 0
 
-    # do the cache if stale
-    cache(src, dst, workers=args.workers)
+    # perform caching
+    try:
+        cache(src, dst, workers=args.workers, force=args.force)
+
+    except KeyboardInterrupt:
+        log.error("canceled")
+        return 1
+
+    except Exception as e:
+        log.error(f"cache failed: {e}")
+        return 1
 
     # after cache, sync epoch into cache
-    if deploy_epoch:
-        _write_cache_epoch(dst, deploy_epoch)
+    util.write_epoch_file(dst, deploy_epoch)
 
+    # mark checked time
     _mark_checked(dst)
 
     return 0

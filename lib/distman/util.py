@@ -511,6 +511,8 @@ def write_epoch_file(
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_name, str(epoch_path))
+    except Exception as e:
+        log.error("Failed to write epoch file: %s", str(e))
     finally:
         try:
             if os.path.exists(tmp_name):
