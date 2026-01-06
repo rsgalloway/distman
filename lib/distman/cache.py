@@ -866,7 +866,7 @@ def build_parser(prog: str = "cache") -> argparse.ArgumentParser:
         default=config.CACHE_ROOT,
         type=Path,
         help="Destination directory",
-    ),
+    )
     parser.add_argument(
         "--workers",
         type=int,
