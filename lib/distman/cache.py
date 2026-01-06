@@ -420,10 +420,11 @@ def print_staleness(
         print("missing source epoch file")
         return
 
-    age = int(src_epoch) - int(dst_epoch)
+    age_ns = int(src_epoch) - int(dst_epoch)
+    age_sec = age_ns / 1e9
 
     # print staleness status (with last update time if stale, epoch is in ns)
-    if age > threshold:
+    if age_sec > threshold:
         stale_time = datetime.fromtimestamp(int(dst_epoch) / 1e9).strftime(
             "%Y-%m-%d %H:%M:%S"
         )
