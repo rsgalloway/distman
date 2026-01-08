@@ -310,15 +310,19 @@ def test_distributor_initialization():
 def test_dist_with_valid_target(mock_distributor, mocker, mock_dist_dict):
     """Test the dist method with a valid target."""
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix="source_path") as temp_file:
+    # Create the temp file, then CLOSE it before dist() tries to read/copy it.
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".source_path") as temp_file:
         source_path = temp_file.name
+
+    try:
         mock_dist_dict["targets"]["test_target"]["source"] = source_path
 
         distributor = Distributor()
         distributor.root = mock_dist_dict
         result = distributor.dist(target="test_target", yes=True, dryrun=False)
-        os.remove(source_path)
         assert result is True
+    finally:
+        os.remove(source_path)
 
 
 def test_dist_with_pipeline_steps(

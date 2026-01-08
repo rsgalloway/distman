@@ -43,6 +43,10 @@ from pathlib import Path
 from distman import util
 
 
+def _strip_win_extended_prefix(p: str) -> str:
+    return p[4:] if p.startswith("\\\\?\\") else p
+
+
 @pytest.fixture
 def temp_dir():
     """Fixture to create a temporary directory for testing."""
@@ -300,6 +304,7 @@ def test_get_file_versions_no_versions(temp_dir):
     assert result == []
 
 
+
 def test_link_object(temp_dir):
     """Test the link_object function to ensure it correctly creates symbolic
     links."""
@@ -312,7 +317,12 @@ def test_link_object(temp_dir):
     # test creating a symbolic link
     assert util.link_object(target_file, link_file, target_file) is True
     assert os.path.islink(link_file)
-    assert os.readlink(link_file) == target_file
+
+    link_target = os.readlink(link_file)
+    link_target = _strip_win_extended_prefix(link_target)
+
+    resolved = Path(link_file).parent / link_target
+    assert resolved.resolve() == Path(target_file).resolve()
 
     # test linking to a non-existent target
     link_file_2 = os.path.join(temp_dir, "link_to_non_existent.txt")
