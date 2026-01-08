@@ -16,12 +16,7 @@
         },
         "lib": {
             "source": "lib/distman",
-            "destination": "{DEPLOY_ROOT}/lib/python/distman",
-            "pipeline": {
-                "formatting": {
-                    "script": ["black --check {input}"]
-                }
-            }
+            "destination": "{DEPLOY_ROOT}/lib/python/distman"
         }
     }
 }
