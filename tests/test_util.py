@@ -97,12 +97,12 @@ def test_copy_file_and_compare(temp_dir):
     src = os.path.join(temp_dir, "src.txt")
     dst = os.path.join(temp_dir, "dst.txt")
 
-    with open(src, "w") as f:
+    with open(src, "w", newline="") as f:
         f.write("line1\r\nline2\nline3\r")
 
     util.copy_file(src, dst)
 
-    with open(dst, "r") as f:
+    with open(dst, "r", newline="") as f:
         lines = f.readlines()
     assert lines == ["line1\n", "line2\n", "line3\n"]
     assert util.compare_files(src, dst)
