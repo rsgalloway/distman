@@ -37,6 +37,7 @@ import os
 import tempfile
 import shutil
 import pytest
+from pathlib import Path
 from unittest.mock import patch
 
 from distman import config, util
@@ -241,7 +242,7 @@ def test_get_version_dest_without_short_head(temp_dir):
     result = get_version_dest(dest, version_num, short_head)
     expected = os.path.join(temp_dir, config.DIR_VERSIONS, "file.txt.2")
 
-    assert result == expected
+    assert Path(result) == Path(expected)
 
 
 def test_get_version_dest_version_num(temp_dir):

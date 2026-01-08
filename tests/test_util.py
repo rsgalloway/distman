@@ -38,6 +38,8 @@ import filecmp
 import tempfile
 import shutil
 import pytest
+from pathlib import Path
+
 from distman import util
 
 
@@ -248,10 +250,9 @@ def test_get_file_versions_with_limit(temp_dir):
 
     assert len(result) == len(expected_results)
     for res, exp in zip(result, expected_results):
-        assert res[0] == exp[0]
+        assert Path(res[0]) == Path(exp[0])
         assert res[1] == exp[1]
         assert res[2] == exp[2]
-
 
 def test_get_file_versions_without_limit(temp_dir):
     """Test the get_file_versions function without a limit on the number of
@@ -286,7 +287,7 @@ def test_get_file_versions_without_limit(temp_dir):
 
     assert len(result) == len(expected_results)
     for res, exp in zip(result, expected_results):
-        assert res[0] == exp[0]
+        assert Path(res[0]) == Path(exp[0])
         assert res[1] == exp[1]
         assert res[2] == exp[2]
 
