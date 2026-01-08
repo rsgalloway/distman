@@ -72,6 +72,15 @@ def test_sanitize_path():
     assert util.sanitize_path("") == ""
 
 
+def test_check_symlinks():
+    """Test if the symlink is correctly supported."""
+
+    if not util.check_symlinks():
+        util.add_symlink_support()
+
+    assert util.check_symlinks() is True
+
+
 def test_get_path_type(temp_dir):
     """Test the get_path_type function to ensure it correctly identifies file
     types."""
@@ -122,6 +131,38 @@ def test_copy_file_binary_file(temp_dir):
     # verify the copied file is the same as the original
     assert util.compare_files(src, dst)
     assert filecmp.cmp(src, dst)
+
+
+def test_copy_directory_with_symlinks(temp_dir):
+    """Test copying a directory with multiple symlinks to ensure symlinks are preserved."""
+    src_dir = os.path.join(temp_dir, "src_dir")
+    dst_dir = os.path.join(temp_dir, "dst_dir")
+    os.mkdir(src_dir)
+
+    # create a file and a symlink to that file
+    file_path = os.path.join(src_dir, "file.txt")
+    with open(file_path, "w") as f:
+        f.write("This is a test file.")
+
+    symlink_path = os.path.join(src_dir, "symlink_to_file")
+    os.symlink(file_path, symlink_path)
+
+    # create another symlink to the directory itself
+    symlink_dir_path = os.path.join(src_dir, "symlink_to_dir")
+    os.symlink(src_dir, symlink_dir_path)
+
+    # copy the directory
+    util.copy_directory(src_dir, dst_dir)
+
+    # check if the symlink to the file is preserved
+    copied_symlink_path = os.path.join(dst_dir, "symlink_to_file")
+    assert os.path.islink(copied_symlink_path)
+    assert os.readlink(copied_symlink_path) == os.path.abspath(file_path)
+
+    # check if the symlink to the directory is preserved
+    copied_symlink_dir_path = os.path.join(dst_dir, "symlink_to_dir")
+    assert os.path.islink(copied_symlink_dir_path)
+    assert os.readlink(copied_symlink_dir_path) == os.path.abspath(src_dir)
 
 
 def test_remove_object(temp_dir):
