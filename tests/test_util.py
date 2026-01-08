@@ -44,7 +44,16 @@ from distman import util
 
 
 def _strip_win_extended_prefix(p: str) -> str:
+    """Strip the Windows extended-length path prefix if present."""
     return p[4:] if p.startswith("\\\\?\\") else p
+
+
+def _resolved_link_target(link_path: str) -> Path:
+    """Resolve the target of a symlink, handling relative paths."""
+    target = os.readlink(link_path)
+    target = _strip_win_extended_prefix(target)
+    # if target is relative, resolve relative to link's parent
+    return (Path(link_path).parent / target).resolve()
 
 
 @pytest.fixture
@@ -133,36 +142,76 @@ def test_copy_file_binary_file(temp_dir):
     assert filecmp.cmp(src, dst)
 
 
+def test_copy_directory_copies_nested(temp_dir):
+    """Test the copy_directory function to ensure it correctly copies nested
+    folders."""
+    src = os.path.join(temp_dir, "src")
+    dst = os.path.join(temp_dir, "dst")
+    os.makedirs(os.path.join(src, "a", "b"), exist_ok=True)
+
+    # visible files
+    with open(os.path.join(src, "root.txt"), "w", newline="") as f:
+        f.write("root\r\n")
+    with open(os.path.join(src, "a", "b", "leaf.txt"), "w", newline="") as f:
+        f.write("leaf\r\n")
+
+    # hidden-ish (Unix-style)
+    with open(os.path.join(src, ".hidden.txt"), "w", newline="") as f:
+        f.write("nope\r\n")
+
+    util.copy_directory(src, dst, all_files=False)
+
+    assert os.path.isfile(os.path.join(dst, "root.txt"))
+    assert os.path.isfile(os.path.join(dst, "a", "b", "leaf.txt"))
+    assert not os.path.exists(os.path.join(dst, ".hidden.txt"))
+
+    # and your newline normalization should have happened
+    with open(os.path.join(dst, "root.txt"), "r") as f:
+        assert f.read() == "root\n"
+
+
+def test_copy_directory_all_files_includes_hidden(temp_dir):
+    """Test the copy_directory function to ensure it copies hidden files when
+    all_files is True."""
+    src = os.path.join(temp_dir, "src")
+    dst = os.path.join(temp_dir, "dst")
+    os.makedirs(src, exist_ok=True)
+
+    with open(os.path.join(src, ".hidden.txt"), "w", newline="") as f:
+        f.write("ok\r\n")
+
+    util.copy_directory(src, dst, all_files=True)
+
+    assert os.path.isfile(os.path.join(dst, ".hidden.txt"))
+    with open(os.path.join(dst, ".hidden.txt"), "r") as f:
+        assert f.read() == "ok\n"
+
+
 def test_copy_directory_with_symlinks(temp_dir):
-    """Test copying a directory with multiple symlinks to ensure symlinks are preserved."""
+    """Test the copy_directory function to ensure it correctly copies directories"""
     src_dir = os.path.join(temp_dir, "src_dir")
     dst_dir = os.path.join(temp_dir, "dst_dir")
     os.mkdir(src_dir)
 
-    # create a file and a symlink to that file
     file_path = os.path.join(src_dir, "file.txt")
-    with open(file_path, "w") as f:
+    with open(file_path, "w", newline="") as f:
         f.write("This is a test file.")
 
     symlink_path = os.path.join(src_dir, "symlink_to_file")
     os.symlink(file_path, symlink_path)
 
-    # create another symlink to the directory itself
     symlink_dir_path = os.path.join(src_dir, "symlink_to_dir")
     os.symlink(src_dir, symlink_dir_path)
 
-    # copy the directory
     util.copy_directory(src_dir, dst_dir)
 
-    # check if the symlink to the file is preserved
     copied_symlink_path = os.path.join(dst_dir, "symlink_to_file")
     assert os.path.islink(copied_symlink_path)
-    assert os.readlink(copied_symlink_path) == os.path.abspath(file_path)
+    assert _resolved_link_target(copied_symlink_path) == Path(file_path).resolve()
 
-    # check if the symlink to the directory is preserved
     copied_symlink_dir_path = os.path.join(dst_dir, "symlink_to_dir")
     assert os.path.islink(copied_symlink_dir_path)
-    assert os.readlink(copied_symlink_dir_path) == os.path.abspath(src_dir)
+    assert _resolved_link_target(copied_symlink_dir_path) == Path(src_dir).resolve()
 
 
 def test_remove_object(temp_dir):

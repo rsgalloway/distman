@@ -158,7 +158,7 @@ def copy_directory(source: str, dest: str, all_files: bool = False) -> None:
     :param dest: Path to destination directory.
     :param all_files: Copy all files, including hidden and ignorable files.
     """
-    source = os.path.relpath(source)
+    source = os.path.abspath(source)
 
     for filepath in get_files(source, all_files=all_files):
         relative = filepath[len(source) + 1 :] if source != "." else filepath
@@ -918,5 +918,6 @@ def walk(
             elif os.path.islink(os.path.join(dirname, d)):
                 yield os.path.join(dirname, d)
         for name in files:
-            if not is_ignorable(name):
-                yield os.path.join(dirname, name)
+            if exclude_ignorables and is_ignorable(name):
+                continue
+            yield os.path.join(dirname, name)
