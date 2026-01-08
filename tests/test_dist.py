@@ -110,7 +110,8 @@ def test_get_source_and_dest_valid():
         "destination": "path/to/dest",
     }
     result = get_source_and_dest(target_dict)
-    assert result == ("path/to/source", "path/to/dest")
+    r1, r2 = result
+    assert (Path(r1), Path(r2)) == (Path("path/to/source"), Path("path/to/dest"))
 
 
 def test_get_source_and_dest_missing_source():
@@ -227,7 +228,7 @@ def test_get_version_dest_with_short_head(temp_dir):
     result = get_version_dest(dest, version_num, short_head)
     expected = os.path.join(temp_dir, config.DIR_VERSIONS, "file.txt.1.abc123")
 
-    assert result == expected
+    assert Path(result) == Path(expected)
 
 
 def test_get_version_dest_without_short_head(temp_dir):
@@ -257,7 +258,7 @@ def test_get_version_dest_version_num(temp_dir):
     result = get_version_dest(dest, version_num, short_head)
     expected_dir = os.path.join(os.path.dirname(dest), config.DIR_VERSIONS)
 
-    assert result == os.path.join(expected_dir, "test.txt.3.def456")
+    assert Path(result) == Path(os.path.join(expected_dir, "test.txt.3.def456"))
 
 
 def test_should_skip_target_with_matching_pattern():
