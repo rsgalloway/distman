@@ -388,3 +388,53 @@ def test_delete_target_with_no_versions(mock_distributor, mocker, mock_dist_dict
     dist.root = mock_dist_dict
     result = dist.delete_target("test_target", dryrun=True)
     assert result is False
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows-only handle regression test")
+def test_dist_does_not_emit_popen_del_invalid_handle(tmp_path):
+    """
+    Run distman in a fresh interpreter and assert we don't get the
+    'Exception ignored in: Popen.__del__ ... WinError 6' noise on stderr.
+
+    This catches GitPython subprocess-handle leaks on early-return code paths.
+    """
+    import subprocess
+    import sys
+
+    # make a minimal dist.json that will fail early in a deterministic way.
+    # we intentionally use an unresolved var in destination to trigger an early return.
+    dist_json = tmp_path / "dist.json"
+    dist_json.write_text(
+        """{
+  "version": 2,
+  "targets": {
+    "t": {
+      "source": ".",
+      "destination": "{THIS_VAR_DOES_NOT_EXIST}/x"
+    }
+  }
+}""",
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    # be sure we don't accidentally have that var set in CI
+    env.pop("THIS_VAR_DOES_NOT_EXIST", None)
+
+    cmd = [sys.executable, "-c", "from distman.dist import main; raise SystemExit(main(['-d']))"]
+
+    p = subprocess.run(
+        cmd,
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    # w expect non-zero exit due to invalid dest var; that's fine
+    assert p.returncode != 0
+
+    # the actual regression assertion:
+    stderr = p.stderr or ""
+    assert "Exception ignored in: <function Popen.__del__" not in stderr
+    assert "WinError 6" not in stderr
