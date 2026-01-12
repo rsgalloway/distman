@@ -15,7 +15,7 @@
 # =============================================================================
 
 # Define the installation command
-BUILD_CMD := pip install -r requirements.txt -t build
+BUILD_CMD := python -m pip install . -t build
 
 # Target to build for Linux
 build: clean
