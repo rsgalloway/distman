@@ -421,6 +421,9 @@ def print_staleness(
     if src_epoch is None:
         print("missing source epoch file")
         return
+    if dst_epoch is None:
+        print("missing destination epoch file")
+        return
 
     age_ns = int(src_epoch) - int(dst_epoch)
     age_sec = age_ns / 1e9

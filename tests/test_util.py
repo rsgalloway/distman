@@ -38,7 +38,22 @@ import filecmp
 import tempfile
 import shutil
 import pytest
+from pathlib import Path
+
 from distman import util
+
+
+def _strip_win_extended_prefix(p: str) -> str:
+    """Strip the Windows extended-length path prefix if present."""
+    return p[4:] if p.startswith("\\\\?\\") else p
+
+
+def _resolved_link_target(link_path: str) -> Path:
+    """Resolve the target of a symlink, handling relative paths."""
+    target = os.readlink(link_path)
+    target = _strip_win_extended_prefix(target)
+    # if target is relative, resolve relative to link's parent
+    return (Path(link_path).parent / target).resolve()
 
 
 @pytest.fixture
@@ -66,6 +81,15 @@ def test_sanitize_path():
     assert util.sanitize_path("") == ""
 
 
+def test_check_symlinks():
+    """Test if the symlink is correctly supported."""
+
+    if not util.check_symlinks():
+        util.add_symlink_support()
+
+    assert util.check_symlinks() is True
+
+
 def test_get_path_type(temp_dir):
     """Test the get_path_type function to ensure it correctly identifies file
     types."""
@@ -91,12 +115,12 @@ def test_copy_file_and_compare(temp_dir):
     src = os.path.join(temp_dir, "src.txt")
     dst = os.path.join(temp_dir, "dst.txt")
 
-    with open(src, "w") as f:
+    with open(src, "w", newline="") as f:
         f.write("line1\r\nline2\nline3\r")
 
     util.copy_file(src, dst)
 
-    with open(dst, "r") as f:
+    with open(dst, "r", newline="") as f:
         lines = f.readlines()
     assert lines == ["line1\n", "line2\n", "line3\n"]
     assert util.compare_files(src, dst)
@@ -116,6 +140,78 @@ def test_copy_file_binary_file(temp_dir):
     # verify the copied file is the same as the original
     assert util.compare_files(src, dst)
     assert filecmp.cmp(src, dst)
+
+
+def test_copy_directory_copies_nested(temp_dir):
+    """Test the copy_directory function to ensure it correctly copies nested
+    folders."""
+    src = os.path.join(temp_dir, "src")
+    dst = os.path.join(temp_dir, "dst")
+    os.makedirs(os.path.join(src, "a", "b"), exist_ok=True)
+
+    # visible files
+    with open(os.path.join(src, "root.txt"), "w", newline="") as f:
+        f.write("root\r\n")
+    with open(os.path.join(src, "a", "b", "leaf.txt"), "w", newline="") as f:
+        f.write("leaf\r\n")
+
+    # hidden-ish (Unix-style)
+    with open(os.path.join(src, ".hidden.txt"), "w", newline="") as f:
+        f.write("nope\r\n")
+
+    util.copy_directory(src, dst, all_files=False)
+
+    assert os.path.isfile(os.path.join(dst, "root.txt"))
+    assert os.path.isfile(os.path.join(dst, "a", "b", "leaf.txt"))
+    assert not os.path.exists(os.path.join(dst, ".hidden.txt"))
+
+    # and your newline normalization should have happened
+    with open(os.path.join(dst, "root.txt"), "r") as f:
+        assert f.read() == "root\n"
+
+
+def test_copy_directory_all_files_includes_hidden(temp_dir):
+    """Test the copy_directory function to ensure it copies hidden files when
+    all_files is True."""
+    src = os.path.join(temp_dir, "src")
+    dst = os.path.join(temp_dir, "dst")
+    os.makedirs(src, exist_ok=True)
+
+    with open(os.path.join(src, ".hidden.txt"), "w", newline="") as f:
+        f.write("ok\r\n")
+
+    util.copy_directory(src, dst, all_files=True)
+
+    assert os.path.isfile(os.path.join(dst, ".hidden.txt"))
+    with open(os.path.join(dst, ".hidden.txt"), "r") as f:
+        assert f.read() == "ok\n"
+
+
+def test_copy_directory_with_symlinks(temp_dir):
+    """Test the copy_directory function to ensure it correctly copies directories"""
+    src_dir = os.path.join(temp_dir, "src_dir")
+    dst_dir = os.path.join(temp_dir, "dst_dir")
+    os.mkdir(src_dir)
+
+    file_path = os.path.join(src_dir, "file.txt")
+    with open(file_path, "w", newline="") as f:
+        f.write("This is a test file.")
+
+    symlink_path = os.path.join(src_dir, "symlink_to_file")
+    os.symlink(file_path, symlink_path)
+
+    symlink_dir_path = os.path.join(src_dir, "symlink_to_dir")
+    os.symlink(src_dir, symlink_dir_path)
+
+    util.copy_directory(src_dir, dst_dir)
+
+    copied_symlink_path = os.path.join(dst_dir, "symlink_to_file")
+    assert os.path.islink(copied_symlink_path)
+    assert _resolved_link_target(copied_symlink_path) == Path(file_path).resolve()
+
+    copied_symlink_dir_path = os.path.join(dst_dir, "symlink_to_dir")
+    assert os.path.islink(copied_symlink_dir_path)
+    assert _resolved_link_target(copied_symlink_dir_path) == Path(src_dir).resolve()
 
 
 def test_remove_object(temp_dir):
@@ -248,10 +344,9 @@ def test_get_file_versions_with_limit(temp_dir):
 
     assert len(result) == len(expected_results)
     for res, exp in zip(result, expected_results):
-        assert res[0] == exp[0]
+        assert Path(res[0]) == Path(exp[0])
         assert res[1] == exp[1]
         assert res[2] == exp[2]
-
 
 def test_get_file_versions_without_limit(temp_dir):
     """Test the get_file_versions function without a limit on the number of
@@ -286,7 +381,7 @@ def test_get_file_versions_without_limit(temp_dir):
 
     assert len(result) == len(expected_results)
     for res, exp in zip(result, expected_results):
-        assert res[0] == exp[0]
+        assert Path(res[0]) == Path(exp[0])
         assert res[1] == exp[1]
         assert res[2] == exp[2]
 
@@ -297,6 +392,7 @@ def test_get_file_versions_no_versions(temp_dir):
     result = util.get_file_versions(target)
 
     assert result == []
+
 
 
 def test_link_object(temp_dir):
@@ -311,7 +407,12 @@ def test_link_object(temp_dir):
     # test creating a symbolic link
     assert util.link_object(target_file, link_file, target_file) is True
     assert os.path.islink(link_file)
-    assert os.readlink(link_file) == target_file
+
+    link_target = os.readlink(link_file)
+    link_target = _strip_win_extended_prefix(link_target)
+
+    resolved = Path(link_file).parent / link_target
+    assert resolved.resolve() == Path(target_file).resolve()
 
     # test linking to a non-existent target
     link_file_2 = os.path.join(temp_dir, "link_to_non_existent.txt")

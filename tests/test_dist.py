@@ -37,6 +37,7 @@ import os
 import tempfile
 import shutil
 import pytest
+from pathlib import Path
 from unittest.mock import patch
 
 from distman import config, util
@@ -109,7 +110,8 @@ def test_get_source_and_dest_valid():
         "destination": "path/to/dest",
     }
     result = get_source_and_dest(target_dict)
-    assert result == ("path/to/source", "path/to/dest")
+    r1, r2 = result
+    assert (Path(r1), Path(r2)) == (Path("path/to/source"), Path("path/to/dest"))
 
 
 def test_get_source_and_dest_missing_source():
@@ -226,7 +228,7 @@ def test_get_version_dest_with_short_head(temp_dir):
     result = get_version_dest(dest, version_num, short_head)
     expected = os.path.join(temp_dir, config.DIR_VERSIONS, "file.txt.1.abc123")
 
-    assert result == expected
+    assert Path(result) == Path(expected)
 
 
 def test_get_version_dest_without_short_head(temp_dir):
@@ -241,7 +243,7 @@ def test_get_version_dest_without_short_head(temp_dir):
     result = get_version_dest(dest, version_num, short_head)
     expected = os.path.join(temp_dir, config.DIR_VERSIONS, "file.txt.2")
 
-    assert result == expected
+    assert Path(result) == Path(expected)
 
 
 def test_get_version_dest_version_num(temp_dir):
@@ -256,7 +258,7 @@ def test_get_version_dest_version_num(temp_dir):
     result = get_version_dest(dest, version_num, short_head)
     expected_dir = os.path.join(os.path.dirname(dest), config.DIR_VERSIONS)
 
-    assert result == os.path.join(expected_dir, "test.txt.3.def456")
+    assert Path(result) == Path(os.path.join(expected_dir, "test.txt.3.def456"))
 
 
 def test_should_skip_target_with_matching_pattern():
@@ -308,15 +310,19 @@ def test_distributor_initialization():
 def test_dist_with_valid_target(mock_distributor, mocker, mock_dist_dict):
     """Test the dist method with a valid target."""
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix="source_path") as temp_file:
+    # Create the temp file, then CLOSE it before dist() tries to read/copy it.
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".source_path") as temp_file:
         source_path = temp_file.name
+
+    try:
         mock_dist_dict["targets"]["test_target"]["source"] = source_path
 
         distributor = Distributor()
         distributor.root = mock_dist_dict
         result = distributor.dist(target="test_target", yes=True, dryrun=False)
-        os.remove(source_path)
         assert result is True
+    finally:
+        os.remove(source_path)
 
 
 def test_dist_with_pipeline_steps(
@@ -382,3 +388,53 @@ def test_delete_target_with_no_versions(mock_distributor, mocker, mock_dist_dict
     dist.root = mock_dist_dict
     result = dist.delete_target("test_target", dryrun=True)
     assert result is False
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows-only handle regression test")
+def test_dist_does_not_emit_popen_del_invalid_handle(tmp_path):
+    """
+    Run distman in a fresh interpreter and assert we don't get the
+    'Exception ignored in: Popen.__del__ ... WinError 6' noise on stderr.
+
+    This catches GitPython subprocess-handle leaks on early-return code paths.
+    """
+    import subprocess
+    import sys
+
+    # make a minimal dist.json that will fail early in a deterministic way.
+    # we intentionally use an unresolved var in destination to trigger an early return.
+    dist_json = tmp_path / "dist.json"
+    dist_json.write_text(
+        """{
+  "version": 2,
+  "targets": {
+    "t": {
+      "source": ".",
+      "destination": "{THIS_VAR_DOES_NOT_EXIST}/x"
+    }
+  }
+}""",
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    # be sure we don't accidentally have that var set in CI
+    env.pop("THIS_VAR_DOES_NOT_EXIST", None)
+
+    cmd = [sys.executable, "-c", "from distman.dist import main; raise SystemExit(main(['-d']))"]
+
+    p = subprocess.run(
+        cmd,
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    # w expect non-zero exit due to invalid dest var; that's fine
+    assert p.returncode != 0
+
+    # the actual regression assertion:
+    stderr = p.stderr or ""
+    assert "Exception ignored in: <function Popen.__del__" not in stderr
+    assert "WinError 6" not in stderr

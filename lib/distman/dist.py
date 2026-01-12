@@ -161,6 +161,14 @@ class Distributor(GitRepo):
         if not callable(getattr(os, "symlink", None)):
             util.add_symlink_support()
 
+    def close(self) -> None:
+        """Cleans up resources used by the Distributor."""
+        try:
+            if self.repo:
+                self.repo.close()
+        except Exception:
+            pass
+
     def dist(
         self,
         target: Optional[Union[str, List[str]]] = None,
@@ -437,12 +445,6 @@ class Distributor(GitRepo):
                         continue
 
             log.info(f"Updated: {t.source} ={t.type}> {version_dest}")
-
-        if self.repo:
-            try:
-                self.repo.close()
-            except Exception:
-                pass
 
         if did_mutate and not dryrun and not show:
             util.write_epoch_file(config.DEPLOY_ROOT)
@@ -860,76 +862,81 @@ def run(args: argparse.Namespace) -> int:
     if not os.path.isdir(args.location):
         print(f"{args.location} is not a directory")
         return 1
+
     if sum([bool(args.commit), bool(args.number), bool(args.reset)]) > 1:
         print("--commit,--number and --reset are mutually exclusive")
         return 1
 
-    distributor = Distributor()
+    try:
+        distributor = Distributor()
 
-    if not distributor.read_dist_file(args.location):
-        return 1
-
-    # delete target(s)
-    if args.delete:
-        ok = distributor.delete_target(
-            target=args.target,
-            target_version=args.number,
-            target_commit=args.commit,
-            yes=args.yes,
-            dryrun=args.dryrun,
-        )
-        return 0 if ok else 1
-
-    # windows: ensure symlink privilege
-    if os.name == "nt":
-        if not util.check_symlinks():
+        if not distributor.read_dist_file(args.location):
             return 1
 
-    # change/reset versions
-    if args.number or args.commit or args.reset:
-        if args.reset:
-            ok = distributor.reset_file_version(args.target, dryrun=args.dryrun)
+        # delete target(s)
+        if args.delete:
+            ok = distributor.delete_target(
+                target=args.target,
+                target_version=args.number,
+                target_commit=args.commit,
+                yes=args.yes,
+                dryrun=args.dryrun,
+            )
             return 0 if ok else 1
 
-        if args.number:
-            try:
-                target_version = int(args.number)
-            except Exception:
-                print(f"Invalid version number: {args.number}")
-                return 2
-            target_commit = ""
-        else:
-            target_version = args.number
-            target_commit = args.commit
-            if len(target_commit) < config.LEN_MINHASH:
-                print(f"Hashes must be at least {config.LEN_MINHASH} characters")
-                return 2
+        # windows: ensure symlink privilege
+        if os.name == "nt":
+            if not util.check_symlinks():
+                return 1
 
-        ok = distributor.change_file_version(
-            target=args.target,
-            target_commit=target_commit,
-            target_version=target_version,
-            dryrun=args.dryrun,
-        )
-        return 0 if ok else 1
+        # change/reset versions
+        if args.number or args.commit or args.reset:
+            if args.reset:
+                ok = distributor.reset_file_version(args.target, dryrun=args.dryrun)
+                return 0 if ok else 1
 
-    # run dist
-    try:
-        ok = distributor.dist(
-            target=args.target,
-            show=args.show,
-            force=args.force,
-            all=args.all,
-            yes=args.yes,
-            ignore_missing=args.ignore_missing,
-            dryrun=args.dryrun,
-            versiononly=args.version_only,
-            verbose=args.verbose,
-        )
-        return 0 if ok else 1
-    except KeyboardInterrupt:
-        print("Stopping dist...")
-        return 2
+            if args.number:
+                try:
+                    target_version = int(args.number)
+                except Exception:
+                    print(f"Invalid version number: {args.number}")
+                    return 2
+                target_commit = ""
+            else:
+                target_version = args.number
+                target_commit = args.commit
+                if len(target_commit) < config.LEN_MINHASH:
+                    print(f"Hashes must be at least {config.LEN_MINHASH} characters")
+                    return 2
+
+            ok = distributor.change_file_version(
+                target=args.target,
+                target_commit=target_commit,
+                target_version=target_version,
+                dryrun=args.dryrun,
+            )
+            return 0 if ok else 1
+
+        # run dist
+        try:
+            ok = distributor.dist(
+                target=args.target,
+                show=args.show,
+                force=args.force,
+                all=args.all,
+                yes=args.yes,
+                ignore_missing=args.ignore_missing,
+                dryrun=args.dryrun,
+                versiononly=args.version_only,
+                verbose=args.verbose,
+            )
+            return 0 if ok else 1
+        except KeyboardInterrupt:
+            print("Stopping dist...")
+            return 2
+
+    finally:
+        distributor.close()
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

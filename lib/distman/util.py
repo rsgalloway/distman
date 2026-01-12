@@ -100,35 +100,55 @@ def copy_file(source: str, dest: str) -> None:
     """Copies a file or link. Converts line endings to linux LF, preserving
     original source file mode.
 
-    :param source: Path to source file or link.
-    :param dest: Path to destination.
-    :return: None
+    This is important for cross-platform distributions: CRLF can break shebang
+    execution on Linux (bad interpreter) even if the file came from Windows.
+
+    :param source: Path to source file.
+    :param dest: Path to destination file.
     """
     try:
         destdir = os.path.dirname(dest)
-        if not os.path.isdir(destdir):
+        if destdir and not os.path.isdir(destdir):
             os.makedirs(destdir, exist_ok=True)
+
+        # preserve symlinks as symlinks
         if os.path.islink(source):
             linkto = os.readlink(source)
             try:
                 os.symlink(linkto, dest, target_is_directory=os.path.isdir(linkto))
             except OSError as e:
                 log.error("Failed to create symbolic link: %s", str(e))
-        # copy file, converting line endings to LF and replacing tokens
-        else:
-            with open(source, "r") as infile, open(dest, "wb") as outfile:
-                for line in infile:
-                    line = line.replace("\r\n", "\n").replace("\r", "\n")
-                    outfile.write((line).encode("utf-8"))
-    # if file is binary, or has invalid characters, copy it as is
+            return
+
+        # read raw bytes so newline handling is deterministic on Windows + Linux
+        with open(source, "rb") as f:
+            data = f.read()
+
+        # treat as utf-8 text if possible; otherwise copy as binary
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            shutil.copy2(source, dest)
+            return
+
+        # normalize line endings to LF
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+
+        # write text with LF newlines
+        with open(dest, "w", encoding="utf-8", newline="\n") as outfile:
+            outfile.write(text)
+
     except (UnicodeDecodeError, TypeError, ValueError):
         shutil.copy2(source, dest)
     except Exception as e:
         log.error("File copy error: %s %s", source, str(e))
     finally:
-        # preserve original file mode if not a link
-        if not os.path.islink(source):
-            os.chmod(dest, os.stat(source).st_mode)
+        # preserve original file mode if not a link (best-effort on Windows)
+        try:
+            if not os.path.islink(source) and os.path.exists(dest):
+                os.chmod(dest, os.stat(source).st_mode)
+        except Exception:
+            pass
 
 
 def copy_directory(source: str, dest: str, all_files: bool = False) -> None:
@@ -137,9 +157,8 @@ def copy_directory(source: str, dest: str, all_files: bool = False) -> None:
     :param source: Path to source directory.
     :param dest: Path to destination directory.
     :param all_files: Copy all files, including hidden and ignorable files.
-    :return: None
     """
-    source = os.path.relpath(source)
+    source = os.path.abspath(source)
 
     for filepath in get_files(source, all_files=all_files):
         relative = filepath[len(source) + 1 :] if source != "." else filepath
@@ -155,7 +174,6 @@ def copy_object(source: str, dest: str, all_files: bool = False) -> None:
     :param dest: Path to destination file or directory.
     :param all_files: Copy all files in a directory, including hidden and
         ignorable files.
-    :return: None
     """
     if os.path.islink(source):
         link_target = os.readlink(source)
@@ -900,5 +918,6 @@ def walk(
             elif os.path.islink(os.path.join(dirname, d)):
                 yield os.path.join(dirname, d)
         for name in files:
-            if not is_ignorable(name):
-                yield os.path.join(dirname, name)
+            if exclude_ignorables and is_ignorable(name):
+                continue
+            yield os.path.join(dirname, name)
