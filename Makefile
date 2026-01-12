@@ -1,6 +1,6 @@
 # =============================================================================
 # Project: Distman - Simple File Distribution Manager
-# Makefile for building project executables on Linux and Windows (using Wine)
+# Makefile for building project executables on Linux
 #
 # Usage:
 #   make           - Builds targets
@@ -15,13 +15,13 @@
 # =============================================================================
 
 # Define the installation command
-BUILD_CMD := python -m pip install . -t build
+BUILD_DIR := build
+BUILD_CMD := python -m pip install . -t $(BUILD_DIR)
 
 # Target to build for Linux
 build: clean
 	$(BUILD_CMD)
-	rm -rf build/bin
-	rm -rf build/distman
+	rm -rf build/bin build/lib build/distman build/bdist* build/__pycache__
 
 # Clean target to remove the build directory
 clean:

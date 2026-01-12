@@ -2,12 +2,12 @@
 setlocal enabledelayedexpansion
 
 rem =============================================================================
-rem Project: Distman - Simple File Distribution Manager
-rem Windows make.bat equivalent for the provided Makefile.
+rem Project: distman
+rem Windows make.bat equivalent for the Makefile targets.
 rem
 rem Usage:
 rem   make.bat              -> build
-rem   make.bat build        -> build
+rem   make.bat build        -> build (clean + install-to-build + prune)
 rem   make.bat clean        -> remove build artifacts
 rem   make.bat dryrun       -> dist --dryrun
 rem   make.bat install      -> build, then dist --yes
@@ -27,19 +27,28 @@ echo Valid targets: build, clean, dryrun, install
 exit /b 2
 
 :build
-rem Build Python sdist/wheel into .\build (requires the 'build' package)
+call "%~f0" clean
+if errorlevel 1 exit /b %errorlevel%
+
+rem Ensure build dir exists
 if not exist build mkdir build
 
-python -m pip install -U pip setuptools wheel >NUL
-python -m pip show build >NUL 2>&1
-if errorlevel 1 (
-  echo Installing python-build (pip package: build)...
-  python -m pip install -U build
+rem Install this project + its runtime deps into .\build (per pyproject.toml)
+python -m pip install --upgrade pip setuptools wheel >NUL
+echo Installing distman into .\build ...
+python -m pip install . -t build
+if errorlevel 1 exit /b %errorlevel%
+
+rem Prune items that are not intended to ship (match Makefile)
+for %%D in (build\bin build\lib build\distman build\__pycache__) do (
+  if exist "%%D" rmdir /s /q "%%D"
 )
 
-echo Building sdist/wheel into .\build ...
-python -m build --outdir build
-if errorlevel 1 exit /b %errorlevel%
+rem Remove bdist-style dirs under build (build\bdist*)
+for /d %%D in ("build\bdist*") do (
+  if exist "%%D" rmdir /s /q "%%D"
+)
+
 goto :eof
 
 :clean
