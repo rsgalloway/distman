@@ -33,8 +33,8 @@ __doc__ = """
 Contains logging functions and classes.
 """
 
-import os
 import logging
+import os
 from logging.handlers import RotatingFileHandler
 
 from distman import config
@@ -168,14 +168,10 @@ def setup_file_handler(
     os.makedirs(logdir, exist_ok=True)
     log_file = os.path.join(logdir, "distman.log")
 
-    handler = UserRotatingFileHandler(
-        log_file, maxBytes=maxBytes, backupCount=backupCount
-    )
+    handler = UserRotatingFileHandler(log_file, maxBytes=maxBytes, backupCount=backupCount)
     handler.setLevel(level)
 
-    formatter = logging.Formatter(
-        "%(asctime)s - %(username)s - %(levelname)s - %(message)s"
-    )
+    formatter = logging.Formatter("%(asctime)s - %(username)s - %(levelname)s - %(message)s")
     handler.setFormatter(formatter)
 
     # add dry run filter

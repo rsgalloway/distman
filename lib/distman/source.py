@@ -35,9 +35,9 @@ Contains source file distribution classes and functions.
 
 import json
 import os
+from functools import wraps
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
-from functools import wraps
 
 import git
 from git.exc import GitCommandError
@@ -147,9 +147,7 @@ class GitRepo(Source):
         repo_root = Path(self.repo.working_tree_dir).resolve()
         start_path = (repo_root / start).resolve()
         if not start_path.is_dir():
-            raise ValueError(
-                f"Start directory '{start}' does not exist or is not a directory."
-            )
+            raise ValueError(f"Start directory '{start}' does not exist or is not a directory.")
 
         tracked_files = []
         for item in self.repo.tree().traverse():
@@ -252,7 +250,7 @@ class GitRepo(Source):
                 )
                 return True
 
-        except GitCommandError as err:
+        except GitCommandError:
             log.warning("WARNING: branch '%s' not found on remote.", self.branch_name)
             return True
         except Exception as err:
@@ -273,18 +271,15 @@ class GitRepo(Source):
 
         try:
             changed = [
-                os.path.join(self.directory, item.a_path)
-                for item in self.repo.index.diff(None)
+                os.path.join(self.directory, item.a_path) for item in self.repo.index.diff(None)
             ]
             staged = [
-                os.path.join(self.directory, item.a_path)
-                for item in self.repo.index.diff("HEAD")
+                os.path.join(self.directory, item.a_path) for item in self.repo.index.diff("HEAD")
             ]
             untracked = []
             if include_untracked:
                 untracked = [
-                    os.path.join(self.directory, item)
-                    for item in self.repo.untracked_files
+                    os.path.join(self.directory, item) for item in self.repo.untracked_files
                 ]
 
             return [util.normalize_path(p) for p in (changed + staged + untracked)]

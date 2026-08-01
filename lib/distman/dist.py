@@ -43,10 +43,10 @@ from typing import List, Optional, Sequence, Tuple, Union
 from distman import config, util
 from distman.logger import log, setup_logging
 from distman.pipeline import (
-    validate_pipeline_spec,
+    ValidationError,
     get_pipeline_for_target,
     run_pipeline,
-    ValidationError,
+    validate_pipeline_spec,
 )
 from distman.source import GitRepo
 from distman.transform import TransformError
@@ -128,17 +128,13 @@ def get_version_dest(dest: str, version_num: int, short_head: Optional[str]) -> 
     :return: The versioned destination path.
     """
     versions_dir = os.path.join(os.path.dirname(dest), config.DIR_VERSIONS)
-    version_dest = os.path.join(
-        versions_dir, os.path.basename(dest) + f".{version_num}"
-    )
+    version_dest = os.path.join(versions_dir, os.path.basename(dest) + f".{version_num}")
     if short_head:
         version_dest += f".{short_head}"
     return util.sanitize_path(version_dest)
 
 
-def should_skip_target(
-    target_name: str, patterns: Optional[Union[str, List[str]]]
-) -> bool:
+def should_skip_target(target_name: str, patterns: Optional[Union[str, List[str]]]) -> bool:
     """Check if a target should be skipped based on the provided patterns.
 
     :param target_name: The name of the target to check.
@@ -284,9 +280,7 @@ class Distributor(GitRepo):
 
                 if not os.path.exists(src_path):
                     if target_options.get("ignore_missing", ignore_missing):
-                        log.info(
-                            f"Target {name}: Source '{source}' not found, skipping"
-                        )
+                        log.info(f"Target {name}: Source '{source}' not found, skipping")
                         continue
                     else:
                         log.error(f"Target {name}: Source '{source}' does not exist")
@@ -302,11 +296,7 @@ class Distributor(GitRepo):
                     )
                     return False
 
-                if (
-                    not show
-                    and not dryrun
-                    and not os.path.exists(os.path.dirname(dest_resolved))
-                ):
+                if not show and not dryrun and not os.path.exists(os.path.dirname(dest_resolved)):
                     question = f"Target {name}: Destination dir '{os.path.dirname(dest_resolved)}' doesn't exist. Create?"
                     if not confirm(question, yes, dryrun):
                         return False
@@ -498,9 +488,7 @@ class Distributor(GitRepo):
         for source, dest in target_list:
             version_list = util.get_file_versions(dest)
             if not version_list:
-                log.info(
-                    f"Target {target_name}: No versioned files found for '{source}'"
-                )
+                log.info(f"Target {target_name}: No versioned files found for '{source}'")
                 continue
             latest_ver = version_list[-1][0]
             target_type = util.get_path_type(latest_ver)[0]
@@ -546,9 +534,7 @@ class Distributor(GitRepo):
                 try:
                     commit = self.repo.commit(version_commit)
                     log.info(f"    {commit.message.strip()}")
-                    log.info(
-                        f"    {time.ctime(commit.committed_date)} - {commit.author}"
-                    )
+                    log.info(f"    {time.ctime(commit.committed_date)} - {commit.author}")
                 except Exception:
                     pass
 
@@ -691,21 +677,19 @@ class Distributor(GitRepo):
                 version_list = util.get_file_versions(dest)
                 if version_list:
                     if target_version is not None:
-                        version_list = [
-                            v for v in version_list if int(v[1]) == int(target_version)
-                        ]
+                        version_list = [v for v in version_list if int(v[1]) == int(target_version)]
                     elif target_commit:
                         version_list = [
-                            v
-                            for v in version_list
-                            if util.hashes_equal(target_commit, v[2])
+                            v for v in version_list if util.hashes_equal(target_commit, v[2])
                         ]
 
                 if version_list:
                     if len(version_list) == 1:
                         question = f"Delete {version_list[0][0]}?"
                     else:
-                        question = f"Delete {len(version_list)} versions for target '{target_name}'?"
+                        question = (
+                            f"Delete {len(version_list)} versions for target '{target_name}'?"
+                        )
                     if not confirm(question, yes, dryrun):
                         continue
                 else:
@@ -715,9 +699,7 @@ class Distributor(GitRepo):
                 dist_file = util.get_dist_file(dest=dest)
                 link_path = util.get_link_full_path(dest)
 
-                if (target_commit or target_version) and link_path in [
-                    v[0] for v in version_list
-                ]:
+                if (target_commit or target_version) and link_path in [v[0] for v in version_list]:
                     log.warning(
                         f"Cannot delete target '{target_name}' because it is linked to the version being deleted"
                     )

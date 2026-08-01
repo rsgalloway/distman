@@ -43,7 +43,7 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
-from typing import List, Tuple, Generator, Optional
+from typing import Generator, List, Optional, Tuple
 
 from distman import config
 from distman.logger import log
@@ -82,9 +82,7 @@ def check_symlinks() -> bool:
     try:
         os.symlink(temp_file, link_file)
     except OSError:
-        log.warning(
-            "Unable to create symbolic links. Admin privileges may be required."
-        )
+        log.warning("Unable to create symbolic links. Admin privileges may be required.")
         os.remove(temp_file)
         return False
     finally:
@@ -500,9 +498,7 @@ def write_dist_file(dest: str, dist_info: dict) -> None:
             outFile.write(f"{key}: {value}\n")
 
 
-def write_epoch_file(
-    deploy_root: str = None, epoch: str = None, dryrun: bool = False
-) -> Path:
+def write_epoch_file(deploy_root: str = None, epoch: str = None, dryrun: bool = False) -> Path:
     """Ensure ${DEPLOY_ROOT}/.distman/epoch exists and updates it atomically.
 
     :param deploy_root: optional deploy root path.
@@ -586,19 +582,16 @@ def create_dest_folder(dest: str, dryrun: bool = False, yes: bool = False) -> bo
     distinfo = get_dist_file(dest)
     if not os.path.exists(distinfo):
         if os.path.exists(dest):
-            question = (
-                "Target '%s' already exists as a %s and will "
-                "be deleted, continue?"
-                % (dest, "dir" if os.path.isdir(dest) else "file")
+            question = "Target '%s' already exists as a %s and will " "be deleted, continue?" % (
+                dest,
+                "dir" if os.path.isdir(dest) else "file",
             )
             if not yes and not yesNo(question):
                 return False
         log.info("Initializing: %s" % dest)
 
 
-def expand_wildcard_entry(
-    source_pattern: str, destination_template: str
-) -> List[Tuple[str, str]]:
+def expand_wildcard_entry(source_pattern: str, destination_template: str) -> List[Tuple[str, str]]:
     """Expands a wildcard entry in the form of a glob pattern to a list of
     tuples of source and destination paths. Supports only `*`, not `**` or ?.
 
@@ -820,9 +813,7 @@ def replace_vars(
 
         end = s.find(close_token, start + len(open_token))
         if end == -1:
-            raise ValueError(
-                f"Unclosed token starting at position {start}: {s[start:]}"
-            )
+            raise ValueError(f"Unclosed token starting at position {start}: {s[start:]}")
 
         result.append(s[i:start])
         var_name = s[start + len(open_token) : end]
@@ -879,7 +870,7 @@ def get_files(start: str, all_files: bool = False) -> List[str]:
         ignorable files.
     :return: List of relative file paths.
     """
-    return [f for f in walk(start, exclude_ignorables=(all_files == False))]
+    return [f for f in walk(start, exclude_ignorables=not all_files)]
 
 
 def walk(
