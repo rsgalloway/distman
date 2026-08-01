@@ -22,7 +22,7 @@ bin/
     └── tool.2.a1b2c3d
 ```
 
-distman works well with [envstack](https://github.com/rsgalloway/envstack) for
+distman works well with [envstack](https://envstack.dev) for
 environment-specific deployment and runtime configuration.
 
 ## Installation

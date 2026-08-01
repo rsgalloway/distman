@@ -580,9 +580,11 @@ def cache(
 
                             # rate-limit UI updates to keep planning fast
                             if (planned_files + planned_links) % 200 == 0:
-                                plan.set_postfix_str(
-                                    f"refs={len(vos)} missing={missing} files={planned_files} links={planned_links}"
+                                status = (
+                                    f"refs={len(vos)} missing={missing} "
+                                    f"files={planned_files} links={planned_links}"
                                 )
+                                plan.set_postfix_str(status)
 
             except Exception as e:
                 log.warning(f"failed to expand version object {vo}: {e}")

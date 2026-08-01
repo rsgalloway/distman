@@ -292,12 +292,17 @@ class Distributor(GitRepo):
                     and (src_path in changed_files or src_path in changed_dirs)
                 ):
                     log.info(
-                        f"Target {name}: Source '{source}' has uncommitted changes. Commit or use --force."
+                        f"Target {name}: Source '{source}' has uncommitted changes. "
+                        "Commit or use --force."
                     )
                     return False
 
-                if not show and not dryrun and not os.path.exists(os.path.dirname(dest_resolved)):
-                    question = f"Target {name}: Destination dir '{os.path.dirname(dest_resolved)}' doesn't exist. Create?"
+                destination_dir = os.path.dirname(dest_resolved)
+                if not show and not dryrun and not os.path.exists(destination_dir):
+                    question = (
+                        f"Target {name}: Destination dir '{destination_dir}' "
+                        "doesn't exist. Create?"
+                    )
                     if not confirm(question, yes, dryrun):
                         return False
                     try:
@@ -595,7 +600,10 @@ class Distributor(GitRepo):
             if isinstance(target_version, int) and target_version < 0:
                 if abs(target_version) > len(version_list) - 1:
                     log.warning(
-                        f"Requested to roll back {abs(target_version)} versions but only {len(version_list) - 1} exist for {source}"
+                        "Requested to roll back %d versions but only %d exist for %s",
+                        abs(target_version),
+                        len(version_list) - 1,
+                        source,
                     )
                     continue
                 # get the version number to roll back to for this source
@@ -699,9 +707,12 @@ class Distributor(GitRepo):
                 dist_file = util.get_dist_file(dest=dest)
                 link_path = util.get_link_full_path(dest)
 
-                if (target_commit or target_version) and link_path in [v[0] for v in version_list]:
+                linked_to_version = link_path in [v[0] for v in version_list]
+                if (target_commit or target_version) and linked_to_version:
                     log.warning(
-                        f"Cannot delete target '{target_name}' because it is linked to the version being deleted"
+                        "Cannot delete target '%s' because it is linked to the "
+                        "version being deleted",
+                        target_name,
                     )
                     continue
 

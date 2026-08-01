@@ -8,12 +8,14 @@ on:
     paths:
       - "lib/distman/**"
       - "tests/**"
+      - "scripts/**"
       - "pyproject.toml"
       - ".github/workflows/tests.yml"
   pull_request:
     paths:
       - "lib/distman/**"
       - "tests/**"
+      - "scripts/**"
       - "pyproject.toml"
       - ".github/workflows/tests.yml"
   workflow_dispatch:

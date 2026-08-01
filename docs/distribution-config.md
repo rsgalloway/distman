@@ -60,7 +60,7 @@ ENV=dev DEPLOY_ROOT=/studio/apps/dev dist --dryrun
 ```
 
 distman can also be used alongside
-[envstack](https://github.com/rsgalloway/envstack) to populate these variables.
+[envstack](https://envstack.dev) to populate these variables.
 
 ## Wildcard Sources
 

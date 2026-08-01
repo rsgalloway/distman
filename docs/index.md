@@ -73,7 +73,7 @@ dist --yes
 The same operation is available through the suite command:
 
 ```bash
-dist --dryrun
+distman dist --dryrun
 ```
 
 ## Learn More

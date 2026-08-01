@@ -52,8 +52,8 @@ test = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/rsgalloway/distman"
-Documentation = "https://rsgalloway.github.io/distman/"
+Homepage = "https://distman.dev"
+Documentation = "https://distman.dev"
 Repository = "https://github.com/rsgalloway/distman"
 Issues = "https://github.com/rsgalloway/distman/issues"
 
