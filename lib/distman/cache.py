@@ -41,8 +41,9 @@ import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import List, Optional, Sequence, Set, Tuple
+
 from tqdm import tqdm
-from typing import List, Optional, Sequence, Tuple, Set
 
 from distman import config, util
 from distman.logger import log, setup_logging
@@ -262,9 +263,7 @@ def collapse_dirs(dirs: Set[Path], root: Path) -> Set[Path]:
     return collapsed
 
 
-def copy_tree_fallback(
-    src_dir: Path, dst_dir: Path, executor: cf.Executor, results: list
-) -> None:
+def copy_tree_fallback(src_dir: Path, dst_dir: Path, executor: cf.Executor, results: list) -> None:
     """Fallback copy tree that does not handle symlinks.
 
     :param src_dir: Source directory.
@@ -300,9 +299,7 @@ def diff_sort_key(rel: Path):
     return ("", "", -1, "", str(rel))
 
 
-def diff_trees(
-    src_root: Path = config.DEPLOY_ROOT, dst_root: Path = config.CACHE_ROOT
-) -> int:
+def diff_trees(src_root: Path = config.DEPLOY_ROOT, dst_root: Path = config.CACHE_ROOT) -> int:
     """Compare src and dst recursively. Returns number of differences.
 
     :param src_root: Source directory.
@@ -325,11 +322,7 @@ def diff_trees(
             continue
 
         # Remove ignorable subdirs so we never descend into them
-        dirs[:] = [
-            d
-            for d in dirs
-            if not util.is_ignorable(str(rel_root / d), include_hidden=True)
-        ]
+        dirs[:] = [d for d in dirs if not util.is_ignorable(str(rel_root / d), include_hidden=True)]
 
         src_entries.add(rel_root)
         for f in files:
@@ -351,11 +344,7 @@ def diff_trees(
             continue
 
         # Remove ignorable subdirs so we never descend into them
-        dirs[:] = [
-            d
-            for d in dirs
-            if not util.is_ignorable(str(rel_root / d), include_hidden=True)
-        ]
+        dirs[:] = [d for d in dirs if not util.is_ignorable(str(rel_root / d), include_hidden=True)]
 
         dst_entries.add(rel_root)
         for f in files:
@@ -409,9 +398,7 @@ def diff_trees(
     return differences
 
 
-def print_staleness(
-    src_epoch: int, dst_epoch: int, threshold: int = config.CACHE_TTL
-) -> None:
+def print_staleness(src_epoch: int, dst_epoch: int, threshold: int = config.CACHE_TTL) -> None:
     """Prints whether the data is stale or fresh based on the given epoch times.
 
     :param src_epoch: Epoch time (ns) of the source tree.
@@ -430,9 +417,7 @@ def print_staleness(
 
     # print staleness status (with last update time if stale, epoch is in ns)
     if age_sec > threshold:
-        stale_time = datetime.fromtimestamp(int(dst_epoch) / 1e9).strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
+        stale_time = datetime.fromtimestamp(int(dst_epoch) / 1e9).strftime("%Y-%m-%d %H:%M:%S")
         print(f"cache is stale (last update {stale_time})")
     else:
         print("cache is fresh")
@@ -595,9 +580,11 @@ def cache(
 
                             # rate-limit UI updates to keep planning fast
                             if (planned_files + planned_links) % 200 == 0:
-                                plan.set_postfix_str(
-                                    f"refs={len(vos)} missing={missing} files={planned_files} links={planned_links}"
+                                status = (
+                                    f"refs={len(vos)} missing={missing} "
+                                    f"files={planned_files} links={planned_links}"
                                 )
+                                plan.set_postfix_str(status)
 
             except Exception as e:
                 log.warning(f"failed to expand version object {vo}: {e}")
@@ -670,9 +657,7 @@ def cache(
             pbar.update(1)
 
     dt = time.time() - t0
-    log.debug(
-        "done in %.2fs copied=%d skipped=%d errors=%d", dt, copied, skipped, errors
-    )
+    log.debug("done in %.2fs copied=%d skipped=%d errors=%d", dt, copied, skipped, errors)
 
 
 def _is_dangerous_cache_root(p: Path) -> bool:

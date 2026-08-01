@@ -34,14 +34,15 @@ Contains tests for the pipeline module.
 """
 
 import os
+
 import pytest
 
 from distman.dist import Target
 from distman.pipeline import (
+    ValidationError,
+    get_pipeline_for_target,
     run_pipeline,
     validate_pipeline_spec,
-    get_pipeline_for_target,
-    ValidationError,
 )
 
 
@@ -93,7 +94,7 @@ def test_get_pipeline_for_env_var(tmp_path):
 
 def test_get_pipeline_for_env_var_fails(tmp_path):
     """Test that an environment variable in the pipeline fails if not set."""
-    from distman.pipeline import run_pipeline, TransformError
+    from distman.pipeline import TransformError, run_pipeline
 
     f = tmp_path / "test.txt"
 
@@ -110,7 +111,7 @@ def test_get_pipeline_for_env_var_fails(tmp_path):
 
 def test_black_check_fails(tmp_path):
     """Test that the black_check step fails on unformatted code."""
-    from distman.pipeline import run_pipeline, TransformError
+    from distman.pipeline import TransformError, run_pipeline
 
     f = tmp_path / "unformatted.py"
     f.write_text("x=1+2")

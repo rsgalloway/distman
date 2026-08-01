@@ -34,9 +34,9 @@ Contains basic transform classes and functions.
 """
 
 import os
+import py_compile
 import re
 import shutil
-import py_compile
 from typing import Optional
 
 from distman import util
@@ -153,14 +153,10 @@ def byte_compile(input: str, output: str) -> str:
         os.makedirs(os.path.dirname(output), exist_ok=True)
         return _byte_compile_file(input, output)
     else:
-        raise TransformError(
-            f"Cannot byte-compile: '{input}' is not a file or directory"
-        )
+        raise TransformError(f"Cannot byte-compile: '{input}' is not a file or directory")
 
 
-def _byte_compile_file(
-    input: str, output: str = None, display_path: Optional[str] = None
-) -> str:
+def _byte_compile_file(input: str, output: str = None, display_path: Optional[str] = None) -> str:
     """Byte-compile a single Python file.
 
     :param input: Path to the input Python file.
@@ -269,9 +265,7 @@ def _minify_html(input: str) -> str:
     with open(input, "r") as infile:
         html_content = infile.read()
 
-        minified_html = htmlmin.minify(
-            html_content, remove_comments=True, remove_empty_space=True
-        )
+        minified_html = htmlmin.minify(html_content, remove_comments=True, remove_empty_space=True)
 
         return minified_html
 

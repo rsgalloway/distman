@@ -12,3 +12,6 @@ pipe/
 venv*/
 .vscode/
 *.egg-info/
+.agents/
+.codex/
+_site*

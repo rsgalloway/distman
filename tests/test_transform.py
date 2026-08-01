@@ -34,10 +34,10 @@ Contains tests for the transform module.
 """
 
 import os
+
 import pytest
 
-from distman.transform import replace_tokens, byte_compile, chmod, minify
-from distman.transform import TransformError
+from distman.transform import TransformError, byte_compile, chmod, minify, replace_tokens
 
 
 def test_replace_tokens(tmp_path):
@@ -96,9 +96,7 @@ def test_minify_js(tmp_path):
 def test_minify_html(tmp_path):
     """Test the minify function to ensure it correctly minifies an HTML file."""
     html_file = tmp_path / "index.html"
-    html_file.write_text(
-        "<html>\n<head>\n<title> Test </title> </head>\n<body>\n</body>\n</html>"
-    )
+    html_file.write_text("<html>\n<head>\n<title> Test </title> </head>\n<body>\n</body>\n</html>")
     minified_html_file = tmp_path / "minified_index.html"
 
     minify(str(html_file), str(minified_html_file))

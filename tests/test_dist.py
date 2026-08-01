@@ -34,20 +34,21 @@ Contains tests for the dist module.
 """
 
 import os
-import tempfile
 import shutil
-import pytest
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from distman import config, util
-from distman.dist import Distributor
 from distman.dist import (
-    get_source_and_dest,
+    Distributor,
     confirm,
-    update_symlink,
+    get_source_and_dest,
     get_version_dest,
     should_skip_target,
+    update_symlink,
 )
 
 
@@ -93,9 +94,7 @@ def mock_distributor(mocker, temp_dir, mock_dist_dict):
     mocker.patch("distman.dist.Distributor.read_git_info", return_value=True)
     mocker.patch("distman.dist.Distributor.is_git_behind", return_value=False)
     mocker.patch("distman.dist.Distributor.git_changed_files", return_value=[])
-    mocker.patch(
-        "distman.dist.Distributor.get_targets", return_value=mock_dist_dict["targets"]
-    )
+    mocker.patch("distman.dist.Distributor.get_targets", return_value=mock_dist_dict["targets"])
     mocker.patch("distman.util.get_file_versions", return_value=[])
     mocker.patch("distman.util.link_object", return_value=True)
     mocker.patch("distman.util.remove_object", return_value=True)
@@ -325,9 +324,7 @@ def test_dist_with_valid_target(mock_distributor, mocker, mock_dist_dict):
         os.remove(source_path)
 
 
-def test_dist_with_pipeline_steps(
-    mock_distributor, mocker, mock_dist_dict_with_pipeline
-):
+def test_dist_with_pipeline_steps(mock_distributor, mocker, mock_dist_dict_with_pipeline):
     """Test the dist method with pipeline steps."""
     mocker.patch("os.path.exists", return_value=True)
 
@@ -353,9 +350,7 @@ def test_reset_file_version_with_valid_target(mock_distributor, mocker, mock_dis
     assert result is True
 
 
-def test_change_file_version_with_valid_target(
-    mock_distributor, mocker, mock_dist_dict
-):
+def test_change_file_version_with_valid_target(mock_distributor, mocker, mock_dist_dict):
     """Test the change_file_version method with a valid target."""
     mocker.patch(
         "distman.util.get_file_versions",

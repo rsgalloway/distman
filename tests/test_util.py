@@ -33,12 +33,13 @@ __doc__ = """
 Contains tests for the util module.
 """
 
-import os
 import filecmp
-import tempfile
+import os
 import shutil
-import pytest
+import tempfile
 from pathlib import Path
+
+import pytest
 
 from distman import util
 
@@ -348,6 +349,7 @@ def test_get_file_versions_with_limit(temp_dir):
         assert res[1] == exp[1]
         assert res[2] == exp[2]
 
+
 def test_get_file_versions_without_limit(temp_dir):
     """Test the get_file_versions function without a limit on the number of
     versions returned."""
@@ -394,7 +396,6 @@ def test_get_file_versions_no_versions(temp_dir):
     assert result == []
 
 
-
 def test_link_object(temp_dir):
     """Test the link_object function to ensure it correctly creates symbolic
     links."""
@@ -416,9 +417,7 @@ def test_link_object(temp_dir):
 
     # test linking to a non-existent target
     link_file_2 = os.path.join(temp_dir, "link_to_non_existent.txt")
-    assert (
-        util.link_object("non_existent.txt", link_file_2, "non_existent.txt") is False
-    )
+    assert util.link_object("non_existent.txt", link_file_2, "non_existent.txt") is False
     assert not os.path.exists(link_file_2)
 
     os.remove(link_file)
@@ -465,9 +464,7 @@ def test_find_matching_versions(temp_dir):
     assert len(results) == 2
 
     # test with a specific commit_hash, should match commitB
-    results = util.find_matching_versions(
-        source_file, target_file, commit_hash="commitB"
-    )
+    results = util.find_matching_versions(source_file, target_file, commit_hash="commitB")
     assert len(results) == 1
 
 
