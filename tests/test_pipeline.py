@@ -40,6 +40,7 @@ import pytest
 from distman.dist import Target
 from distman.pipeline import (
     ValidationError,
+    _quote_shell_arg,
     get_pipeline_for_target,
     run_pipeline,
     validate_pipeline_spec,
@@ -121,3 +122,41 @@ def test_black_check_fails(tmp_path):
 
     with pytest.raises(TransformError):
         run_pipeline(target, pipeline, str(f), tmp_path / "build")
+
+
+def test_quote_shell_arg_posix_uses_single_quotes_for_spaces():
+    """POSIX shell quoting should protect paths with spaces."""
+    assert _quote_shell_arg("build dir/input file.py", windows=False) == "'build dir/input file.py'"
+
+
+def test_quote_shell_arg_windows_avoids_single_quotes():
+    """Windows shell quoting should not wrap args in single quotes."""
+    quoted = _quote_shell_arg(r"lib\distman", windows=True)
+    assert quoted == r"lib\distman"
+    assert "'" not in quoted
+
+
+def test_run_pipeline_formats_windows_script_args(tmp_path, monkeypatch):
+    """Windows script steps should receive cmd.exe-safe path arguments."""
+    captured = {}
+
+    f = tmp_path / "input file.py"
+    f.write_text("print('hello')\n")
+
+    def fake_run_script_step(cmd, env=None):
+        captured["cmd"] = cmd
+
+    monkeypatch.setattr("distman.pipeline.run_script_step", fake_run_script_step)
+    monkeypatch.setattr(
+        "distman.pipeline._quote_shell_arg",
+        lambda value: _quote_shell_arg(value, windows=True),
+    )
+
+    target = Target("test", str(f), "test/input file.py", "f")
+    pipeline = {"black_check": {"script": ["black --check {input}"]}}
+
+    run_pipeline(target, pipeline, str(f), tmp_path / "build")
+
+    assert captured["cmd"].startswith("black --check ")
+    assert "'" not in captured["cmd"]
+    assert f'"{f}"' in captured["cmd"]
