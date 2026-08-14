@@ -89,7 +89,7 @@ def mock_dist_dict_with_pipeline():
 
 
 @pytest.fixture
-def mock_distributor(mocker, temp_dir, mock_dist_dict):
+def mock_distributor(mocker, monkeypatch, temp_dir, mock_dist_dict):
     """Fixture to mock the Distributor class and its methods."""
     mocker.patch("distman.dist.Distributor.read_git_info", return_value=True)
     mocker.patch("distman.dist.Distributor.is_git_behind", return_value=False)
@@ -99,7 +99,8 @@ def mock_distributor(mocker, temp_dir, mock_dist_dict):
     mocker.patch("distman.util.link_object", return_value=True)
     mocker.patch("distman.util.remove_object", return_value=True)
     mocker.patch("distman.util.yesNo", return_value=True)
-    os.environ["DEPLOY_ROOT"] = temp_dir
+    monkeypatch.setenv("DEPLOY_ROOT", temp_dir)
+    monkeypatch.setattr(config, "DEPLOY_ROOT", temp_dir)
 
 
 def test_get_source_and_dest_valid():

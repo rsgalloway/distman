@@ -23,9 +23,6 @@ on:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
-    env:
-      DEPLOY_ROOT: ${{ runner.temp }}/distman-deploy
-      CACHE_ROOT: ${{ runner.temp }}/distman-cache
     strategy:
       fail-fast: false
       matrix:
@@ -64,4 +61,7 @@ jobs:
           python -m pip install -e ".[test]"
 
       - name: Run unit tests
+        env:
+          DEPLOY_ROOT: ${{ github.workspace }}/.tmp/distman-deploy
+          CACHE_ROOT: ${{ github.workspace }}/.tmp/distman-cache
         run: python -m pytest tests -q

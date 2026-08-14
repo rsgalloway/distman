@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "distman"
-version = "0.8.2"
+version = "0.8.3"
 description = "Simple software distribution for complex pipelines"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.8"
@@ -31,13 +31,13 @@ dependencies = [
 
 [project.optional-dependencies]
 minify = [
-  "htmlmin>=0.1,<1.0",
+  "htmlmin>=0.1,<1.0; python_version < '3.13'",
   "jsmin>=3.0,<4.0",
 ]
 dev = [
   "pytest",
   "pytest-mock",
-  "htmlmin>=0.1,<1.0",
+  "htmlmin>=0.1,<1.0; python_version < '3.13'",
   "jsmin>=3.0,<4.0",
   "flake8==7.1.1",
   "mccabe==0.7.0",
@@ -47,7 +47,7 @@ dev = [
 test = [
   "pytest",
   "pytest-mock",
-  "htmlmin>=0.1,<1.0",
+  "htmlmin>=0.1,<1.0; python_version < '3.13'",
   "jsmin>=3.0,<4.0",
 ]
 

@@ -33,6 +33,7 @@ __doc__ = """
 Contains tests for the transform module.
 """
 
+import importlib.util
 import os
 
 import pytest
@@ -95,6 +96,8 @@ def test_minify_js(tmp_path):
 
 def test_minify_html(tmp_path):
     """Test the minify function to ensure it correctly minifies an HTML file."""
+    if importlib.util.find_spec("htmlmin") is None:
+        pytest.skip("htmlmin is unavailable on this Python version")
     html_file = tmp_path / "index.html"
     html_file.write_text("<html>\n<head>\n<title> Test </title> </head>\n<body>\n</body>\n</html>")
     minified_html_file = tmp_path / "minified_index.html"

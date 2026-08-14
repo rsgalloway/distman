@@ -109,6 +109,22 @@ def run_script_step(cmd: str, env: dict = None) -> None:
         raise TransformError(f"Pipeline step failed with exit code {e.returncode}")
 
 
+def _quote_shell_arg(value: str, windows: Optional[bool] = None) -> str:
+    """Quote a shell argument for the active platform shell.
+
+    :param value: The string value to quote.
+    :param windows: Optional boolean to force Windows quoting. If None, it will
+      auto-detect based on the OS.
+    :return: The quoted string suitable for shell execution.
+    """
+    if windows is None:
+        windows = os.name == "nt"
+    value = str(value)
+    if windows:
+        return '"' + value.replace('"', r"\"") + '"'
+    return shlex.quote(value)
+
+
 def run_pipeline(target, pipeline: Dict[str, Any], input_path: str, build_dir: str) -> str:
     """Run a series of pipeline steps defined in the pipeline dictionary.
 
@@ -151,7 +167,11 @@ def run_pipeline(target, pipeline: Dict[str, Any], input_path: str, build_dir: s
                 commands = [commands]
             for cmd in commands:
                 try:
-                    cmd = cmd.format(input=shlex.quote(current), output=shlex.quote(output), **env)
+                    cmd = cmd.format(
+                        input=_quote_shell_arg(current),
+                        output=_quote_shell_arg(output),
+                        **env,
+                    )
                 except KeyError as e:
                     raise TransformError(f"Missing key in command format: {e}")
                 run_script_step(cmd, env=env)
