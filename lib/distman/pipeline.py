@@ -120,7 +120,9 @@ def _quote_shell_arg(value: str, windows: Optional[bool] = None) -> str:
     if windows is None:
         windows = os.name == "nt"
     value = str(value)
-    return subprocess.list2cmdline([value]) if windows else shlex.quote(value)
+    if windows:
+        return '"' + value.replace('"', r"\"") + '"'
+    return shlex.quote(value)
 
 
 def run_pipeline(target, pipeline: Dict[str, Any], input_path: str, build_dir: str) -> str:

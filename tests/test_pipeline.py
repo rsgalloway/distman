@@ -34,13 +34,14 @@ Contains tests for the pipeline module.
 """
 
 import os
+import shlex
+import sys
 
 import pytest
 
 from distman.dist import Target
 from distman.pipeline import (
     ValidationError,
-    _quote_shell_arg,
     get_pipeline_for_target,
     run_pipeline,
     validate_pipeline_spec,
@@ -124,20 +125,8 @@ def test_black_check_fails(tmp_path):
         run_pipeline(target, pipeline, str(f), tmp_path / "build")
 
 
-def test_quote_shell_arg_posix_uses_single_quotes_for_spaces():
-    """POSIX shell quoting should protect paths with spaces."""
-    assert _quote_shell_arg("build dir/input file.py", windows=False) == "'build dir/input file.py'"
-
-
-def test_quote_shell_arg_windows_avoids_single_quotes():
-    """Windows shell quoting should not wrap args in single quotes."""
-    quoted = _quote_shell_arg(r"lib\distman", windows=True)
-    assert quoted == r"lib\distman"
-    assert "'" not in quoted
-
-
-def test_run_pipeline_formats_windows_script_args(tmp_path, monkeypatch):
-    """Windows script steps should receive cmd.exe-safe path arguments."""
+def test_run_pipeline_formats_posix_script_args(tmp_path, monkeypatch):
+    """POSIX script steps should single-quote paths with spaces."""
     captured = {}
 
     f = tmp_path / "input file.py"
@@ -147,10 +136,28 @@ def test_run_pipeline_formats_windows_script_args(tmp_path, monkeypatch):
         captured["cmd"] = cmd
 
     monkeypatch.setattr("distman.pipeline.run_script_step", fake_run_script_step)
-    monkeypatch.setattr(
-        "distman.pipeline._quote_shell_arg",
-        lambda value: _quote_shell_arg(value, windows=True),
-    )
+    monkeypatch.setattr("distman.pipeline.os.name", "posix")
+
+    target = Target("test", str(f), "test/input file.py", "f")
+    pipeline = {"black_check": {"script": ["black --check {input}"]}}
+
+    run_pipeline(target, pipeline, str(f), tmp_path / "build")
+
+    assert captured["cmd"] == f"black --check {shlex.quote(str(f))}"
+
+
+def test_run_pipeline_formats_windows_black_check_path(tmp_path, monkeypatch):
+    """Windows black-style commands should double-quote the substituted path."""
+    captured = {}
+
+    f = tmp_path / "input file.py"
+    f.write_text("print('hello')\n")
+
+    def fake_run_script_step(cmd, env=None):
+        captured["cmd"] = cmd
+
+    monkeypatch.setattr("distman.pipeline.run_script_step", fake_run_script_step)
+    monkeypatch.setattr("distman.pipeline.os.name", "nt")
 
     target = Target("test", str(f), "test/input file.py", "f")
     pipeline = {"black_check": {"script": ["black --check {input}"]}}
@@ -160,3 +167,62 @@ def test_run_pipeline_formats_windows_script_args(tmp_path, monkeypatch):
     assert captured["cmd"].startswith("black --check ")
     assert "'" not in captured["cmd"]
     assert f'"{f}"' in captured["cmd"]
+
+
+def test_run_pipeline_executes_shell_command_with_literal_input_on_posix(tmp_path):
+    """POSIX shell execution should pass the input path through unchanged."""
+    source_dir = tmp_path / "dir & (x)"
+    source_dir.mkdir()
+    f = source_dir / "input file.py"
+    f.write_text("print('hello')\n")
+
+    helper = tmp_path / "emit_arg.py"
+    helper.write_text(
+        "import os\n"
+        "import pathlib\n"
+        "import sys\n"
+        "pathlib.Path(os.environ['OUTFILE']).write_text(sys.argv[1], encoding='utf-8')\n"
+    )
+    outfile = tmp_path / "captured.txt"
+
+    target = Target("test", str(f), "test/input file.py", "f")
+    pipeline = {
+        "capture_input": {
+            "script": [f"{shlex.quote(sys.executable)} {shlex.quote(str(helper))} {{input}}"],
+            "env": {"OUTFILE": str(outfile)},
+        }
+    }
+
+    run_pipeline(target, pipeline, str(f), tmp_path / "build")
+
+    assert outfile.read_text(encoding="utf-8") == str(f)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows-only shell regression test")
+def test_run_pipeline_executes_shell_command_with_literal_input_on_windows(tmp_path):
+    """Windows shell execution should preserve spaces and cmd metacharacters in {input}."""
+    source_dir = tmp_path / "dir & (x)"
+    source_dir.mkdir()
+    f = source_dir / "input file.py"
+    f.write_text("print('hello')\n")
+
+    helper = tmp_path / "emit_arg.py"
+    helper.write_text(
+        "import os\n"
+        "import pathlib\n"
+        "import sys\n"
+        "pathlib.Path(os.environ['OUTFILE']).write_text(sys.argv[1], encoding='utf-8')\n"
+    )
+    outfile = tmp_path / "captured.txt"
+
+    target = Target("test", str(f), "test/input file.py", "f")
+    pipeline = {
+        "capture_input": {
+            "script": [f'python "{helper}" {{input}}'],
+            "env": {"OUTFILE": str(outfile)},
+        }
+    }
+
+    run_pipeline(target, pipeline, str(f), tmp_path / "build")
+
+    assert outfile.read_text(encoding="utf-8") == str(f)
