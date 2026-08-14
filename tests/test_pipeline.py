@@ -169,6 +169,7 @@ def test_run_pipeline_formats_windows_black_check_path(tmp_path, monkeypatch):
     assert f'"{f}"' in captured["cmd"]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX-only shell regression test")
 def test_run_pipeline_executes_shell_command_with_literal_input_on_posix(tmp_path):
     """POSIX shell execution should pass the input path through unchanged."""
     source_dir = tmp_path / "dir & (x)"
