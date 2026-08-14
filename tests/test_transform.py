@@ -33,8 +33,8 @@ __doc__ = """
 Contains tests for the transform module.
 """
 
-import os
 import importlib.util
+import os
 
 import pytest
 
