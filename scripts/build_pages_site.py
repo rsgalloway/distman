@@ -206,7 +206,12 @@ h1 { font-size: clamp(1.9rem, 5.4vw, 3.3rem); margin: 0 0 18px; }
 h2 { font-size: 1.6rem; margin-top: 46px; margin-bottom: 16px; }
 h3 { font-size: 1.08rem; margin-top: 28px; margin-bottom: 10px; }
 .site-main h2, .site-main h3 { display: flex; align-items: center; gap: 0.5rem; }
-.header-anchor { color: var(--accent-2); font-weight: 500; opacity: 0; transition: opacity 120ms ease; }
+.header-anchor {
+  color: var(--accent-2);
+  font-weight: 500;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
 .site-main h2:hover .header-anchor,
 .site-main h2:focus-within .header-anchor,
 .site-main h3:hover .header-anchor,
