@@ -7,15 +7,18 @@ It is designed for production pipelines where deterministic deployments,
 environment-aware paths, quick version switching, and rollback matter more
 than building and installing packages.
 
+It also fits revision-controlled configuration repositories well. distman can
+publish independently owned configuration into filesystem locations such as
+`/studio/prod/env` or `/studio/project/foo/env`, while a runtime tool can
+decide which deployed directories participate later.
+
 ```text
 deploy/
-├── bin/
-│   ├── tool -> versions/tool.2.a1b2c3d
-│   └── versions/
-│       ├── tool.1.91c8a77
-│       └── tool.2.a1b2c3d
-└── .distman/
-    └── epoch
+└── bin/
+    ├── tool -> versions/tool.2.a1b2c3d
+    └── versions/
+        ├── tool.1.91c8a77
+        └── tool.2.a1b2c3d
 ```
 
 ## Why distman
@@ -33,13 +36,14 @@ deploy/
 - Resolve destination paths from environment variables
 - Select targets by name or wildcard
 - Expand source globs into matching destinations
+- Publish configuration repositories independently of application code
 
 ### Prepare and cache
 
 - Run Python functions or shell commands before distribution
 - Replace tokens, change modes, byte-compile Python, and minify assets
 - Mirror active deployments to a fast local cache
-- Avoid unnecessary remote checks with epoch files and a configurable TTL
+- Avoid unnecessary remote checks with a configurable TTL
 
 ## Install
 
@@ -79,7 +83,7 @@ distman dist --dryrun
 ## Learn More
 
 - [Getting Started](getting-started.md): first deployment and version layout
-- [Distribution Configuration](distribution-config.md): `dist.json`, paths, and targets
+- [Distribution Configuration](distribution-config.md): `dist.json`, paths, targets, and configuration deployment patterns
 - [CLI Reference](cli-reference.md): distribution and cache commands
 - [Transform Pipelines](transform-pipelines.md): preprocessing files before deployment
 - [Local Caching](caching.md): keeping a local mirror of active versions

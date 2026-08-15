@@ -38,6 +38,10 @@ Sources are relative to the directory containing `dist.json`. Destinations may
 contain `{NAME}` placeholders, which distman replaces from the current process
 environment and its built-in defaults.
 
+This works for configuration repositories as well as application payloads. For
+example, a repository that stores `env/mytool.env` can deploy it to
+`{DEPLOY_ROOT}/env/mytool.env` or any other filesystem scope you choose.
+
 ## Preview a Deployment
 
 Always inspect a new configuration with a dry run first:
@@ -74,8 +78,7 @@ bin/
 
 The suffix records a monotonically increasing version number and, for
 commit-based matching, a short Git commit. Metadata is written beside deployed
-targets, and successful mutations update `.distman/epoch` under the deployment
-root so local caches can detect changes.
+targets.
 
 ## Inspect and Roll Back
 
@@ -95,3 +98,17 @@ distman uses Git information to identify the source and version. A normal
 deployment stops when a selected source has uncommitted changes or the local
 repository is behind its upstream. Use `--force` only when that behavior is
 intentional.
+
+## Runtime Composition
+
+distman answers a deployment question: which revision of this repository is
+published at this filesystem location? If you later compose environment files
+at runtime with a tool such as [envstack](https://envstack.dev), keep that as a
+separate concern.
+
+For example, if project-specific configuration should override production
+configuration, `ENVPATH` should list the project directory first:
+
+```bash
+export ENVPATH=/studio/project/foo/env:/studio/prod/env
+```

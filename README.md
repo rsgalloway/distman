@@ -11,6 +11,12 @@ configuration files to predefined filesystem locations. It is useful when
 deterministic deployments, environment-aware transforms, local caching, and
 quick rollback matter more than conventional package installation.
 
+That includes revision-controlled configuration repositories. distman can
+publish configuration into runtime filesystem scopes without needing to
+understand the contents of those files. In that model, Git remains the source
+of truth, distman handles filesystem deployment, and runtime tools such as
+[envstack](https://envstack.dev) can compose the deployed files later.
+
 Deployed objects are stored as numbered versions, while an atomic symlink
 selects the active version:
 
@@ -22,8 +28,9 @@ bin/
     └── tool.2.a1b2c3d
 ```
 
-distman works well with [envstack](https://envstack.dev) for
-environment-specific deployment and runtime configuration.
+distman works well with [envstack](https://envstack.dev) when you want
+filesystem deployment and runtime environment composition to remain separate
+concerns.
 
 ## Installation
 
