@@ -30,7 +30,7 @@
 #
 
 __doc__ = """
-Contains the Distributor class for distributing files.
+Core deployment logic for creating versioned filesystem distributions.
 """
 
 import argparse
@@ -54,15 +54,11 @@ from distman.transform import TransformError
 
 @dataclass
 class Target:
-    """Represents a distribution target with its name, source path, destination
-    path, type (folder, directory or link) and dist options.
+    """Describe one configured distribution target.
 
-    name: The name of the target.
-    source: The source path of the target.
-    dest: The destination path of the target.
-    type: The type of the target (e.g., file, directory, link).
-    pipeline: Optional dictionary of pipeline steps to apply to the target.
-    options: Optional dictionary of additional options for the target.
+    ``source`` is the repository path to distribute, ``dest`` is the resolved
+    deployment path, and ``pipeline`` / ``options`` contain the effective
+    target-specific settings.
     """
 
     name: str
@@ -149,16 +145,16 @@ def should_skip_target(target_name: str, patterns: Optional[Union[str, List[str]
 
 
 class Distributor(GitRepo):
-    """Handles distribution of files based on a configuration file."""
+    """Deploy targets from a loaded ``dist.json`` file."""
 
     def __init__(self):
-        """Initializes the Distributor class."""
+        """Initialize the distributor and ensure symlink support is available."""
         super().__init__()
         if not callable(getattr(os, "symlink", None)):
             util.add_symlink_support()
 
     def close(self) -> None:
-        """Cleans up resources used by the Distributor."""
+        """Release repository resources held by the distributor."""
         try:
             if self.repo:
                 self.repo.close()
@@ -177,7 +173,7 @@ class Distributor(GitRepo):
         versiononly: bool = False,
         verbose: int = 0,
     ) -> bool:
-        """Distributes files based on targets defined in the dist file.
+        """Deploy targets defined in the loaded dist file.
 
             {
                 "author": "<email>",
@@ -188,6 +184,9 @@ class Distributor(GitRepo):
                     },
                 }
             }
+
+        Each target is copied into an immutable version path, then the active
+        destination symlink is updated unless ``versiononly`` is set.
 
         :param target: One or more target patterns to filter dist targets.
         :param show: If True, shows distribution information without making changes.

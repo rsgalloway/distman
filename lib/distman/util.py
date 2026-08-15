@@ -30,7 +30,7 @@
 #
 
 __doc__ = """
-Contains utility functions and classes.
+Utility helpers for filesystem operations, version discovery, and path handling.
 """
 
 import ctypes
@@ -95,8 +95,10 @@ def check_symlinks() -> bool:
 
 
 def copy_file(source: str, dest: str) -> None:
-    """Copies a file or link. Converts line endings to linux LF, preserving
-    original source file mode.
+    """Copy a file or symlink to ``dest``.
+
+    Text files are normalized to LF line endings while preserving the source
+    file mode. Binary files fall back to ``shutil.copy2``.
 
     This is important for cross-platform distributions: CRLF can break shebang
     execution on Linux (bad interpreter) even if the file came from Windows.
@@ -165,8 +167,7 @@ def copy_directory(source: str, dest: str, all_files: bool = False) -> None:
 
 
 def copy_object(source: str, dest: str, all_files: bool = False) -> None:
-    """Copies, or links, a file or directory recursively (ignores hidden
-    files).
+    """Copy a file, directory, or symlink to ``dest``.
 
     :param source: Path to source file, link or directory.
     :param dest: Path to destination file or directory.
@@ -249,10 +250,7 @@ def compare_objects(path1: str, path2: str) -> bool:
 
 
 def parse_versioned_filename(name: str, prefix: str) -> Optional[Tuple[str, int, str]]:
-    """
-    Parse '<prefix>.<version>.<commit>[.*]' and return (prefix, version, commit).
-    Returns None if it doesn't match.
-    """
+    """Parse ``<prefix>.<version>.<commit>[.*]`` style version filenames."""
     if not name.startswith(prefix + "."):
         return None
 
@@ -290,10 +288,10 @@ def find_matching_versions(
     commit_hash: Optional[str] = None,
     version_list: Optional[List[Tuple[str, int, str]]] = None,
 ) -> List[Tuple[str, int, str]]:
-    """Finds all matching versions of a file in the destination directory,
-    sorted from oldest to newest.
+    """Find matching deployed versions for a source object.
 
-    [("/path/to/dest/versions/target.1.abc123", 1, "abc123"),]
+    Results are returned from oldest to newest as tuples in the form
+    ``(version_path, version_number, commit_hash)``.
 
     :param source_path: Path to source file.
     :param dest: Path to target destination.
@@ -330,7 +328,7 @@ def get_effective_options(global_options: dict, target_options: dict) -> dict:
 
 
 def get_epoch_path(deploy_root: str = None) -> Path:
-    """Returns the path to the epoch file.
+    """Return the path to the deployment epoch file.
 
     :param deploy_root: optional deploy root path.
     :return: Path to epoch file.
@@ -372,8 +370,7 @@ def is_file_hidden(filepath: str) -> bool:
 
 
 def is_ignorable(filepath: str, include_hidden: bool = False) -> bool:
-    """Returns True if path is ignorable. Checks path against patterns
-    in the ignorables list, as well as dot files.
+    """Return ``True`` when a path should be skipped during distribution.
 
     :param path: a file system path.
     :param include_hidden: include hidden files flag.

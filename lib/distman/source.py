@@ -30,7 +30,7 @@
 #
 
 __doc__ = """
-Contains source file distribution classes and functions.
+Source and Git metadata helpers used to load deployment configuration.
 """
 
 import json
@@ -47,7 +47,7 @@ from distman.logger import log
 
 
 def requires_git(func: Callable) -> Callable:
-    """Decorator to ensure git repo info is loaded before calling the method."""
+    """Ensure Git metadata has been loaded before calling an instance method."""
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
@@ -59,10 +59,10 @@ def requires_git(func: Callable) -> Callable:
 
 
 class Source(object):
-    """Base class for handling dist file metadata."""
+    """Base class for reading ``dist.json`` metadata."""
 
     def __init__(self):
-        """Initializes the Source object with default values."""
+        """Initialize default source metadata."""
         self.author = os.getenv("USERNAME", os.getenv("USER", "unknown"))
         self.changed_files: List[str] = []
         self.directory = "."
@@ -71,16 +71,16 @@ class Source(object):
         self.root = None
 
     def get_targets(self) -> Optional[dict]:
-        """Returns the targets defined in the dist file."""
+        """Return the targets defined in the loaded dist file."""
         return self.root.get(config.TAG_TARGETS) if self.root else None
 
     def log_distribution_info(self) -> None:
-        """Logs source information."""
+        """Log basic source information."""
         log.info("Name: %s", self.name)
         log.info("Path: %s", self.path)
 
     def read_dist_file(self, directory: str = ".") -> bool:
-        """Reads the dist file from the specified directory.
+        """Read ``dist.json`` from the specified directory.
 
         :param directory: Directory containing the dist file.
         :return: True if the dist file was successfully read, False otherwise.
@@ -126,10 +126,10 @@ class Source(object):
 
 
 class GitRepo(Source):
-    """Extends Source to support Git-based repositories."""
+    """Extend :class:`Source` with Git repository metadata."""
 
     def __init__(self):
-        """Initializes the GitRepo object."""
+        """Initialize Git-specific state."""
         super(GitRepo, self).__init__()
         self.branch_name = ""
         self.head = ""
@@ -161,7 +161,7 @@ class GitRepo(Source):
     def get_untracked_files(
         self, start: str = ".", include_ignored: bool = True
     ) -> Tuple[List[str], List[str]]:
-        """Returns a list of untracked files and directories in the git repository.
+        """Return untracked files and their common root directories.
 
         :param start: Directory to start searching for untracked files.
         :param include_ignored: If True, includes ignored files in the result.
@@ -180,8 +180,7 @@ class GitRepo(Source):
         return untracked_files, untracked_dirs
 
     def get_path(self) -> str:
-        """Returns the URL of the git repository or the current path if not a
-        git repo."""
+        """Return the repository URL, or the local path when no remote exists."""
         if self.repo and self.repo.remotes:
             if "origin" in [r.name for r in self.repo.remotes]:
                 return self.repo.remotes.origin.url
@@ -189,14 +188,14 @@ class GitRepo(Source):
         return self.path
 
     def log_distribution_info(self) -> None:
-        """Logs source repo information."""
+        """Log source and Git revision details."""
         log.info("Name: %s", self.name)
         log.info("Path: %s", self.path)
         log.info("Branch: %s", self.branch_name)
         log.info("Head: %s (%s)", self.head, self.short_head)
 
     def read_git_info(self) -> bool:
-        """Reads the git repository information and initializes the object."""
+        """Populate repository, branch, and commit metadata."""
         self.branch_name = ""
         self.head = ""
         self.short_head = ""
@@ -232,7 +231,7 @@ class GitRepo(Source):
 
     @requires_git
     def is_git_behind(self) -> bool:
-        """Checks if the current branch is behind the remote branch.
+        """Check whether the current branch is behind its remote branch.
 
         :return: True if the branch is behind, False otherwise.
         """
@@ -261,7 +260,7 @@ class GitRepo(Source):
 
     @requires_git
     def git_changed_files(self, include_untracked: bool = True) -> List[str]:
-        """Returns a list of changed files in the git repository.
+        """Return changed files relative to the repository root.
 
         :param include_untracked: If True, includes untracked files in the result.
         :return: List of changed file paths relative to the repository root.

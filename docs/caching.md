@@ -28,6 +28,14 @@ Successful deployment mutations update `.distman/epoch` under the deployment
 root. The cache stores the corresponding epoch and compares the two to decide
 whether it is stale.
 
+For example:
+
+```text
+deploy/
+└── .distman/
+    └── epoch
+```
+
 `CACHE_TTL` (600 seconds by default) limits how often the remote epoch is read.
 This makes routine shell startup checks inexpensive:
 

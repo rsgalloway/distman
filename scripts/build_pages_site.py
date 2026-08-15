@@ -10,6 +10,7 @@ from pathlib import Path
 
 GENERATED_SITE_MARKER = ".distman-pages-output"
 MARKDOWN_LINK_RE = re.compile(r"\[(?P<label>[^\]]+)\]\((?P<target>[^)]+)\)")
+MERMAID_BLOCK_RE = re.compile(r"```mermaid\s*\n(.*?)\n```", re.DOTALL)
 
 
 def rewrite_links(content: str, page_kind: str) -> str:
@@ -61,9 +62,20 @@ def extract_title(content: str, fallback: str) -> str:
     return fallback
 
 
+def rewrite_mermaid_blocks(content: str) -> str:
+    """Convert fenced Mermaid blocks into raw HTML containers."""
+
+    def replace(match: re.Match) -> str:
+        body = match.group(1).strip("\n")
+        return '<div class="mermaid">\n' + body + "\n</div>"
+
+    return MERMAID_BLOCK_RE.sub(replace, content)
+
+
 def write_page(src: Path, dst: Path, fallback_title: str, page_kind: str) -> None:
     """Add Jekyll front matter and write one Markdown page."""
     content = rewrite_links(src.read_text(encoding="utf-8"), page_kind)
+    content = rewrite_mermaid_blocks(content)
     title = extract_title(content, fallback_title)
     dst.parent.mkdir(parents=True, exist_ok=True)
     dst.write_text(
@@ -78,7 +90,13 @@ def write_site_files(output_dir: Path) -> None:
         "title: distman\n"
         "description: Safe, versioned file distribution for production pipelines\n"
         "markdown: kramdown\n"
-        "permalink: pretty\n",
+        "permalink: pretty\n"
+        "highlighter: rouge\n"
+        "kramdown:\n"
+        "  input: GFM\n"
+        "  syntax_highlighter: rouge\n"
+        "  syntax_highlighter_opts:\n"
+        "    css_class: highlight\n",
         encoding="utf-8",
     )
 
@@ -93,6 +111,26 @@ def write_site_files(output_dir: Path) -> None:
     <title>{% if page.title %}{{ page.title }} | {% endif %}{{ site.title }}</title>
     <meta name="description" content="{{ site.description }}">
     <link rel="stylesheet" href="{{ '/assets/site.css' | relative_url }}">
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "dark" });
+    </script>
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        for (const heading of document.querySelectorAll(".site-main h2, .site-main h3")) {
+          if (!heading.id || heading.querySelector(".header-anchor")) {
+            continue;
+          }
+
+          const anchor = document.createElement("a");
+          anchor.className = "header-anchor";
+          anchor.href = `#${encodeURIComponent(heading.id)}`;
+          anchor.setAttribute("aria-label", `Link to section: ${heading.textContent.trim()}`);
+          anchor.textContent = "#";
+          heading.appendChild(anchor);
+        }
+      });
+    </script>
   </head>
   <body>
     <div class="site-shell">
@@ -167,6 +205,17 @@ h1, h2, h3 { color: var(--text); line-height: 1.15; }
 h1 { font-size: clamp(1.9rem, 5.4vw, 3.3rem); margin: 0 0 18px; }
 h2 { font-size: 1.6rem; margin-top: 46px; margin-bottom: 16px; }
 h3 { font-size: 1.08rem; margin-top: 28px; margin-bottom: 10px; }
+.site-main h2, .site-main h3 { display: flex; align-items: center; gap: 0.5rem; }
+.header-anchor {
+  color: var(--accent-2);
+  font-weight: 500;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.site-main h2:hover .header-anchor,
+.site-main h2:focus-within .header-anchor,
+.site-main h3:hover .header-anchor,
+.site-main h3:focus-within .header-anchor { opacity: 1; }
 p, li { color: var(--muted); font-size: 0.98rem; }
 strong { color: var(--text); }
 
@@ -192,6 +241,67 @@ pre {
   background: var(--code);
 }
 pre code { padding: 0; background: transparent; }
+.highlight { margin: 0; }
+.highlight pre,
+pre.highlight {
+  overflow-x: auto;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--code);
+}
+.highlight .hll { background: rgba(255,255,255,0.05); }
+.highlight .c,
+.highlight .cm,
+.highlight .c1,
+.highlight .cs { color: #7f8ea3; font-style: italic; }
+.highlight .k,
+.highlight .kd,
+.highlight .kn,
+.highlight .kp,
+.highlight .kr,
+.highlight .nt { color: #7cc7ff; }
+.highlight .s,
+.highlight .sa,
+.highlight .sb,
+.highlight .sc,
+.highlight .dl,
+.highlight .sd,
+.highlight .s2 { color: #9be38c; }
+.highlight .si,
+.highlight .se,
+.highlight .sh,
+.highlight .sx { color: #ffd580; }
+.highlight .m,
+.highlight .mb,
+.highlight .mf,
+.highlight .mh,
+.highlight .mi,
+.highlight .mo { color: #ffb86b; }
+.highlight .na,
+.highlight .nb,
+.highlight .bp,
+.highlight .nc,
+.highlight .nf,
+.highlight .fm,
+.highlight .ne,
+.highlight .nn { color: #f7d774; }
+.highlight .nv,
+.highlight .vc,
+.highlight .vg,
+.highlight .vi { color: #ff9ecb; }
+.highlight .o,
+.highlight .ow { color: #ff8f70; }
+.highlight .p,
+.highlight .w { color: #d9e2f2; }
+.mermaid {
+  margin: 24px 0;
+  padding: 18px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  overflow-x: auto;
+}
 table {
   width: 100%;
   border-collapse: collapse;
