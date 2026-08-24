@@ -1,4 +1,6 @@
-# distman
+<p align="left">
+  <img src="distman.png" alt="distman logo" width="300">
+</p>
 
 distman is a **configuration-driven file distribution manager** for safe,
 versioned software rollouts to predefined filesystem locations.

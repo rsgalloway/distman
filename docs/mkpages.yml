@@ -1,0 +1,17 @@
+title: distman
+description: Simple software distribution for complex pipelines.
+favicon: favicon.png
+
+navigation:
+  - label: Home
+    href: /
+  - label: Getting Started
+    href: /getting-started/
+  - label: CLI
+    href: /cli-reference/
+  - label: Config
+    href: /distribution-config/
+  - label: Pipelines
+    href: /transform-pipelines/
+  - label: GitHub
+    href: https://github.com/rsgalloway/distman
