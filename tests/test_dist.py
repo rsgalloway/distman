@@ -420,6 +420,23 @@ def test_dist_with_source_and_dest_without_dist_file(mocker, temp_dir):
     assert result is True
 
 
+def test_dist_with_invalid_direct_dest_returns_false(mocker, temp_dir):
+    """Invalid ad hoc destination variables should fail cleanly."""
+    source_file = Path(temp_dir) / "artifact.txt"
+    source_file.write_text("artifact\n", encoding="utf-8")
+
+    dist = Distributor()
+    dist.directory = temp_dir
+    dist.root = None
+
+    mocker.patch("distman.dist.Distributor.read_git_info", return_value=True)
+    mocker.patch("distman.dist.Distributor.is_git_behind", return_value=False)
+    mocker.patch("distman.dist.Distributor.git_changed_files", return_value=[])
+
+    result = dist.dist(source="artifact.txt", dest="{MISSING_ROOT}/artifact.txt")
+    assert result is False
+
+
 def test_run_ad_hoc_dist_without_dist_file(tmp_path, monkeypatch):
     """The CLI should dist a file directly from a directory without dist.json."""
     source_file = tmp_path / "artifact.txt"

@@ -82,7 +82,7 @@ def get_source_and_dest(target_dict: dict) -> Optional[Tuple[str, str]]:
         return None
     try:
         source = util.normalize_path(source)
-        dest = util.sanitize_path(util.replace_vars(dest))
+        dest = util.resolve_vars_path(dest)
     except Exception as e:
         log.error(f"Error resolving paths: {e}")
         return None
@@ -146,7 +146,12 @@ def should_skip_target(target_name: str, patterns: Optional[Union[str, List[str]
 
 
 def match_source_pattern(source_path: str, source_pattern: str) -> Optional[Tuple[str, ...]]:
-    """Return wildcard capture groups when ``source_path`` matches ``source_pattern``."""
+    """Return wildcard capture groups when ``source_path`` matches ``source_pattern``.
+
+    :param source_path: CLI source path to match.
+    :param source_pattern: Configured source path or wildcard pattern.
+    :return: Capture groups when matched, empty tuple for exact matches, otherwise None.
+    """
     source_path = util.normalize_path(source_path)
     source_pattern = util.normalize_path(source_pattern)
 
@@ -160,7 +165,12 @@ def match_source_pattern(source_path: str, source_pattern: str) -> Optional[Tupl
 
 
 def apply_destination_template(destination: str, groups: Tuple[str, ...]) -> str:
-    """Expand wildcard capture groups into a destination template."""
+    """Expand wildcard capture groups into a destination template.
+
+    :param destination: Destination template that may contain ``%1`` placeholders.
+    :param groups: Wildcard capture groups from a matched source pattern.
+    :return: Destination with capture placeholders replaced.
+    """
     resolved = destination
     for index, group in enumerate(groups, start=1):
         resolved = resolved.replace(f"%{index}", group)
@@ -189,9 +199,14 @@ class Distributor(GitRepo):
         target: Optional[Union[str, List[str]]] = None,
         source: Optional[str] = None,
         dest: Optional[str] = None,
-        ignore_missing: bool = config.IGNORE_MISSING,
     ) -> Optional[List[Target]]:
-        """Build effective targets from ``dist.json`` with optional CLI overrides."""
+        """Build effective targets from ``dist.json`` with optional CLI overrides.
+
+        :param target: One or more target-name patterns to include.
+        :param source: Optional CLI source path used to match configured source patterns.
+        :param dest: Optional CLI destination override for matched targets.
+        :return: List of effective targets, or None when config resolution fails.
+        """
         if not self.root:
             return None
 
@@ -229,23 +244,16 @@ class Distributor(GitRepo):
 
                 raw_dest = dest or apply_destination_template(entry_dest, groups)
                 try:
-                    dest_resolved = util.sanitize_path(util.replace_vars(raw_dest))
+                    dest_resolved = util.resolve_vars_path(raw_dest)
                 except Exception as e:
                     log.error(f"{e} in <dest> for {name}")
                     return None
 
-                src_path = (
-                    self.directory
-                    if requested_source == "."
-                    else util.normalize_path(os.path.join(self.directory, requested_source))
-                )
-                target_type = util.get_path_type(src_path)[0] if os.path.exists(src_path) else "?"
                 target_list.append(
-                    Target(
+                    self._make_target(
                         name,
-                        src_path,
+                        requested_source,
                         dest_resolved,
-                        target_type,
                         target_pipeline,
                         target_options,
                     )
@@ -254,20 +262,18 @@ class Distributor(GitRepo):
 
             if "*" in entry_source:
                 for src_path, dst_path in util.expand_wildcard_entry(entry_source, entry_dest):
-                    target_type = util.get_path_type(src_path)[0]
                     raw_dest = dest or dst_path
                     try:
-                        dst_resolved = util.sanitize_path(util.replace_vars(raw_dest))
+                        dst_resolved = util.resolve_vars_path(raw_dest)
                     except Exception as e:
                         log.error(f"{e} resolving wildcard target {name}")
                         return None
 
                     target_list.append(
-                        Target(
+                        self._make_target(
                             name,
                             src_path,
                             dst_resolved,
-                            target_type,
                             target_pipeline,
                             target_options,
                         )
@@ -275,23 +281,16 @@ class Distributor(GitRepo):
                 continue
 
             try:
-                dest_resolved = util.sanitize_path(util.replace_vars(dest or entry_dest))
+                dest_resolved = util.resolve_vars_path(dest or entry_dest)
             except Exception as e:
                 log.error(f"{e} in <dest> for {name}")
                 return None
 
-            src_path = (
-                self.directory
-                if entry_source == "."
-                else util.normalize_path(os.path.join(self.directory, entry_source))
-            )
-            target_type = util.get_path_type(src_path)[0] if os.path.exists(src_path) else "?"
             target_list.append(
-                Target(
+                self._make_target(
                     name,
-                    src_path,
+                    entry_source,
                     dest_resolved,
-                    target_type,
                     target_pipeline,
                     target_options,
                 )
@@ -303,24 +302,42 @@ class Distributor(GitRepo):
 
         return target_list
 
+    def _make_target(
+        self,
+        name: str,
+        source: str,
+        dest: str,
+        pipeline: Optional[dict] = None,
+        options: Optional[dict] = None,
+    ) -> Target:
+        """Create a target with paths normalized against the distributor root.
+
+        :param name: Target name used in logs and dist metadata.
+        :param source: Source path, absolute or relative to the distributor directory.
+        :param dest: Resolved destination path.
+        :param pipeline: Optional pipeline specification for this target.
+        :param options: Effective target options.
+        :return: Normalized distribution target.
+        """
+        src_path = util.resolve_relative_path(self.directory, source)
+        target_type = util.get_path_type(src_path)[0] if os.path.exists(src_path) else "?"
+        return Target(name, src_path, dest, target_type, pipeline, options or {})
+
     def get_direct_target(
         self,
         source: str,
         dest: str,
     ) -> Target:
-        """Create a single ad hoc target from CLI arguments."""
-        src_path = (
-            self.directory
-            if util.normalize_path(source) == "."
-            else util.normalize_path(os.path.join(self.directory, source))
-        )
-        dest_resolved = util.sanitize_path(util.replace_vars(dest))
-        target_type = util.get_path_type(src_path)[0] if os.path.exists(src_path) else "?"
-        return Target(
+        """Create a single ad hoc target from CLI arguments.
+
+        :param source: CLI source path, absolute or relative to the distributor directory.
+        :param dest: CLI destination path with optional environment tokens.
+        :return: Normalized ad hoc distribution target.
+        """
+        return self._make_target(
             "cli",
-            src_path,
-            dest_resolved,
-            target_type,
+            source,
+            util.resolve_vars_path(dest),
             None,
             {},
         )
@@ -339,7 +356,7 @@ class Distributor(GitRepo):
         versiononly: bool = False,
         verbose: int = 0,
     ) -> bool:
-        """Deploy targets defined in the loaded dist file.
+        """Deploy configured or ad hoc targets into versioned destinations.
 
             {
                 "author": "<email>",
@@ -355,6 +372,8 @@ class Distributor(GitRepo):
         destination symlink is updated unless ``versiononly`` is set.
 
         :param target: One or more target patterns to filter dist targets.
+        :param source: Optional source path override or ad hoc source path.
+        :param dest: Optional destination override or ad hoc destination path.
         :param show: If True, shows distribution information without making changes.
         :param force: If True, forces the distribution even if there are uncommitted changes.
         :param all: If True, processes all files, ignoring changes.
@@ -381,13 +400,16 @@ class Distributor(GitRepo):
             target=target,
             source=source,
             dest=dest,
-            ignore_missing=ignore_missing,
         )
 
         if target_list is None and self.root:
             return False
         if (not target_list) and source and dest:
-            target_list = [self.get_direct_target(source, dest)]
+            try:
+                target_list = [self.get_direct_target(source, dest)]
+            except Exception as e:
+                log.error(f"{e} in --dest")
+                return False
         elif (not target_list) and not self.root:
             log.error(f"{config.DIST_FILE} not found or invalid")
             return False
@@ -845,7 +867,11 @@ class Distributor(GitRepo):
 
 
 def build_parser(prog: str = "dist") -> argparse.ArgumentParser:
-    """Parse arguments for the deploy/version-management CLI (legacy 'dist' behavior)."""
+    """Build the argument parser for the deploy/version-management CLI.
+
+    :param prog: Program name to display in parser help.
+    :return: Configured argument parser.
+    """
     from distman import __version__
 
     parser = argparse.ArgumentParser(
@@ -956,13 +982,21 @@ def build_parser(prog: str = "dist") -> argparse.ArgumentParser:
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
-    """Parse arguments for the dist utility."""
+    """Parse command-line arguments for the dist utility.
+
+    :param argv: Optional argument sequence, excluding the executable name.
+    :return: Parsed command-line arguments.
+    """
     parser = build_parser()
     return parser.parse_args(list(argv) if argv is not None else None)
 
 
 def run(args: argparse.Namespace) -> int:
-    """Run the dist utility with the provided arguments."""
+    """Run the dist utility with parsed command-line arguments.
+
+    :param args: Parsed command-line arguments from ``parse_args``.
+    :return: Process exit code.
+    """
 
     # validate
     if not os.path.isdir(args.location):
@@ -1056,7 +1090,11 @@ def run(args: argparse.Namespace) -> int:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    """Main entry point for dist utility."""
+    """Main entry point for the dist utility.
+
+    :param argv: Optional argument sequence, excluding the executable name.
+    :return: Process exit code.
+    """
 
     args = parse_args(argv)
 
