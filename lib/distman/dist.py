@@ -330,6 +330,9 @@ class Distributor(GitRepo):
     ) -> Target:
         """Create a single ad hoc target from CLI arguments.
 
+        Ad hoc dists default to content matching because they may not come from
+        the current Git repository.
+
         :param source: CLI source path, absolute or relative to the distributor directory.
         :param dest: CLI destination path with optional environment tokens.
         :return: Normalized ad hoc distribution target.
@@ -339,7 +342,7 @@ class Distributor(GitRepo):
             source,
             util.resolve_vars_path(dest),
             None,
-            {},
+            {"match": "content"},
         )
 
     def dist(

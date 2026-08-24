@@ -176,6 +176,8 @@ The `match` option controls how distman recognizes an existing version:
 - `content` compares the source object with recent deployed versions.
 
 Use `content` when a build artifact can remain identical across commits.
+Direct `--source` and `--dest` deployments without a configured target use
+`content` matching by default.
 
 ## Missing Sources
 

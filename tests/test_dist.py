@@ -444,6 +444,18 @@ def test_dist_with_source_and_dest_without_dist_file(mocker, temp_dir):
     assert result is True
 
 
+def test_direct_target_defaults_to_content_match(temp_dir):
+    """Ad hoc targets should match versions by content instead of commit."""
+    source_file = Path(temp_dir) / "artifact.txt"
+    source_file.write_text("artifact\n", encoding="utf-8")
+
+    dist = Distributor()
+    dist.directory = temp_dir
+
+    target = dist.get_direct_target("artifact.txt", "deploy/artifact.txt")
+    assert target.options["match"] == "content"
+
+
 def test_dist_with_invalid_direct_dest_returns_false(mocker, temp_dir):
     """Invalid ad hoc destination variables should fail cleanly."""
     source_file = Path(temp_dir) / "artifact.txt"
