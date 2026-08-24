@@ -44,9 +44,13 @@ import pytest
 from distman import config, util
 from distman.dist import (
     Distributor,
+    apply_destination_template,
     confirm,
     get_source_and_dest,
     get_version_dest,
+    match_source_pattern,
+    parse_args,
+    run,
     should_skip_target,
     update_symlink,
 )
@@ -301,6 +305,29 @@ def test_should_skip_target_with_empty_pattern():
     assert result is True
 
 
+def test_match_source_pattern_exact():
+    """Exact source matches should return an empty capture tuple."""
+    assert match_source_pattern("build/pyparser", "build/pyparser") == ()
+
+
+def test_match_source_pattern_wildcard():
+    """Wildcard source matches should expose capture groups for destination templates."""
+    assert match_source_pattern("build/pyparser", "build/*") == ("pyparser",)
+
+
+def test_match_source_pattern_no_match():
+    """Non-matching sources should return None."""
+    assert match_source_pattern("build/pyparser", "lib/*") is None
+
+
+def test_apply_destination_template():
+    """Destination templates should substitute wildcard capture groups."""
+    assert (
+        apply_destination_template("{DEPLOY_ROOT}/lib/python/%1", ("pyparser",))
+        == "{DEPLOY_ROOT}/lib/python/pyparser"
+    )
+
+
 def test_distributor_initialization():
     """Test the initialization of the Distributor class."""
     distributor = Distributor()
@@ -341,6 +368,76 @@ def test_dist_with_missing_source(mock_distributor, mocker, mock_dist_dict):
     dist.root = mock_dist_dict
     result = dist.dist(target="test_target", dryrun=False)
     assert result is False
+
+
+def test_dist_with_source_override_matches_config(mocker, temp_dir):
+    """A CLI source should match configured source patterns and reuse the target destination."""
+    build_dir = Path(temp_dir) / "build"
+    build_dir.mkdir()
+    source_dir = build_dir / "pyparser"
+    source_dir.mkdir()
+    (source_dir / "module.py").write_text("print('hi')\n", encoding="utf-8")
+
+    dist = Distributor()
+    dist.directory = temp_dir
+    dist.root = {
+        "targets": {
+            "build": {
+                "source": "build/*",
+                "destination": "{DEPLOY_ROOT}/lib/python/%1",
+            }
+        }
+    }
+
+    mocker.patch("distman.dist.Distributor.read_git_info", return_value=True)
+    mocker.patch("distman.dist.Distributor.is_git_behind", return_value=False)
+    mocker.patch("distman.dist.Distributor.git_changed_files", return_value=[])
+    mocker.patch("distman.util.get_file_versions", return_value=[])
+    mocker.patch("distman.util.yesNo", return_value=True)
+
+    result = dist.dist(source="build/pyparser", yes=True, dryrun=True)
+    assert result is True
+
+
+def test_dist_with_source_and_dest_without_dist_file(mocker, temp_dir):
+    """CLI source and destination should support ad hoc deployment without dist.json."""
+    source_dir = Path(temp_dir) / "build" / "foobar"
+    source_dir.mkdir(parents=True)
+    (source_dir / "module.py").write_text("print('hi')\n", encoding="utf-8")
+
+    dist = Distributor()
+    dist.directory = temp_dir
+    dist.root = None
+
+    mocker.patch("distman.dist.Distributor.read_git_info", return_value=True)
+    mocker.patch("distman.dist.Distributor.is_git_behind", return_value=False)
+    mocker.patch("distman.dist.Distributor.git_changed_files", return_value=[])
+    mocker.patch("distman.util.get_file_versions", return_value=[])
+    mocker.patch("distman.util.yesNo", return_value=True)
+
+    destination = os.path.join(temp_dir, "deploy", "lib", "python", "foobar")
+    result = dist.dist(source="build/foobar", dest=destination, yes=True, dryrun=True)
+    assert result is True
+
+
+def test_run_ad_hoc_dist_without_dist_file(tmp_path, monkeypatch):
+    """The CLI should dist a file directly from a directory without dist.json."""
+    source_file = tmp_path / "artifact.txt"
+    source_file.write_text("artifact\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    args = parse_args(
+        [
+            "--source",
+            "artifact.txt",
+            "--dest",
+            "deploy/artifact.txt",
+            "--dryrun",
+            "--yes",
+        ]
+    )
+
+    assert run(args) == 0
 
 
 def test_reset_file_version_with_valid_target(mock_distributor, mocker, mock_dist_dict):

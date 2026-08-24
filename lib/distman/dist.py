@@ -36,6 +36,7 @@ Core deployment logic for creating versioned filesystem distributions.
 import argparse
 import fnmatch
 import os
+import re
 import time
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple, Union
@@ -144,6 +145,28 @@ def should_skip_target(target_name: str, patterns: Optional[Union[str, List[str]
     )
 
 
+def match_source_pattern(source_path: str, source_pattern: str) -> Optional[Tuple[str, ...]]:
+    """Return wildcard capture groups when ``source_path`` matches ``source_pattern``."""
+    source_path = util.normalize_path(source_path)
+    source_pattern = util.normalize_path(source_pattern)
+
+    if "*" not in source_pattern:
+        return tuple() if source_path == source_pattern else None
+
+    regex_pattern = re.escape(util.sanitize_path(source_pattern))
+    regex_pattern = regex_pattern.replace(r"\*", r"([^/]+)")
+    match = re.match("^" + regex_pattern + "$", util.sanitize_path(source_path))
+    return match.groups() if match else None
+
+
+def apply_destination_template(destination: str, groups: Tuple[str, ...]) -> str:
+    """Expand wildcard capture groups into a destination template."""
+    resolved = destination
+    for index, group in enumerate(groups, start=1):
+        resolved = resolved.replace(f"%{index}", group)
+    return resolved
+
+
 class Distributor(GitRepo):
     """Deploy targets from a loaded ``dist.json`` file."""
 
@@ -161,9 +184,152 @@ class Distributor(GitRepo):
         except Exception:
             pass
 
+    def iter_config_targets(
+        self,
+        target: Optional[Union[str, List[str]]] = None,
+        source: Optional[str] = None,
+        dest: Optional[str] = None,
+        ignore_missing: bool = config.IGNORE_MISSING,
+    ) -> Optional[List[Target]]:
+        """Build effective targets from ``dist.json`` with optional CLI overrides."""
+        if not self.root:
+            return None
+
+        targets_node = self.get_targets()
+        if not targets_node:
+            return None
+
+        global_pipeline = self.root.get(config.TAG_PIPELINE)
+        validate_pipeline_spec(global_pipeline, context="global")
+        global_options = self.root.get(config.TAG_OPTIONS, {})
+        requested_source = util.normalize_path(source) if source else None
+        target_list: List[Target] = []
+
+        for name, entry in targets_node.items():
+            if should_skip_target(name, target):
+                continue
+
+            entry_source = entry.get(config.TAG_SOURCEPATH)
+            entry_dest = entry.get(config.TAG_DESTPATH)
+            if entry_source is None or entry_dest is None:
+                continue
+
+            target_pipeline = get_pipeline_for_target(
+                global_pipeline, entry.get(config.TAG_PIPELINE)
+            )
+            validate_pipeline_spec(target_pipeline, context=f"target '{name}'")
+            target_options = util.get_effective_options(
+                global_options, entry.get(config.TAG_OPTIONS, {})
+            )
+
+            if requested_source is not None:
+                groups = match_source_pattern(requested_source, entry_source)
+                if groups is None:
+                    continue
+
+                raw_dest = dest or apply_destination_template(entry_dest, groups)
+                try:
+                    dest_resolved = util.sanitize_path(util.replace_vars(raw_dest))
+                except Exception as e:
+                    log.error(f"{e} in <dest> for {name}")
+                    return None
+
+                src_path = (
+                    self.directory
+                    if requested_source == "."
+                    else util.normalize_path(os.path.join(self.directory, requested_source))
+                )
+                target_type = util.get_path_type(src_path)[0] if os.path.exists(src_path) else "?"
+                target_list.append(
+                    Target(
+                        name,
+                        src_path,
+                        dest_resolved,
+                        target_type,
+                        target_pipeline,
+                        target_options,
+                    )
+                )
+                continue
+
+            if "*" in entry_source:
+                for src_path, dst_path in util.expand_wildcard_entry(entry_source, entry_dest):
+                    target_type = util.get_path_type(src_path)[0]
+                    raw_dest = dest or dst_path
+                    try:
+                        dst_resolved = util.sanitize_path(util.replace_vars(raw_dest))
+                    except Exception as e:
+                        log.error(f"{e} resolving wildcard target {name}")
+                        return None
+
+                    target_list.append(
+                        Target(
+                            name,
+                            src_path,
+                            dst_resolved,
+                            target_type,
+                            target_pipeline,
+                            target_options,
+                        )
+                    )
+                continue
+
+            try:
+                dest_resolved = util.sanitize_path(util.replace_vars(dest or entry_dest))
+            except Exception as e:
+                log.error(f"{e} in <dest> for {name}")
+                return None
+
+            src_path = (
+                self.directory
+                if entry_source == "."
+                else util.normalize_path(os.path.join(self.directory, entry_source))
+            )
+            target_type = util.get_path_type(src_path)[0] if os.path.exists(src_path) else "?"
+            target_list.append(
+                Target(
+                    name,
+                    src_path,
+                    dest_resolved,
+                    target_type,
+                    target_pipeline,
+                    target_options,
+                )
+            )
+
+        if requested_source is not None and len(target_list) > 1 and dest:
+            log.error("Cannot use --dest with multiple source matches")
+            return None
+
+        return target_list
+
+    def get_direct_target(
+        self,
+        source: str,
+        dest: str,
+    ) -> Target:
+        """Create a single ad hoc target from CLI arguments."""
+        src_path = (
+            self.directory
+            if util.normalize_path(source) == "."
+            else util.normalize_path(os.path.join(self.directory, source))
+        )
+        dest_resolved = util.sanitize_path(util.replace_vars(dest))
+        target_type = util.get_path_type(src_path)[0] if os.path.exists(src_path) else "?"
+        return Target(
+            "cli",
+            src_path,
+            dest_resolved,
+            target_type,
+            None,
+            {},
+        )
+
     def dist(
         self,
         target: Optional[Union[str, List[str]]] = None,
+        source: Optional[str] = None,
+        dest: Optional[str] = None,
         show: bool = False,
         force: bool = False,
         all: bool = False,
@@ -199,131 +365,38 @@ class Distributor(GitRepo):
         :param verbose: Verbosity level.
         :return: True if distribution was successful, False otherwise.
         """
-        if not self.root:
-            log.error(f"{config.DIST_FILE} not found or invalid")
-            return False
         if not self.read_git_info():
             return False
         if verbose >= 2:
             self.log_distribution_info()
 
-        targets_node = self.get_targets()
-        if not targets_node:
-            return False
-
         changed_files = self.git_changed_files()
         changed_dirs = util.get_common_root_dirs(changed_files)
-        global_pipeline = self.root.get(config.TAG_PIPELINE)
-        validate_pipeline_spec(global_pipeline, context="global")
-        global_options = self.root.get(config.TAG_OPTIONS, {})
         did_mutate = False
 
-        if config.DIST_FILE in changed_files:
+        if self.root and config.DIST_FILE in changed_files:
             log.warning(f"Uncommitted changes in {config.DIST_FILE}")
 
-        # build the list of targets to process
-        target_list: List[Target] = []
-        for name, entry in targets_node.items():
-            if should_skip_target(name, target):
-                continue
+        target_list = self.iter_config_targets(
+            target=target,
+            source=source,
+            dest=dest,
+            ignore_missing=ignore_missing,
+        )
 
-            source = entry.get(config.TAG_SOURCEPATH)
-            dest = entry.get(config.TAG_DESTPATH)
-            if source is None:
-                log.info(f"Target {name}: Missing source path")
-                continue
-            if dest is None:
-                log.info(f"Target {name}: Missing dest path")
-                continue
-
-            # get target pipeline and options
-            target_pipeline = get_pipeline_for_target(
-                global_pipeline, entry.get(config.TAG_PIPELINE)
-            )
-            validate_pipeline_spec(target_pipeline, context=f"target '{name}'")
-            target_options = util.get_effective_options(
-                global_options, entry.get(config.TAG_OPTIONS, {})
-            )
-
-            # check for wildcard in source
-            if "*" in source:
-                for src_path, dst_path in util.expand_wildcard_entry(source, dest):
-                    target_type = util.get_path_type(src_path)[0]
-                    try:
-                        dst_resolved = util.sanitize_path(util.replace_vars(dst_path))
-                        target_list.append(
-                            Target(
-                                name,
-                                src_path,
-                                dst_resolved,
-                                target_type,
-                                target_pipeline,
-                                target_options,
-                            )
-                        )
-                    except Exception as e:
-                        log.error(f"{e} resolving wildcard target {name}")
-                        return False
-            else:
-                try:
-                    dest_resolved = util.sanitize_path(util.replace_vars(dest))
-                except Exception as e:
-                    log.error(f"{e} in <dest> for {name}")
-                    return False
-
-                src_path = (
-                    self.directory
-                    if source == "."
-                    else util.normalize_path(os.path.join(self.directory, source))
-                )
-
-                if not os.path.exists(src_path):
-                    if target_options.get("ignore_missing", ignore_missing):
-                        log.info(f"Target {name}: Source '{source}' not found, skipping")
-                        continue
-                    else:
-                        log.error(f"Target {name}: Source '{source}' does not exist")
-                        return False
-
-                if (
-                    not show
-                    and not force
-                    and (src_path in changed_files or src_path in changed_dirs)
-                ):
-                    log.info(
-                        f"Target {name}: Source '{source}' has uncommitted changes. "
-                        "Commit or use --force."
-                    )
-                    return False
-
-                destination_dir = os.path.dirname(dest_resolved)
-                if not show and not dryrun and not os.path.exists(destination_dir):
-                    question = (
-                        f"Target {name}: Destination dir '{destination_dir}' "
-                        "doesn't exist. Create?"
-                    )
-                    if not confirm(question, yes, dryrun):
-                        return False
-                    try:
-                        os.makedirs(os.path.dirname(dest_resolved), exist_ok=True)
-                    except Exception as err:
-                        log.error(str(err))
-                        return False
-
-                target_type = util.get_path_type(src_path)[0]
-                target_list.append(
-                    Target(
-                        name,
-                        src_path,
-                        dest_resolved,
-                        target_type,
-                        target_pipeline,
-                        target_options,
-                    )
-                )
+        if target_list is None and self.root:
+            return False
+        if (not target_list) and source and dest:
+            target_list = [self.get_direct_target(source, dest)]
+        elif (not target_list) and not self.root:
+            log.error(f"{config.DIST_FILE} not found or invalid")
+            return False
 
         if not target_list:
-            log.info(f"No matching targets in {config.DIST_FILE}")
+            if source:
+                log.info(f"No matching targets found for source '{source}'")
+            else:
+                log.info(f"No matching targets in {config.DIST_FILE}")
             return False
 
         if not show and not force and self.is_git_behind():
@@ -333,6 +406,37 @@ class Distributor(GitRepo):
             log.info(config.DRYRUN_MESSAGE)
 
         for t in target_list:
+            if not os.path.exists(t.source):
+                if t.options.get("ignore_missing", ignore_missing):
+                    log.info(f"Target {t.name}: Source '{t.source}' not found, skipping")
+                    continue
+                log.error(f"Target {t.name}: Source '{t.source}' does not exist")
+                return False
+
+            if not show and not force and (t.source in changed_files or t.source in changed_dirs):
+                log.info(
+                    f"Target {t.name}: Source '{t.source}' has uncommitted changes. "
+                    "Commit or use --force."
+                )
+                return False
+
+            destination_dir = os.path.dirname(t.dest)
+            if not show and not dryrun and not os.path.exists(destination_dir):
+                question = (
+                    f"Target {t.name}: Destination dir '{destination_dir}' "
+                    "doesn't exist. Create?"
+                )
+                if not confirm(question, yes, dryrun):
+                    return False
+                try:
+                    os.makedirs(os.path.dirname(t.dest), exist_ok=True)
+                except Exception as err:
+                    log.error(str(err))
+                    return False
+
+            if t.type == "?":
+                t.type = util.get_path_type(t.source)[0]
+
             util.create_dest_folder(t.dest, dryrun, yes)
 
             # determine if the commit hash will be used for matching versions
@@ -746,7 +850,7 @@ def build_parser(prog: str = "dist") -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog=prog,
-        description="dist: distribute files based on a dist.json file",
+        description="dist: distribute files and directories to versioned destinations",
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
@@ -754,14 +858,24 @@ def build_parser(prog: str = "dist") -> argparse.ArgumentParser:
         metavar="LOCATION",
         nargs="?",
         default=".",
-        help="directory containing dist file (default is cwd)",
+        help="source directory and optional dist file location (default is cwd)",
     )
     parser.add_argument(
         "-t",
         "--target",
         nargs="+",
         metavar="TARGET",
-        help="source TARGET in the dist file (supports wildcards)",
+        help="target name in the dist file (supports wildcards)",
+    )
+    parser.add_argument(
+        "--source",
+        metavar="PATH",
+        help="source file or directory; matches dist.json source patterns when present",
+    )
+    parser.add_argument(
+        "--dest",
+        metavar="PATH",
+        help="deployment destination; with --source, supports ad-hoc distribution",
     )
     parser.add_argument(
         "-s",
@@ -862,8 +976,16 @@ def run(args: argparse.Namespace) -> int:
     try:
         distributor = Distributor()
 
-        if not distributor.read_dist_file(args.location):
+        dist_file = os.path.join(args.location, config.DIST_FILE)
+        has_direct_target = bool(args.source and args.dest)
+        if has_direct_target and not os.path.exists(dist_file):
+            # An explicit source and destination is a complete ad-hoc deployment.
+            distributor.directory = args.location
+        elif not distributor.read_dist_file(args.location):
+            distributor.directory = args.location
             return 1
+        else:
+            distributor.directory = args.location
 
         # delete target(s)
         if args.delete:
@@ -913,6 +1035,8 @@ def run(args: argparse.Namespace) -> int:
         try:
             ok = distributor.dist(
                 target=args.target,
+                source=args.source,
+                dest=args.dest,
                 show=args.show,
                 force=args.force,
                 all=args.all,
