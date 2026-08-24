@@ -432,7 +432,7 @@ def test_iter_config_targets_allows_literal_dest_for_source_override(tmp_path):
         dest=str(tmp_path / "deploy" / "custom"),
     )
     assert len(targets) == 1
-    assert targets[0].dest == str(tmp_path / "deploy" / "custom")
+    assert targets[0].dest == util.sanitize_path(str(tmp_path / "deploy" / "custom"))
 
 
 def test_iter_config_targets_expands_wildcards_from_location(monkeypatch, tmp_path):
