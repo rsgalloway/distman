@@ -71,6 +71,13 @@ def test_normalize_path():
     assert util.normalize_path("") == "."
 
 
+def test_resolve_relative_path_normalizes_absolute_paths(temp_dir):
+    """Test resolving relative paths normalizes joined absolute paths."""
+    result = util.resolve_relative_path(temp_dir, os.path.join(temp_dir, "..", "artifact"))
+    expected = os.path.normpath(os.path.join(temp_dir, "..", "artifact"))
+    assert result == util.sanitize_path(expected)
+
+
 def test_sanitize_path():
     """Test the sanitize_path function to ensure it correctly sanitizes paths."""
     assert util.sanitize_path("foo\\bar\\") == "foo/bar"

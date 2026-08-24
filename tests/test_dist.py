@@ -328,6 +328,18 @@ def test_apply_destination_template():
     )
 
 
+def test_apply_destination_template_requires_placeholders():
+    """Destination templates should reject missing wildcard placeholders."""
+    with pytest.raises(ValueError):
+        apply_destination_template("{DEPLOY_ROOT}/lib/python/tool", ("pyparser",))
+
+
+def test_apply_destination_template_rejects_unresolved_placeholders():
+    """Destination templates should reject leftover wildcard placeholders."""
+    with pytest.raises(ValueError):
+        apply_destination_template("{DEPLOY_ROOT}/lib/python/%1/%2", ("pyparser",))
+
+
 def test_distributor_initialization():
     """Test the initialization of the Distributor class."""
     distributor = Distributor()
@@ -397,6 +409,106 @@ def test_dist_with_source_override_matches_config(mocker, temp_dir):
 
     result = dist.dist(source="build/pyparser", yes=True, dryrun=True)
     assert result is True
+
+
+def test_iter_config_targets_allows_literal_dest_for_source_override(tmp_path):
+    """A single CLI source can override a wildcard target with a literal destination."""
+    source_dir = tmp_path / "build" / "pyparser"
+    source_dir.mkdir(parents=True)
+
+    dist = Distributor()
+    dist.directory = str(tmp_path)
+    dist.root = {
+        "targets": {
+            "build": {
+                "source": "build/*",
+                "destination": "{DEPLOY_ROOT}/lib/python/%1",
+            }
+        }
+    }
+
+    targets = dist.iter_config_targets(
+        source="build/pyparser",
+        dest=str(tmp_path / "deploy" / "custom"),
+    )
+    assert len(targets) == 1
+    assert targets[0].dest == str(tmp_path / "deploy" / "custom")
+
+
+def test_iter_config_targets_expands_wildcards_from_location(monkeypatch, tmp_path):
+    """Wildcard config sources should resolve relative to the dist location."""
+    repo_dir = tmp_path / "repo"
+    build_dir = repo_dir / "build"
+    build_dir.mkdir(parents=True)
+    (build_dir / "alpha").mkdir()
+    (build_dir / "beta").mkdir()
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    monkeypatch.chdir(outside_dir)
+
+    dist = Distributor()
+    dist.directory = str(repo_dir)
+    dist.root = {
+        "targets": {
+            "build": {
+                "source": "build/*",
+                "destination": str(tmp_path / "deploy" / "%1"),
+            }
+        }
+    }
+
+    targets = dist.iter_config_targets()
+    assert [Path(t.source).name for t in targets] == ["alpha", "beta"]
+
+
+def test_iter_config_targets_applies_dest_override_template(tmp_path):
+    """Wildcard target destination overrides should expand capture placeholders."""
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    (build_dir / "dist").write_text("#!/usr/bin/env python\n", encoding="utf-8")
+    (build_dir / "distman").write_text("#!/usr/bin/env python\n", encoding="utf-8")
+
+    dist = Distributor()
+    dist.directory = str(tmp_path)
+    dist.root = {
+        "targets": {
+            "bin": {
+                "source": "build/*",
+                "destination": "{DEPLOY_ROOT}/bin/%1",
+            }
+        }
+    }
+
+    targets = dist.iter_config_targets(
+        target="bin",
+        dest=str(tmp_path / "deploy" / "bin" / "%1"),
+    )
+    assert [Path(t.dest).name for t in targets] == ["dist", "distman"]
+
+
+def test_iter_config_targets_rejects_ambiguous_wildcard_dest_override(tmp_path):
+    """Wildcard destination overrides should not collapse multiple sources."""
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    (build_dir / "dist").write_text("#!/usr/bin/env python\n", encoding="utf-8")
+    (build_dir / "distman").write_text("#!/usr/bin/env python\n", encoding="utf-8")
+
+    dist = Distributor()
+    dist.directory = str(tmp_path)
+    dist.root = {
+        "targets": {
+            "bin": {
+                "source": "build/*",
+                "destination": "{DEPLOY_ROOT}/bin/%1",
+            }
+        }
+    }
+
+    targets = dist.iter_config_targets(
+        target="bin",
+        dest=str(tmp_path / "deploy" / "bin"),
+    )
+    assert targets is None
 
 
 def test_dist_with_dest_requires_source_or_target(mocker, temp_dir):

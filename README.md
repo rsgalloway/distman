@@ -1,7 +1,7 @@
 # distman
 
 <p align="left">
-  <img src="docs/distman.png" alt="distman logo" width="300">
+  <img src="https://raw.githubusercontent.com/rsgalloway/distman/master/docs/distman.png" alt="distman logo" width="300">
 </p>
 
 [![PyPI](https://img.shields.io/pypi/v/distman.svg?color=blue)](https://pypi.org/project/distman/)

@@ -68,7 +68,9 @@ expanded from the matched wildcard group.
 
 `--dest` overrides the selected destination. It must be paired with `--source`
 or `--target` so one destination is not accidentally applied to every
-configured target.
+configured target. When the selected source pattern contains wildcards,
+`--dest` is also treated as a destination template and must include the
+matching `%1`, `%2`, etc. placeholders.
 
 `--commit`, `--number`, and `--reset` are mutually exclusive.
 

@@ -164,16 +164,31 @@ def match_source_pattern(source_path: str, source_pattern: str) -> Optional[Tupl
     return match.groups() if match else None
 
 
-def apply_destination_template(destination: str, groups: Tuple[str, ...]) -> str:
+def apply_destination_template(
+    destination: str,
+    groups: Tuple[str, ...],
+    require_placeholders: bool = True,
+) -> str:
     """Expand wildcard capture groups into a destination template.
 
     :param destination: Destination template that may contain ``%1`` placeholders.
     :param groups: Wildcard capture groups from a matched source pattern.
+    :param require_placeholders: If True, require each capture group to appear.
     :return: Destination with capture placeholders replaced.
+    :raises ValueError: If required placeholders are missing or unresolved.
     """
     resolved = destination
     for index, group in enumerate(groups, start=1):
-        resolved = resolved.replace(f"%{index}", group)
+        placeholder = f"%{index}"
+        if placeholder not in resolved:
+            if require_placeholders:
+                raise ValueError(
+                    f"Destination template '{destination}' does not contain {placeholder}"
+                )
+            continue
+        resolved = resolved.replace(placeholder, group)
+    if re.search(r"%\d+", resolved):
+        raise ValueError(f"Unresolved wildcard placeholders: {resolved}")
     return resolved
 
 
@@ -242,8 +257,12 @@ class Distributor(GitRepo):
                 if groups is None:
                     continue
 
-                raw_dest = dest or apply_destination_template(entry_dest, groups)
                 try:
+                    raw_dest = apply_destination_template(
+                        dest or entry_dest,
+                        groups,
+                        require_placeholders=dest is None,
+                    )
                     dest_resolved = util.resolve_vars_path(raw_dest)
                 except Exception as e:
                     log.error(f"{e} in <dest> for {name}")
@@ -261,9 +280,14 @@ class Distributor(GitRepo):
                 continue
 
             if "*" in entry_source:
-                for src_path, dst_path in util.expand_wildcard_entry(entry_source, entry_dest):
-                    raw_dest = dest or dst_path
+                entry_source_path = util.resolve_relative_path(self.directory, entry_source)
+                for src_path, dst_path in util.expand_wildcard_entry(entry_source_path, entry_dest):
                     try:
+                        if dest:
+                            groups = match_source_pattern(src_path, entry_source_path)
+                            raw_dest = apply_destination_template(dest, groups)
+                        else:
+                            raw_dest = dst_path
                         dst_resolved = util.resolve_vars_path(raw_dest)
                     except Exception as e:
                         log.error(f"{e} resolving wildcard target {name}")

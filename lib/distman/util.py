@@ -431,10 +431,10 @@ def resolve_relative_path(base_dir: str, path: str) -> str:
     """
     path = normalize_path(path)
     if path == ".":
-        return base_dir
+        return sanitize_path(os.path.normpath(base_dir))
     if os.path.isabs(path):
-        return path
-    return normalize_path(os.path.join(base_dir, path))
+        return sanitize_path(os.path.normpath(path))
+    return sanitize_path(os.path.normpath(os.path.join(base_dir, path)))
 
 
 def sanitize_path(path: str) -> str:
