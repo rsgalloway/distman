@@ -374,6 +374,7 @@ class Distributor(GitRepo):
         :param target: One or more target patterns to filter dist targets.
         :param source: Optional source path override or ad hoc source path.
         :param dest: Optional destination override or ad hoc destination path.
+            Requires ``source`` or ``target``.
         :param show: If True, shows distribution information without making changes.
         :param force: If True, forces the distribution even if there are uncommitted changes.
         :param all: If True, processes all files, ignoring changes.
@@ -395,6 +396,10 @@ class Distributor(GitRepo):
 
         if self.root and config.DIST_FILE in changed_files:
             log.warning(f"Uncommitted changes in {config.DIST_FILE}")
+
+        if dest and not source and not target:
+            log.error("--dest requires --source or --target")
+            return False
 
         target_list = self.iter_config_targets(
             target=target,
@@ -901,7 +906,7 @@ def build_parser(prog: str = "dist") -> argparse.ArgumentParser:
     parser.add_argument(
         "--dest",
         metavar="PATH",
-        help="deployment destination; with --source, supports ad-hoc distribution",
+        help="deployment destination override; requires --source or --target",
     )
     parser.add_argument(
         "-s",

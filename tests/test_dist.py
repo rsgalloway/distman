@@ -399,6 +399,30 @@ def test_dist_with_source_override_matches_config(mocker, temp_dir):
     assert result is True
 
 
+def test_dist_with_dest_requires_source_or_target(mocker, temp_dir):
+    """A destination override should not apply to every configured target implicitly."""
+    dist = Distributor()
+    dist.directory = temp_dir
+    dist.root = {
+        "targets": {
+            "lib": {
+                "source": "lib/distman",
+                "destination": "{DEPLOY_ROOT}/lib/python/distman",
+            },
+            "bin": {
+                "source": "bin/dist",
+                "destination": "{DEPLOY_ROOT}/bin/dist",
+            },
+        }
+    }
+
+    mocker.patch("distman.dist.Distributor.read_git_info", return_value=True)
+    mocker.patch("distman.dist.Distributor.git_changed_files", return_value=[])
+
+    result = dist.dist(dest=os.path.join(temp_dir, "deploy", "distman"), dryrun=True)
+    assert result is False
+
+
 def test_dist_with_source_and_dest_without_dist_file(mocker, temp_dir):
     """CLI source and destination should support ad hoc deployment without dist.json."""
     source_dir = Path(temp_dir) / "build" / "foobar"
