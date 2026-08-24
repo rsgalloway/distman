@@ -187,9 +187,18 @@ def apply_destination_template(
                 )
             continue
         resolved = resolved.replace(placeholder, group)
-    if re.search(r"%\d+", resolved):
-        raise ValueError(f"Unresolved wildcard placeholders: {resolved}")
+    validate_destination_template(resolved)
     return resolved
+
+
+def validate_destination_template(destination: str) -> None:
+    """Validate that a destination has no unresolved wildcard placeholders.
+
+    :param destination: Destination path or template to validate.
+    :raises ValueError: If unresolved ``%N`` placeholders remain.
+    """
+    if re.search(r"%\d+", destination):
+        raise ValueError(f"Unresolved wildcard placeholders: {destination}")
 
 
 class Distributor(GitRepo):
@@ -253,7 +262,9 @@ class Distributor(GitRepo):
             )
 
             if requested_source is not None:
-                groups = match_source_pattern(requested_source, entry_source)
+                requested_source_path = util.resolve_relative_path(self.directory, requested_source)
+                entry_source_path = util.resolve_relative_path(self.directory, entry_source)
+                groups = match_source_pattern(requested_source_path, entry_source_path)
                 if groups is None:
                     continue
 
@@ -271,7 +282,7 @@ class Distributor(GitRepo):
                 target_list.append(
                     self._make_target(
                         name,
-                        requested_source,
+                        requested_source_path,
                         dest_resolved,
                         target_pipeline,
                         target_options,
@@ -288,6 +299,7 @@ class Distributor(GitRepo):
                             raw_dest = apply_destination_template(dest, groups)
                         else:
                             raw_dest = dst_path
+                            validate_destination_template(raw_dest)
                         dst_resolved = util.resolve_vars_path(raw_dest)
                     except Exception as e:
                         log.error(f"{e} resolving wildcard target {name}")

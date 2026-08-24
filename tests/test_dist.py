@@ -53,6 +53,7 @@ from distman.dist import (
     run,
     should_skip_target,
     update_symlink,
+    validate_destination_template,
 )
 
 
@@ -340,6 +341,12 @@ def test_apply_destination_template_rejects_unresolved_placeholders():
         apply_destination_template("{DEPLOY_ROOT}/lib/python/%1/%2", ("pyparser",))
 
 
+def test_validate_destination_template_rejects_unresolved_placeholders():
+    """Destination validation should reject leftover wildcard placeholders."""
+    with pytest.raises(ValueError):
+        validate_destination_template("{DEPLOY_ROOT}/lib/python/%2")
+
+
 def test_distributor_initialization():
     """Test the initialization of the Distributor class."""
     distributor = Distributor()
@@ -435,6 +442,27 @@ def test_iter_config_targets_allows_literal_dest_for_source_override(tmp_path):
     assert targets[0].dest == util.sanitize_path(str(tmp_path / "deploy" / "custom"))
 
 
+def test_iter_config_targets_matches_absolute_source_override(tmp_path):
+    """Absolute CLI sources should match configured relative source patterns."""
+    source_dir = tmp_path / "build" / "pyparser"
+    source_dir.mkdir(parents=True)
+
+    dist = Distributor()
+    dist.directory = str(tmp_path)
+    dist.root = {
+        "targets": {
+            "build": {
+                "source": "build/*",
+                "destination": "{DEPLOY_ROOT}/lib/python/%1",
+            }
+        }
+    }
+
+    targets = dist.iter_config_targets(source=str(source_dir))
+    assert len(targets) == 1
+    assert targets[0].source == util.sanitize_path(str(source_dir))
+
+
 def test_iter_config_targets_expands_wildcards_from_location(monkeypatch, tmp_path):
     """Wildcard config sources should resolve relative to the dist location."""
     repo_dir = tmp_path / "repo"
@@ -459,6 +487,27 @@ def test_iter_config_targets_expands_wildcards_from_location(monkeypatch, tmp_pa
 
     targets = dist.iter_config_targets()
     assert [Path(t.source).name for t in targets] == ["alpha", "beta"]
+
+
+def test_iter_config_targets_rejects_unresolved_config_dest_placeholders(tmp_path):
+    """Configured wildcard destinations should reject unresolved placeholders."""
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    (build_dir / "dist").write_text("#!/usr/bin/env python\n", encoding="utf-8")
+
+    dist = Distributor()
+    dist.directory = str(tmp_path)
+    dist.root = {
+        "targets": {
+            "bin": {
+                "source": "build/*",
+                "destination": str(tmp_path / "deploy" / "%1" / "%2"),
+            }
+        }
+    }
+
+    targets = dist.iter_config_targets(target="bin")
+    assert targets is None
 
 
 def test_iter_config_targets_applies_dest_override_template(tmp_path):
