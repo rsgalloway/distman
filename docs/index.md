@@ -2,8 +2,8 @@
   <img src="distman.png" alt="distman logo" width="300">
 </p>
 
-distman is a **configuration-driven file distribution manager** for safe,
-versioned software rollouts to predefined filesystem locations.
+distman is a **file distribution manager** for safe, versioned software
+rollouts to filesystem locations.
 
 It is designed for production pipelines where deterministic deployments,
 environment-aware paths, quick version switching, and rollback matter more
@@ -40,6 +40,13 @@ deploy/
 - Expand source globs into matching destinations
 - Publish configuration repositories independently of application code
 
+### Deploy directly
+
+- Dist one-off files or directories with `--source` and `--dest`
+- Use the same versioned destination layout without a `dist.json`
+- Match ad hoc deployments by content by default
+- Override configured target destinations when a target or source is selected
+
 ### Prepare and cache
 
 - Run Python functions or shell commands before distribution
@@ -55,7 +62,15 @@ pip install -U distman
 
 ## Quickstart
 
-Create `dist.json` at the root of a Git repository:
+Deploy a file or directory directly:
+
+```bash
+dist --source path/to/tool --dest /deploy/bin/tool --dryrun
+dist --source path/to/tool --dest /deploy/bin/tool --yes
+```
+
+For repeatable project deployments, create `dist.json` at the root of a Git
+repository:
 
 ```json
 {

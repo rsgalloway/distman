@@ -1,15 +1,19 @@
 # distman
 
-[![PyPI](https://img.shields.io/pypi/v/distman.svg)](https://pypi.org/project/distman/)
+<p align="left">
+  <img src="docs/distman.png" alt="distman logo" width="300">
+</p>
+
+[![PyPI](https://img.shields.io/pypi/v/distman.svg?color=blue)](https://pypi.org/project/distman/)
 [![Tests](https://github.com/rsgalloway/distman/actions/workflows/tests.yml/badge.svg)](https://github.com/rsgalloway/distman/actions/workflows/tests.yml)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
 
-Simple, configuration-driven software distribution for production pipelines.
+Simple software distribution for production pipelines.
 
 distman performs safe, versioned rollouts of software, scripts, and
-configuration files to predefined filesystem locations. It is useful when
-deterministic deployments, environment-aware transforms, local caching, and
-quick rollback matter more than conventional package installation.
+configuration files to filesystem locations. It is useful when deterministic
+deployments, environment-aware transforms, local caching, and quick rollback
+matter more than conventional package installation.
 
 That includes revision-controlled configuration repositories. distman can
 publish configuration into runtime filesystem scopes without needing to
@@ -47,7 +51,18 @@ pip install -U "distman[minify]"
 
 ## Quickstart
 
-Create a `dist.json` file at the root of a Git repository:
+For an ad hoc deployment, provide the source and destination directly:
+
+```bash
+dist --source path/to/tool --dest /deploy/bin/tool --dryrun
+dist --source path/to/tool --dest /deploy/bin/tool --yes
+```
+
+Ad hoc deployments use the same versioned layout as configured deployments and
+match previous versions by content by default.
+
+For repeatable project deployments, create a `dist.json` file at the root of a
+Git repository:
 
 ```json
 {
@@ -66,6 +81,13 @@ Preview and then perform the deployment:
 ```bash
 dist --dryrun
 dist --yes
+```
+
+Override a configured target source or destination from the CLI:
+
+```bash
+dist --source build/package --dest /deploy/lib/python/package --dryrun
+dist --target tools --dest /deploy/tools --yes
 ```
 
 The namespaced `distman dist` command provides the same distribution

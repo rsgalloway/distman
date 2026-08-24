@@ -108,10 +108,10 @@ selected target back to its latest version.
 
 ## Git Safety
 
-distman uses Git information to identify the source and version. A normal
-deployment stops when a selected source has uncommitted changes or the local
-repository is behind its upstream. Use `--force` only when that behavior is
-intentional.
+When Git information is available, distman records the source revision and can
+use it for version matching. A normal repository-backed deployment stops when a
+selected source has uncommitted changes or the local repository is behind its
+upstream. Use `--force` only when that behavior is intentional.
 
 ## Runtime Composition
 

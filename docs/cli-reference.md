@@ -23,12 +23,14 @@ distman --version
 dist [OPTIONS] [LOCATION]
 ```
 
-`LOCATION` is the directory containing `dist.json` and defaults to the current
-directory.
+`LOCATION` is the source directory and optional `dist.json` location. It
+defaults to the current directory.
 
 | Option | Meaning |
 |---|---|
 | `-t`, `--target TARGET...` | Select target names; wildcards are supported |
+| `--source PATH` | Source file or directory; matches configured source patterns when `dist.json` is present |
+| `--dest PATH` | Destination override; requires `--source` or `--target` |
 | `-s`, `--show` | Show active distributed versions only |
 | `-c`, `--commit HASH` | Point selected targets to a deployed commit |
 | `-n`, `--number NUMBER` | Point selected targets to a version number |
@@ -48,10 +50,25 @@ Examples:
 ```bash
 dist /path/to/repository --target bin --dryrun
 dist --target 'plugin-*' --yes
+dist --target lib --dest /deploy/lib/python/distman --dryrun
+dist --source build/tool --dest /deploy/bin/tool --dryrun
 dist --show
 dist --target tools --number 3
 dist --target tools --delete --number 1 --dryrun
 ```
+
+Use `--source` and `--dest` together to deploy directly without a `dist.json`
+file. Direct ad hoc deployments use content matching by default because the
+source may not belong to the current Git commit.
+
+When `dist.json` is present, `--source` matches configured source paths. For
+example, a target with `"source": "build/*"` matches
+`--source build/package`; `%1` placeholders in the configured destination are
+expanded from the matched wildcard group.
+
+`--dest` overrides the selected destination. It must be paired with `--source`
+or `--target` so one destination is not accidentally applied to every
+configured target.
 
 `--commit`, `--number`, and `--reset` are mutually exclusive.
 
