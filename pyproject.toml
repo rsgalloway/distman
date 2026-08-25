@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "distman"
-version = "0.8.3"
+version = "0.8.4"
 description = "Simple software distribution for complex pipelines"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.8"
