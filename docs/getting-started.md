@@ -2,7 +2,8 @@
 
 distman reads deployment instructions from a `dist.json` file located at the
 root of a directory or Git repository. Each named target maps a source object
-to a destination.
+to a destination. For one-off deployments, `dist` can also take an explicit
+`--source` and `--dest` without a `dist.json` file.
 
 ## Install
 
@@ -63,6 +64,19 @@ dist --target bin library --yes
 dist --target 'lib*' --yes
 ```
 
+## Ad Hoc Deployment
+
+Use `--source` and `--dest` to deploy a file or directory directly:
+
+```bash
+dist --source path/to/tool --dest /deploy/bin/tool --dryrun
+dist --source path/to/tool --dest /deploy/bin/tool --yes
+```
+
+Ad hoc deployments use the same versioned destination layout as configured
+targets. Because the source may come from outside the current Git repository,
+ad hoc deployments match existing versions by content by default.
+
 ## Version Layout
 
 For a destination such as `{DEPLOY_ROOT}/bin/tool`, distman stores numbered
@@ -94,10 +108,10 @@ selected target back to its latest version.
 
 ## Git Safety
 
-distman uses Git information to identify the source and version. A normal
-deployment stops when a selected source has uncommitted changes or the local
-repository is behind its upstream. Use `--force` only when that behavior is
-intentional.
+When Git information is available, distman records the source revision and can
+use it for version matching. A normal repository-backed deployment stops when a
+selected source has uncommitted changes or the local repository is behind its
+upstream. Use `--force` only when that behavior is intentional.
 
 ## Runtime Composition
 

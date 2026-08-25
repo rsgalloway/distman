@@ -396,7 +396,7 @@ def get_common_root_dirs(filepaths: List[str]) -> List[str]:
 
 
 def get_path_type(path: str) -> str:
-    """Returns the short name of the path type: 'file', 'directory', 'link',
+    """Returns the name of the path type: 'file', 'directory', 'link',
     or 'null' if path does not exist.
 
     :param path: file system path.
@@ -420,6 +420,21 @@ def normalize_path(path: str) -> str:
     """
     path = sanitize_path(path)
     return os.path.normpath(path.lstrip("./")) if not os.path.isabs(path) else path
+
+
+def resolve_relative_path(base_dir: str, path: str) -> str:
+    """Resolve ``path`` relative to ``base_dir`` unless it is already absolute.
+
+    :param base_dir: base directory for relative paths.
+    :param path: file system path.
+    :return: absolute or normalized path.
+    """
+    path = normalize_path(path)
+    if path == ".":
+        return sanitize_path(os.path.normpath(base_dir))
+    if os.path.isabs(path):
+        return sanitize_path(os.path.normpath(path))
+    return sanitize_path(os.path.normpath(os.path.join(base_dir, path)))
 
 
 def sanitize_path(path: str) -> str:
@@ -823,6 +838,15 @@ def replace_vars(
         i = end + len(close_token)
 
     return "".join(result)
+
+
+def resolve_vars_path(path: str) -> str:
+    """Resolve environment tokens in a path and normalize its separators.
+
+    :param path: file system path with optional ``{VAR}`` tokens.
+    :return: resolved and sanitized path.
+    """
+    return sanitize_path(replace_vars(path))
 
 
 def safe_copytree(src: str, dst: str):

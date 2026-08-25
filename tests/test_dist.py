@@ -44,11 +44,16 @@ import pytest
 from distman import config, util
 from distman.dist import (
     Distributor,
+    apply_destination_template,
     confirm,
     get_source_and_dest,
     get_version_dest,
+    match_source_pattern,
+    parse_args,
+    run,
     should_skip_target,
     update_symlink,
+    validate_destination_template,
 )
 
 
@@ -301,6 +306,47 @@ def test_should_skip_target_with_empty_pattern():
     assert result is True
 
 
+def test_match_source_pattern_exact():
+    """Exact source matches should return an empty capture tuple."""
+    assert match_source_pattern("build/pyparser", "build/pyparser") == ()
+
+
+def test_match_source_pattern_wildcard():
+    """Wildcard source matches should expose capture groups for destination templates."""
+    assert match_source_pattern("build/pyparser", "build/*") == ("pyparser",)
+
+
+def test_match_source_pattern_no_match():
+    """Non-matching sources should return None."""
+    assert match_source_pattern("build/pyparser", "lib/*") is None
+
+
+def test_apply_destination_template():
+    """Destination templates should substitute wildcard capture groups."""
+    assert (
+        apply_destination_template("{DEPLOY_ROOT}/lib/python/%1", ("pyparser",))
+        == "{DEPLOY_ROOT}/lib/python/pyparser"
+    )
+
+
+def test_apply_destination_template_requires_placeholders():
+    """Destination templates should reject missing wildcard placeholders."""
+    with pytest.raises(ValueError):
+        apply_destination_template("{DEPLOY_ROOT}/lib/python/tool", ("pyparser",))
+
+
+def test_apply_destination_template_rejects_unresolved_placeholders():
+    """Destination templates should reject leftover wildcard placeholders."""
+    with pytest.raises(ValueError):
+        apply_destination_template("{DEPLOY_ROOT}/lib/python/%1/%2", ("pyparser",))
+
+
+def test_validate_destination_template_rejects_unresolved_placeholders():
+    """Destination validation should reject leftover wildcard placeholders."""
+    with pytest.raises(ValueError):
+        validate_destination_template("{DEPLOY_ROOT}/lib/python/%2")
+
+
 def test_distributor_initialization():
     """Test the initialization of the Distributor class."""
     distributor = Distributor()
@@ -341,6 +387,271 @@ def test_dist_with_missing_source(mock_distributor, mocker, mock_dist_dict):
     dist.root = mock_dist_dict
     result = dist.dist(target="test_target", dryrun=False)
     assert result is False
+
+
+def test_dist_with_source_override_matches_config(mocker, temp_dir):
+    """A CLI source should match configured source patterns and reuse the target destination."""
+    build_dir = Path(temp_dir) / "build"
+    build_dir.mkdir()
+    source_dir = build_dir / "pyparser"
+    source_dir.mkdir()
+    (source_dir / "module.py").write_text("print('hi')\n", encoding="utf-8")
+
+    dist = Distributor()
+    dist.directory = temp_dir
+    dist.root = {
+        "targets": {
+            "build": {
+                "source": "build/*",
+                "destination": "{DEPLOY_ROOT}/lib/python/%1",
+            }
+        }
+    }
+
+    mocker.patch("distman.dist.Distributor.read_git_info", return_value=True)
+    mocker.patch("distman.dist.Distributor.is_git_behind", return_value=False)
+    mocker.patch("distman.dist.Distributor.git_changed_files", return_value=[])
+    mocker.patch("distman.util.get_file_versions", return_value=[])
+    mocker.patch("distman.util.yesNo", return_value=True)
+
+    result = dist.dist(source="build/pyparser", yes=True, dryrun=True)
+    assert result is True
+
+
+def test_iter_config_targets_allows_literal_dest_for_source_override(tmp_path):
+    """A single CLI source can override a wildcard target with a literal destination."""
+    source_dir = tmp_path / "build" / "pyparser"
+    source_dir.mkdir(parents=True)
+
+    dist = Distributor()
+    dist.directory = str(tmp_path)
+    dist.root = {
+        "targets": {
+            "build": {
+                "source": "build/*",
+                "destination": "{DEPLOY_ROOT}/lib/python/%1",
+            }
+        }
+    }
+
+    targets = dist.iter_config_targets(
+        source="build/pyparser",
+        dest=str(tmp_path / "deploy" / "custom"),
+    )
+    assert len(targets) == 1
+    assert targets[0].dest == util.sanitize_path(str(tmp_path / "deploy" / "custom"))
+
+
+def test_iter_config_targets_matches_absolute_source_override(tmp_path):
+    """Absolute CLI sources should match configured relative source patterns."""
+    source_dir = tmp_path / "build" / "pyparser"
+    source_dir.mkdir(parents=True)
+
+    dist = Distributor()
+    dist.directory = str(tmp_path)
+    dist.root = {
+        "targets": {
+            "build": {
+                "source": "build/*",
+                "destination": "{DEPLOY_ROOT}/lib/python/%1",
+            }
+        }
+    }
+
+    targets = dist.iter_config_targets(source=str(source_dir))
+    assert len(targets) == 1
+    assert targets[0].source == util.sanitize_path(str(source_dir))
+
+
+def test_iter_config_targets_expands_wildcards_from_location(monkeypatch, tmp_path):
+    """Wildcard config sources should resolve relative to the dist location."""
+    repo_dir = tmp_path / "repo"
+    build_dir = repo_dir / "build"
+    build_dir.mkdir(parents=True)
+    (build_dir / "alpha").mkdir()
+    (build_dir / "beta").mkdir()
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    monkeypatch.chdir(outside_dir)
+
+    dist = Distributor()
+    dist.directory = str(repo_dir)
+    dist.root = {
+        "targets": {
+            "build": {
+                "source": "build/*",
+                "destination": str(tmp_path / "deploy" / "%1"),
+            }
+        }
+    }
+
+    targets = dist.iter_config_targets()
+    assert [Path(t.source).name for t in targets] == ["alpha", "beta"]
+
+
+def test_iter_config_targets_rejects_unresolved_config_dest_placeholders(tmp_path):
+    """Configured wildcard destinations should reject unresolved placeholders."""
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    (build_dir / "dist").write_text("#!/usr/bin/env python\n", encoding="utf-8")
+
+    dist = Distributor()
+    dist.directory = str(tmp_path)
+    dist.root = {
+        "targets": {
+            "bin": {
+                "source": "build/*",
+                "destination": str(tmp_path / "deploy" / "%1" / "%2"),
+            }
+        }
+    }
+
+    targets = dist.iter_config_targets(target="bin")
+    assert targets is None
+
+
+def test_iter_config_targets_applies_dest_override_template(tmp_path):
+    """Wildcard target destination overrides should expand capture placeholders."""
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    (build_dir / "dist").write_text("#!/usr/bin/env python\n", encoding="utf-8")
+    (build_dir / "distman").write_text("#!/usr/bin/env python\n", encoding="utf-8")
+
+    dist = Distributor()
+    dist.directory = str(tmp_path)
+    dist.root = {
+        "targets": {
+            "bin": {
+                "source": "build/*",
+                "destination": "{DEPLOY_ROOT}/bin/%1",
+            }
+        }
+    }
+
+    targets = dist.iter_config_targets(
+        target="bin",
+        dest=str(tmp_path / "deploy" / "bin" / "%1"),
+    )
+    assert [Path(t.dest).name for t in targets] == ["dist", "distman"]
+
+
+def test_iter_config_targets_rejects_ambiguous_wildcard_dest_override(tmp_path):
+    """Wildcard destination overrides should not collapse multiple sources."""
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    (build_dir / "dist").write_text("#!/usr/bin/env python\n", encoding="utf-8")
+    (build_dir / "distman").write_text("#!/usr/bin/env python\n", encoding="utf-8")
+
+    dist = Distributor()
+    dist.directory = str(tmp_path)
+    dist.root = {
+        "targets": {
+            "bin": {
+                "source": "build/*",
+                "destination": "{DEPLOY_ROOT}/bin/%1",
+            }
+        }
+    }
+
+    targets = dist.iter_config_targets(
+        target="bin",
+        dest=str(tmp_path / "deploy" / "bin"),
+    )
+    assert targets is None
+
+
+def test_dist_with_dest_requires_source_or_target(mocker, temp_dir):
+    """A destination override should not apply to every configured target implicitly."""
+    dist = Distributor()
+    dist.directory = temp_dir
+    dist.root = {
+        "targets": {
+            "lib": {
+                "source": "lib/distman",
+                "destination": "{DEPLOY_ROOT}/lib/python/distman",
+            },
+            "bin": {
+                "source": "bin/dist",
+                "destination": "{DEPLOY_ROOT}/bin/dist",
+            },
+        }
+    }
+
+    mocker.patch("distman.dist.Distributor.read_git_info", return_value=True)
+    mocker.patch("distman.dist.Distributor.git_changed_files", return_value=[])
+
+    result = dist.dist(dest=os.path.join(temp_dir, "deploy", "distman"), dryrun=True)
+    assert result is False
+
+
+def test_dist_with_source_and_dest_without_dist_file(mocker, temp_dir):
+    """CLI source and destination should support ad hoc deployment without dist.json."""
+    source_dir = Path(temp_dir) / "build" / "foobar"
+    source_dir.mkdir(parents=True)
+    (source_dir / "module.py").write_text("print('hi')\n", encoding="utf-8")
+
+    dist = Distributor()
+    dist.directory = temp_dir
+    dist.root = None
+
+    mocker.patch("distman.dist.Distributor.read_git_info", return_value=True)
+    mocker.patch("distman.dist.Distributor.is_git_behind", return_value=False)
+    mocker.patch("distman.dist.Distributor.git_changed_files", return_value=[])
+    mocker.patch("distman.util.get_file_versions", return_value=[])
+    mocker.patch("distman.util.yesNo", return_value=True)
+
+    destination = os.path.join(temp_dir, "deploy", "lib", "python", "foobar")
+    result = dist.dist(source="build/foobar", dest=destination, yes=True, dryrun=True)
+    assert result is True
+
+
+def test_direct_target_defaults_to_content_match(temp_dir):
+    """Ad hoc targets should match versions by content instead of commit."""
+    source_file = Path(temp_dir) / "artifact.txt"
+    source_file.write_text("artifact\n", encoding="utf-8")
+
+    dist = Distributor()
+    dist.directory = temp_dir
+
+    target = dist.get_direct_target("artifact.txt", "deploy/artifact.txt")
+    assert target.options["match"] == "content"
+
+
+def test_dist_with_invalid_direct_dest_returns_false(mocker, temp_dir):
+    """Invalid ad hoc destination variables should fail cleanly."""
+    source_file = Path(temp_dir) / "artifact.txt"
+    source_file.write_text("artifact\n", encoding="utf-8")
+
+    dist = Distributor()
+    dist.directory = temp_dir
+    dist.root = None
+
+    mocker.patch("distman.dist.Distributor.read_git_info", return_value=True)
+    mocker.patch("distman.dist.Distributor.is_git_behind", return_value=False)
+    mocker.patch("distman.dist.Distributor.git_changed_files", return_value=[])
+
+    result = dist.dist(source="artifact.txt", dest="{MISSING_ROOT}/artifact.txt")
+    assert result is False
+
+
+def test_run_ad_hoc_dist_without_dist_file(tmp_path, monkeypatch):
+    """The CLI should dist a file directly from a directory without dist.json."""
+    source_file = tmp_path / "artifact.txt"
+    source_file.write_text("artifact\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    args = parse_args(
+        [
+            "--source",
+            "artifact.txt",
+            "--dest",
+            "deploy/artifact.txt",
+            "--dryrun",
+            "--yes",
+        ]
+    )
+
+    assert run(args) == 0
 
 
 def test_reset_file_version_with_valid_target(mock_distributor, mocker, mock_dist_dict):
