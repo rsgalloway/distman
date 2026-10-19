@@ -1,11 +1,6 @@
 {
     "author": "ryan@rsg.io",
     "targets": {
-        "build": {
-            "source": "build/*",
-            "destination": "{DEPLOY_ROOT}/lib/python/%1",
-            "options": {"match": "content"}
-        },
         "bin": {
             "source": "bin/*",
             "destination": "{DEPLOY_ROOT}/bin/%1"

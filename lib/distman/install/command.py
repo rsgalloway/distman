@@ -1,0 +1,207 @@
+"""Acquire, compose, validate, and publish complete installation revisions."""
+
+import argparse
+import tempfile
+from collections import defaultdict
+from pathlib import Path
+from typing import List, Optional, Sequence, Tuple
+
+from packaging.utils import parse_wheel_filename
+
+from distman import util
+from distman.deployment import publish_directories
+from distman.install import InstallError
+from distman.install.models import Changes, Groups, InstalledArtifact, Selection
+from distman.install.ownership import (
+    check_dependencies,
+    compose,
+    inventory,
+    locks,
+    read_state,
+    same_state,
+)
+from distman.install.projects import (
+    Project,
+    distribute_project,
+    distribution_paths,
+    prepare_arguments,
+)
+from distman.install.targets import Target, expand_targets
+from distman.install.wheels import acquire, build_project, stage
+from distman.policy import Policy
+
+
+def collect(
+    args: argparse.Namespace,
+    policy: Policy,
+    targets: Sequence[Target],
+    temporary: Path,
+    local_project: Optional[Project] = None,
+) -> Tuple[Groups, List[InstalledArtifact]]:
+    """Acquire wheels and group staged payloads by configured deployment boundary.
+
+    :param args: Effective install options after local-project discovery.
+    :param policy: Resolved installation policy used to compute import and target paths.
+    :param targets: Runtime selections for which pip should acquire compatible wheels.
+    :param temporary: Existing workspace for downloads, project builds, and staged wheel
+        payloads.
+    :param local_project: Optional project descriptor identifying custom dist.json ownership.
+    :return: Grouped publication additions and validation-only receipts for dist-owned project
+        wheels.
+    :raises InstallError: If acquisition fails or configured paths/artifacts cannot coexist
+        safely.
+    """
+    project = build_project(args, temporary / "project") if args.project else None
+    excluded_name = (
+        parse_wheel_filename(project.name)[0]
+        if project and local_project and local_project.distribution
+        else None
+    )
+    groups: Groups = defaultdict(dict)
+    project_records: List[InstalledArtifact] = []
+    payloads = {}
+    for number, target in enumerate(targets):
+        for artifact in acquire(args, target, temporary / f"download-{number}", project):
+            provenance = Selection(
+                **artifact.provenance,
+                pure=artifact.pure,
+                targets=[target.label],
+                acquisition="pip resolution report",
+            )
+            if artifact.name == excluded_name:
+                print(f"Project {artifact.name}: publication is owned by dist.json")
+                project_records.append(InstalledArtifact(**provenance, files={}))
+                continue
+            # pip may combine config files, environment and requirement-file indexes.
+            # Do not invent an index of origin or persist credentials from these.
+            import_root = policy.path(
+                "DISTMAN_PURE_PATH" if artifact.pure else "DISTMAN_BINARY_PATH", artifact, target
+            )
+            destination = (
+                import_root
+                if artifact.pure
+                else policy.path("DISTMAN_TARGET_PATH", artifact, target)
+            )
+            try:
+                prefix = import_root.relative_to(destination)
+            except ValueError as exc:
+                raise InstallError(
+                    f"Import path {import_root} must be within target {destination}"
+                ) from exc
+            if ".." in prefix.parts or ".." in destination.parts:
+                raise InstallError("Installation paths must not contain '..'")
+            key = artifact.name if artifact.pure else f"{artifact.name}@{prefix.as_posix()}"
+            identity = (provenance["sha256"], target.platform)
+            if identity not in payloads:
+                payload = temporary / f"wheel-{len(payloads)}"
+                stage(artifact, payload, target)
+                payloads[identity] = payload
+            payload = payloads[identity]
+            previous = groups[destination].get(key)
+            if previous:
+                if previous[2]["sha256"] != provenance["sha256"] or inventory(
+                    previous[1]
+                ) != inventory(payload):
+                    raise InstallError(
+                        f"Incompatible artifacts share {import_root}: {artifact.name}. "
+                        "Use narrower runtime selection or separate configured paths."
+                    )
+                previous[2]["targets"] = sorted(set(previous[2]["targets"] + [target.label]))
+                continue
+            groups[destination][key] = (key, payload, provenance, prefix)
+    destinations = sorted(groups)
+    for i, destination in enumerate(destinations):
+        for other in destinations[i + 1 :]:
+            if destination in other.parents or other in destination.parents:
+                raise InstallError(f"Overlapping deployment targets: {destination} and {other}")
+    return groups, project_records
+
+
+def plan(groups: Groups, temporary: Path, force: bool) -> Tuple[Changes, List[InstalledArtifact]]:
+    """Compose proposed revisions in temporary storage and detect unchanged targets.
+
+    :param groups: Staged wheel additions grouped by active deployment destination.
+    :param temporary: Workspace in which new composed revision directories will be created.
+    :param force: If True, include unchanged targets in the publication list.
+    :return: Staged-source/destination pairs to publish and receipts for all composed artifacts.
+    :raises InstallError: If active integrity or proposed file ownership validation fails.
+    """
+    changes, records = [], []
+    for number, (destination, additions) in enumerate(groups.items()):
+        current = read_state(destination)
+        for key, _, provenance, _ in additions.values():
+            old = current["artifacts"].get(key)
+            if old:
+                provenance["targets"] = sorted(set(old["targets"] + provenance["targets"]))
+            before = old["version"] if old else "absent"
+            print(f"{key}: {before} -> {provenance['version']} at {destination}")
+        staged = temporary / f"revision-{number}"
+        state = compose(destination, staged, list(additions.values()))
+        records.extend(state["artifacts"].values())
+        if force or not same_state(destination, state):
+            changes.append((staged, destination))
+        else:
+            print(f"Unchanged: {destination}")
+    return changes, records
+
+
+def install(args: argparse.Namespace) -> int:
+    """Resolve policy once, validate the complete plan, then confirm and publish.
+
+    :param args: Parsed install options containing inputs, runtime selection, and publication
+        flags.
+    :return: Zero for success or dry run, one for declined confirmation, or the legacy dist exit
+        status.
+    :raises InstallError: If project discovery, acquisition, ownership, or preflight validation
+        fails.
+    :raises OSError: If staging or publication cannot complete.
+    """
+    args, project = prepare_arguments(args)
+    targets = expand_targets(args.platform, args.arch, args.python)
+    policy = Policy()
+    if project:
+        print(f"Local project: {project.path}")
+        print(f"Effective deployment root: {policy.deploy_root}")
+    with tempfile.TemporaryDirectory(prefix="distman-install-") as work:
+        temporary = Path(work)
+        groups, project_records = (
+            collect(args, policy, targets, temporary, project)
+            if args.packages or args.requirement or args.project
+            else ({}, [])
+        )
+        if project and project.distribution:
+            for custom in distribution_paths(project, policy.values):
+                for package_root in groups:
+                    if (
+                        custom == package_root
+                        or custom in package_root.parents
+                        or package_root in custom.parents
+                    ):
+                        raise InstallError(
+                            f"dist.json target overlaps package publication: {custom}"
+                        )
+            if distribute_project(project, args, policy.values, dryrun=True):
+                raise InstallError("Local dist.json preflight failed; no packages were published")
+        with locks(groups, args.dryrun):
+            changes, records = plan(groups, temporary, args.force)
+            records.extend(project_records)
+            check_targets = {target.label: target for target in targets}
+            for record in records:
+                for label in record["targets"]:
+                    system, arch, python = label.split("-")
+                    check_targets.setdefault(
+                        label, Target(system, arch, python[2] + "." + python[3:])
+                    )
+            for target in check_targets.values():
+                check_dependencies(records, target)
+            if args.dryrun:
+                print(f"Dry run: {len(changes)} revision(s); deployment directories unchanged")
+                return 0
+            if (changes or project) and not args.yes:
+                if not util.yesNo(f"Publish installation to {policy.deploy_root}?"):
+                    return 1
+            publish_directories(changes, policy.deploy_root)
+            print(f"Installed: {len(changes)} revision(s)")
+            if project and project.distribution:
+                return distribute_project(project, args, policy.values, dryrun=False)
+    return 0

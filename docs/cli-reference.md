@@ -14,6 +14,7 @@ The `distman` suite command provides equivalent namespaced interfaces:
 ```bash
 distman dist [OPTIONS] [LOCATION]
 distman cache [OPTIONS]
+distman install [OPTIONS] [REQUIREMENTS...]
 distman --version
 ```
 
@@ -102,4 +103,15 @@ distcache --ttl 0
 distcache --diff
 distcache --prune --dryrun
 distcache --src /studio/apps/prod --dst /var/tmp/apps
+```
+
+## Python installation
+
+See [Installing Python Distributions](install.md) for runtime selection, optional
+dependencies, path policy, ownership, and activation behavior.
+
+```bash
+distman install numpy
+distman install -r requirements.txt --dryrun
+distman install ./myapp --yes
 ```

@@ -38,7 +38,7 @@ import os
 import shlex
 import shutil
 import subprocess
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from distman import config, util
 from distman.logger import log
@@ -46,6 +46,10 @@ from distman.transform import TransformError
 
 # define the allowed keys for pipeline steps
 ALLOWED_KEYS = {"func", "script", "options", "env"}
+
+
+if TYPE_CHECKING:
+    from distman.dist import Target
 
 
 class ValidationError(Exception):
@@ -89,9 +93,11 @@ def sort_pipeline(pipeline: dict) -> List[Tuple[str, dict]]:
 def run_script_step(cmd: str, env: dict = None) -> None:
     """Run a script command in a subprocess.
 
-    :param script_cmd: The command to run as a string.
+    :param cmd: The command to run as a string.
     :param env: Optional environment variables to set for the subprocess.
     :raises TransformError: If the script fails with a non-zero exit code.
+
+    :return: None.
     """
     try:
         log.info("Running: '%s'", cmd)
@@ -125,7 +131,9 @@ def _quote_shell_arg(value: str, windows: Optional[bool] = None) -> str:
     return shlex.quote(value)
 
 
-def run_pipeline(target, pipeline: Dict[str, Any], input_path: str, build_dir: str) -> str:
+def run_pipeline(
+    target: "Target", pipeline: Dict[str, Any], input_path: str, build_dir: str
+) -> str:
     """Run a series of pipeline steps defined in the pipeline dictionary.
 
     :param target: The target object containing metadata like name.
@@ -212,6 +220,8 @@ def validate_pipeline_spec(pipeline: Optional[dict], context: str = "global") ->
 
     :param pipeline: The pipeline specification to validate.
     :param context: Context for error messages, e.g., "global" or "target".
+
+    :return: None.
     """
     if pipeline is None:
         return
