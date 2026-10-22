@@ -1,3 +1,34 @@
+#!/usr/bin/env python3
+#
+# Copyright (c) 2024-2025, Ryan Galloway (ryan@rsgalloway.com)
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+#  - Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
+#
+#  - Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
+#
+#  - Neither the name of the software nor the names of its contributors
+#    may be used to endorse or promote products derived from this software
+#    without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+#
+
 """Offline wheels exercise real pip resolution, installation and publication."""
 
 import base64
@@ -217,7 +248,8 @@ def test_policy_active_tier_missing_include_and_templates(
     root, wheels = installation
     (tmp_path / "distman.env").write_text(
         "include: [missing-optional]\nall:\n  ENV: prod\n  DEPLOY_ROOT: /not-the-write-root\n"
-        "  TOOLS_ROOT: ${DEPLOY_ROOT}/third-party\n  DISTMAN_PURE_PATH: '{TOOLS_ROOT}/imports'\n"
+        "  TOOLS_ROOT: ${DEPLOY_ROOT}/third-party\n"
+        "  DISTMAN_SHARED_LIB_PATH: '{TOOLS_ROOT}/imports'\n"
     )
     policy = Policy()
     assert policy.values["ENV"] == "dev"
@@ -226,6 +258,30 @@ def test_policy_active_tier_missing_include_and_templates(
     assert invoke(wheels, "sample") == 0
     assert (root / "third-party/imports/sample").exists()
     assert os.environ["ENV"] == "dev"
+
+
+@pytest.mark.parametrize("custom_target", [False, True])
+def test_runtime_library_path_inherits_target(
+    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, custom_target: bool
+) -> None:
+    """Expand the target variable before formatting artifact and runtime tokens.
+
+    :param installation: Isolated deployment root and offline wheel directory.
+    :param monkeypatch: Fixture for an active target-template override.
+    :param custom_target: Whether to override the default publication boundary.
+    :return: None.
+    """
+    root, wheels = installation
+    if custom_target:
+        monkeypatch.setenv("DISTMAN_TARGET_PATH", "{TOOLS_ROOT}/custom/{version}/{package}")
+    target = expand_targets("windows", "x86_64", "3.11")[0]
+    artifact = inspect_wheel(wheel(wheels, tag="cp311-cp311-win_amd64"), target)
+    policy = Policy()
+    boundary = root / "tools" / ("custom/1.0/sample" if custom_target else "sample/1.0")
+    assert policy.path("DISTMAN_TARGET_PATH", artifact, target) == boundary
+    assert policy.path("DISTMAN_RUNTIME_LIB_PATH", artifact, target) == (
+        boundary / "windows/x86_64/python3.11/lib/python"
+    )
 
 
 def test_standalone_fallback(
