@@ -129,7 +129,12 @@ def test_metadata_multiple_roots_data_and_idempotency(installation: Tuple[Path, 
     assert target.is_symlink()
     assert (target / "sample/__init__.py").read_bytes() == b"value = 42\r\n"
     assert (target / "share/sample.txt").read_bytes() == b"example\r\n"
-    assert (target / "bin/sample-tool").exists()
+    provided_script = root / "tools/bin/sample-tool"
+    assert provided_script.exists()
+    if os.name != "nt":
+        process = subprocess.run([str(provided_script)], capture_output=True, text=True)
+        assert process.returncode == 0, process.stderr
+        assert process.stdout.strip() == "ok"
     assert (target / "sample-1.0.dist-info/RECORD").exists()
     process = subprocess.run(
         [
@@ -396,6 +401,219 @@ def test_cross_target_marker_omission_fails_closed(installation: Tuple[Path, Pat
     assert not (root / "tools/lib/python").exists()
 
 
+def command_wheel(
+    directory: Path,
+    name: str = "sample",
+    version: str = "1.0",
+    command: Optional[str] = "sample-cli",
+    tag: str = "py3-none-any",
+) -> Path:
+    """Create a wheel with an optional console entrypoint for publication tests.
+
+    :param directory: Offline wheelhouse receiving the archive.
+    :param name: Distribution and import module name.
+    :param version: Upstream wheel version.
+    :param command: Generated command name, or None to remove commands on upgrade.
+    :param tag: Wheel compatibility tag.
+    :return: Created wheel archive.
+    """
+    files = {f"{name}.py": f"def main():\n    print({version!r})\n".encode()}
+    if command:
+        files[f"{name}-{version}.dist-info/entry_points.txt"] = (
+            f"[console_scripts]\n{command} = {name}:main\n"
+        ).encode()
+    return wheel(directory, name, version, tag, files=files)
+
+
+def test_shared_commands_upgrade_remove_and_preserve(installation: Tuple[Path, Path]) -> None:
+    """Upgrade both roots, remove obsolete commands, and retain unrelated commands.
+
+    :param installation: Isolated deployment root and offline wheel directory.
+    :return: None.
+    """
+    root, wheels = installation
+    command_wheel(wheels)
+    command_wheel(wheels, "other", command="other-cli")
+    assert invoke(wheels, "sample", "other") == 0
+    library, scripts = root / "tools/lib/python", root / "tools/bin"
+    initial = (os.readlink(library), os.readlink(scripts))
+    command_wheel(wheels, version="2.0", command=None)
+    assert invoke(wheels, "sample==2.0") == 0
+    assert not list(scripts.glob("sample-cli*"))
+    assert list(scripts.glob("other-cli*"))
+    assert os.readlink(library) != initial[0]
+    assert os.readlink(scripts) != initial[1]
+    updated = (os.readlink(library), os.readlink(scripts))
+    assert invoke(wheels, "sample==2.0") == 0
+    assert (os.readlink(library), os.readlink(scripts)) == updated
+
+
+def test_shared_command_collision_and_unmanaged_bin(
+    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reject command collisions and existing unmanaged directories before publishing.
+
+    :param installation: Isolated deployment root and offline wheel directory.
+    :param monkeypatch: Fixture overriding the scripts destination.
+    :return: None.
+    """
+    root, wheels = installation
+    command_wheel(wheels)
+    assert invoke(wheels, "sample") == 0
+    library, scripts = root / "tools/lib/python", root / "tools/bin"
+    initial = (os.readlink(library), os.readlink(scripts))
+    command_wheel(wheels, "other", command="sample-cli")
+    assert invoke(wheels, "other") == 1
+    assert (os.readlink(library), os.readlink(scripts)) == initial
+    unmanaged = root / "legacy-bin"
+    unmanaged.mkdir()
+    (unmanaged / "existing-tool").write_text("preserve")
+    monkeypatch.setenv("DISTMAN_SHARED_BIN_PATH", str(unmanaged))
+    assert invoke(wheels, "other") == 1
+    assert (unmanaged / "existing-tool").read_text() == "preserve"
+    assert (os.readlink(library), os.readlink(scripts)) == initial
+
+
+def test_script_activation_failure_restores_libraries(
+    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed bin activation restores the preceding library activation too.
+
+    :param installation: Isolated deployment root and offline wheel directory.
+    :param monkeypatch: Fixture injecting one script-root activation failure.
+    :return: None.
+    """
+    root, wheels = installation
+    command_wheel(wheels)
+    assert invoke(wheels, "sample") == 0
+    library, scripts = root / "tools/lib/python", root / "tools/bin"
+    initial = (os.readlink(library), os.readlink(scripts))
+    command_wheel(wheels, version="2.0")
+    replace = deployment.replace_link
+
+    def fail_bin(destination: Path, target: Path) -> None:
+        """Fail only the scripts activation, allowing library restoration.
+
+        :param destination: Active link being replaced.
+        :param target: Proposed revision link target.
+        :return: None.
+        :raises OSError: For the scripts destination.
+        """
+        if Path(destination) == scripts:
+            raise OSError("script activation failed")
+        replace(destination, target)
+
+    monkeypatch.setattr(deployment, "replace_link", fail_bin)
+    assert invoke(wheels, "sample==2.0") == 1
+    assert (os.readlink(library), os.readlink(scripts)) == initial
+
+
+def test_custom_shared_bin_record_paths(
+    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """External scripts retain valid RECORD paths and checksums through active links.
+
+    :param installation: Isolated deployment root and offline wheel directory.
+    :param monkeypatch: Fixture overriding the shared scripts template.
+    :return: None.
+    """
+    root, wheels = installation
+    monkeypatch.setenv("DISTMAN_SHARED_BIN_PATH", "{DEPLOY_ROOT}/commands")
+    command_wheel(wheels)
+    assert invoke(wheels, "sample") == 0
+    library = root / "tools/lib/python"
+    assert not (library / "bin").exists()
+    records = list(csv.reader((library / "sample-1.0.dist-info/RECORD").read_text().splitlines()))
+    commands = [row for row in records if "sample-cli" in row[0]]
+    assert len(commands) == 1
+    name, checksum, size = commands[0]
+    path = library / name
+    assert path.parent == root / "commands"
+    content = path.read_bytes()
+    assert int(size) == len(content)
+    assert checksum == "sha256=" + base64.urlsafe_b64encode(
+        hashlib.sha256(content).digest()
+    ).decode().rstrip("=")
+
+
+def test_runtime_commands_stay_with_binary_revisions(
+    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Runtime bins and libraries share one package boundary and preserve other runtimes.
+
+    :param installation: Isolated deployment root and offline wheel directory.
+    :param monkeypatch: Fixture overriding the runtime bin suffix.
+    :return: None.
+    """
+    root, wheels = installation
+    monkeypatch.setenv(
+        "DISTMAN_RUNTIME_BIN_PATH",
+        "${DISTMAN_TARGET_PATH}/{platform}/{arch}/python{python_version}/commands",
+    )
+    for version in ("3.11", "3.12"):
+        tag = "cp" + version.replace(".", "")
+        command_wheel(wheels, tag=f"{tag}-{tag}-win_amd64")
+        assert invoke(wheels, "sample", "--platform", "windows", "--python", version) == 0
+    boundary = root / "tools/sample/1.0"
+    for version in ("3.11", "3.12"):
+        runtime = boundary / "windows/x86_64" / f"python{version}"
+        assert (runtime / "commands/sample-cli.exe").read_bytes().startswith(b"MZ")
+        assert (runtime / "lib/python/sample.py").exists()
+        assert not (runtime / "lib/python/bin").exists()
+        records = list(
+            csv.reader(
+                (runtime / "lib/python/sample-1.0.dist-info/RECORD").read_text().splitlines()
+            )
+        )
+        script_path = next(row[0] for row in records if "sample-cli" in row[0])
+        assert (runtime / "lib/python" / script_path).read_bytes().startswith(b"MZ")
+
+
+def test_custom_runtime_bin_retains_other_package_libraries(
+    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A common runtime bin validates companion libraries outside the requested package.
+
+    :param installation: Isolated deployment root and offline wheel directory.
+    :param monkeypatch: Fixture selecting a common scripts root.
+    :return: None.
+    """
+    root, wheels = installation
+    monkeypatch.setenv("DISTMAN_RUNTIME_BIN_PATH", "{TOOLS_ROOT}/commands")
+    command_wheel(wheels, tag="cp311-cp311-win_amd64")
+    command_wheel(wheels, name="other", command="other-cli", tag="cp311-cp311-win_amd64")
+    options = ("--platform", "windows", "--python", "3.11")
+    assert invoke(wheels, "sample", *options) == 0
+    sample_root = root / "tools/sample/1.0"
+    original = os.readlink(sample_root)
+    assert invoke(wheels, "other", *options) == 0
+    assert os.readlink(sample_root) == original
+    assert (root / "tools/commands/sample-cli.exe").exists()
+    assert (root / "tools/commands/other-cli.exe").exists()
+
+
+def test_mismatched_shared_revisions_fail_before_publication(
+    installation: Tuple[Path, Path]
+) -> None:
+    """Detect an independently rolled-back bin before installing another package.
+
+    :param installation: Isolated deployment root and offline wheel directory.
+    :return: None.
+    """
+    root, wheels = installation
+    command_wheel(wheels)
+    assert invoke(wheels, "sample==1.0") == 0
+    library, scripts = root / "tools/lib/python", root / "tools/bin"
+    old_bin = os.readlink(scripts)
+    command_wheel(wheels, version="2.0")
+    assert invoke(wheels, "sample==2.0") == 0
+    deployment.replace_link(scripts, old_bin)
+    before = (os.readlink(library), os.readlink(scripts))
+    command_wheel(wheels, name="other", command="other-cli")
+    assert invoke(wheels, "other") == 1
+    assert (os.readlink(library), os.readlink(scripts)) == before
+
+
 def test_entry_point_is_installed(installation: Tuple[Path, Path]) -> None:
     """Generate a usable console script with the wheel installer."""
     root, wheels = installation
@@ -410,9 +628,9 @@ def test_entry_point_is_installed(installation: Tuple[Path, Path]) -> None:
     )
     assert invoke(wheels, "sample") == 0
     target = root / "tools/lib/python"
-    script = target / "bin" / ("sample-cli.exe" if os.name == "nt" else "sample-cli")
+    script = root / "tools/bin" / ("sample-cli.exe" if os.name == "nt" else "sample-cli")
     assert script.exists()
-    command = [str(script)] if os.name == "nt" else [sys.executable, str(script)]
+    command = [str(script)]
     process = subprocess.run(
         command,
         env=dict(os.environ, PYTHONPATH=str(target)),
@@ -535,6 +753,40 @@ def test_positional_packaging_project(installation: Tuple[Path, Path], tmp_path:
     previous = os.readlink(target)
     assert invoke(wheels, str(project)) == 0
     assert os.readlink(target) == previous
+
+
+def test_packaging_project_installs_entrypoints_without_dist_json(
+    installation: Tuple[Path, Path], tmp_path: Path
+) -> None:
+    """A locally built wheel receives ordinary library and bin policy automatically.
+
+    :param installation: Isolated deployment root and offline wheel directory.
+    :param tmp_path: Directory receiving the local packaging project.
+    :return: None.
+    """
+    root, wheels = installation
+    project = make_project(tmp_path / "project")
+    wheel(
+        project,
+        "local-project",
+        files={
+            "local_project.py": b"def main():\n    print('local-command')\n",
+            "local_project-1.0.dist-info/entry_points.txt": (
+                b"[console_scripts]\n" b"local-cli = local_project:main\n"
+            ),
+        },
+    )
+    assert not (project / "dist.json").exists()
+    assert invoke(wheels, str(project)) == 0
+    command = root / "tools/bin" / ("local-cli.exe" if os.name == "nt" else "local-cli")
+    process = subprocess.run(
+        [str(command)],
+        env=dict(os.environ, PYTHONPATH=str(root / "tools/lib/python")),
+        text=True,
+        capture_output=True,
+    )
+    assert process.returncode == 0, process.stderr
+    assert process.stdout.strip() == "local-command"
 
 
 def test_requirements_only_project(
@@ -786,3 +1038,75 @@ def test_invalid_custom_targets_block_dependency_publication(
     )
     assert invoke(wheels, str(project)) == 1
     assert not (root / "tools/lib/python").exists()
+
+
+@pytest.mark.parametrize("custom", [False, True])
+def test_unrelated_install_retains_runtime_dependencies(
+    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, custom: bool
+) -> None:
+    """Validate transitive installed runtime dependencies without republishing them.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :param monkeypatch: Fixture for selecting a custom deployment template.
+    :param custom: Whether version lookup must respect a custom path layout.
+    :return: None.
+    """
+    root, wheels = installation
+    if custom:
+        monkeypatch.setenv(
+            "DISTMAN_TARGET_PATH", "{TOOLS_ROOT}/packages[local]/{version}/{package}"
+        )
+    tag = "cp311-cp311-manylinux_2_17_x86_64"
+    wheel(wheels, "native", tag=tag, requires=["support>=1"])
+    wheel(wheels, "support", tag=tag)
+    wheel(wheels, "app", requires=["native>=1"])
+    wheel(wheels, "unrelated")
+    args = ("--platform", "linux", "--arch", "x86_64", "--python", "3.11")
+    assert invoke(wheels, "app", *args) == 0
+    boundaries = [
+        root / (f"tools/packages[local]/1.0/{name}" if custom else f"tools/{name}/1.0")
+        for name in ("native", "support")
+    ]
+    original = [boundary.resolve() for boundary in boundaries]
+    assert invoke(wheels, "unrelated", *args, "--force") == 0
+    assert [boundary.resolve() for boundary in boundaries] == original
+    assert (root / "tools/lib/python/unrelated").is_dir()
+
+
+@pytest.mark.parametrize("failure", ["missing", "incompatible", "ambiguous"])
+def test_retained_runtime_dependency_failures_do_not_publish(
+    installation: Tuple[Path, Path], failure: str, capsys: pytest.CaptureFixture
+) -> None:
+    """Do not hide missing, conflicting, or ambiguous retained dependencies.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :param failure: Retained dependency condition to exercise.
+    :param capsys: Captured CLI diagnostics.
+    :return: None.
+    """
+    root, wheels = installation
+    tag = "cp311-cp311-manylinux_2_17_x86_64"
+    wheel(wheels, "native", tag=tag)
+    wheel(wheels, "app", requires=["native<2"])
+    wheel(wheels, "unrelated")
+    args = ("--platform", "linux", "--arch", "x86_64", "--python", "3.11")
+    assert invoke(wheels, "app", *args) == 0
+    requested = ["unrelated"]
+    if failure == "missing":
+        (root / "tools/native/1.0").unlink()
+    elif failure == "incompatible":
+        wheel(wheels, "native", version="2.0", tag=tag)
+        requested.append("native==2.0")
+    else:
+        wheel(wheels, "native", version="1.1", tag=tag)
+        assert invoke(wheels, "native==1.1", *args) == 0
+    shared = root / "tools/lib/python"
+    original = shared.resolve()
+    capsys.readouterr()
+    assert invoke(wheels, *requested, *args) == 1
+    assert shared.resolve() == original
+    assert not (shared / "unrelated").exists()
+    output = capsys.readouterr().out
+    assert (
+        "Multiple installed versions" if failure == "ambiguous" else "requires native<2"
+    ) in output

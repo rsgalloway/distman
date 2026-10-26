@@ -35,19 +35,22 @@ import argparse
 import tempfile
 from collections import defaultdict
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
-from packaging.utils import parse_wheel_filename
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name, parse_wheel_filename
 
 from distman import util
 from distman.deployment import publish_directories
 from distman.install import InstallError
-from distman.install.models import Changes, Groups, InstalledArtifact, Selection
+from distman.install.models import Changes, Groups, InstalledArtifact, InstallState, Selection
 from distman.install.ownership import (
     check_dependencies,
+    check_script_pairs,
     compose,
     inventory,
     locks,
+    marker_environment,
     read_state,
     same_state,
 )
@@ -58,7 +61,7 @@ from distman.install.projects import (
     prepare_arguments,
 )
 from distman.install.targets import Target, expand_targets
-from distman.install.wheels import acquire, build_project, stage
+from distman.install.wheels import acquire, build_project, stage, staged_path
 from distman.policy import Policy
 
 
@@ -98,6 +101,11 @@ def collect(
                 pure=artifact.pure,
                 targets=[target.label],
                 acquisition="pip resolution report",
+                library_boundary="",
+                library_path="",
+                scripts_path="",
+                component="library",
+                separate_scripts=False,
             )
             if artifact.name == excluded_name:
                 print(f"Project {artifact.name}: publication is owned by dist.json")
@@ -123,31 +131,175 @@ def collect(
                 ) from exc
             if ".." in prefix.parts or ".." in destination.parts:
                 raise InstallError("Installation paths must not contain '..'")
+            scripts_root = policy.path(
+                "DISTMAN_SHARED_BIN_PATH" if artifact.pure else "DISTMAN_RUNTIME_BIN_PATH",
+                artifact,
+                target,
+            )
+            if ".." in scripts_root.parts or scripts_root in destination.parents:
+                raise InstallError(f"Invalid or overlapping scripts root: {scripts_root}")
+            external_scripts = (
+                scripts_root != destination and destination not in scripts_root.parents
+            )
+            provenance.update(
+                library_boundary=str(destination),
+                library_path=str(import_root),
+                scripts_path=str(scripts_root),
+                separate_scripts=external_scripts,
+            )
             key = artifact.name if artifact.pure else f"{artifact.name}@{prefix.as_posix()}"
-            identity = (provenance["sha256"], target.platform)
+            identity = (
+                provenance["sha256"],
+                target.platform,
+                import_root,
+                scripts_root,
+                destination,
+            )
             if identity not in payloads:
                 payload = temporary / f"wheel-{len(payloads)}"
-                stage(artifact, payload, target)
+                stage(artifact, payload, target, import_root, scripts_root, destination)
                 payloads[identity] = payload
             payload = payloads[identity]
-            previous = groups[destination].get(key)
-            if previous:
-                if previous[2]["sha256"] != provenance["sha256"] or inventory(
-                    previous[1]
-                ) != inventory(payload):
-                    raise InstallError(
-                        f"Incompatible artifacts share {import_root}: {artifact.name}. "
-                        "Use narrower runtime selection or separate configured paths."
-                    )
-                previous[2]["targets"] = sorted(set(previous[2]["targets"] + [target.label]))
-                continue
-            groups[destination][key] = (key, payload, provenance, prefix)
+            pieces = [(destination, staged_path(payload, destination), key, "library")]
+            if external_scripts:
+                pieces.append((scripts_root, staged_path(payload, scripts_root), key, "scripts"))
+            for boundary, contents, owner, component in pieces:
+                selection = provenance.copy()
+                selection["component"] = component
+                previous = groups[boundary].get(owner)
+                if previous:
+                    if (
+                        previous[2]["sha256"] != selection["sha256"]
+                        or previous[2]["component"] != component
+                        or previous[2]["library_path"] != selection["library_path"]
+                        or inventory(previous[1]) != inventory(contents)
+                    ):
+                        raise InstallError(
+                            f"Incompatible artifacts share {boundary}: {artifact.name}. "
+                            "Use narrower runtime selection or separate configured paths."
+                        )
+                    previous[2]["targets"] = sorted(set(previous[2]["targets"] + [target.label]))
+                    continue
+                groups[boundary][owner] = (owner, contents, selection, Path("."))
+    include_dependencies(groups, policy, targets)
     destinations = sorted(groups)
     for i, destination in enumerate(destinations):
         for other in destinations[i + 1 :]:
             if destination in other.parents or other in destination.parents:
                 raise InstallError(f"Overlapping deployment targets: {destination} and {other}")
     return groups, project_records
+
+
+def include_companions(groups: Groups, states: Optional[Dict[Path, InstallState]] = None) -> None:
+    """Include existing paired roots in locking and validation without adding artifacts.
+
+    A custom bin can serve multiple independent library roots. Their receipts
+    must all be checked when updating that bin, even if they are not being upgraded.
+
+    :param groups: Publication groups to extend with read-only companion boundaries.
+    :param states: Optional cache of integrity-checked receipts during discovery.
+    :return: None; empty addition groups are inserted for existing companions.
+    :raises InstallError: If recorded companions are invalid or their payloads are corrupt.
+    """
+    states = {} if states is None else states
+    pending = list(groups)
+    visited = set()
+    while pending:
+        destination = pending.pop()
+        if destination in visited:
+            continue
+        visited.add(destination)
+        if destination not in states:
+            states[destination] = read_state(destination)
+        for record in states[destination]["artifacts"].values():
+            if not record.get("separate_scripts"):
+                continue
+            for field in ("library_boundary", "scripts_path"):
+                boundary = Path(record[field])
+                if not boundary.is_absolute() or ".." in boundary.parts:
+                    raise InstallError(f"Invalid paired deployment boundary: {boundary}")
+                if boundary not in groups:
+                    groups[boundary] = {}
+                    pending.append(boundary)
+
+
+def include_dependencies(groups: Groups, policy: Policy, targets: Sequence[Target]) -> None:
+    """Include retained dependency roots for validation without republishing them.
+
+    Search only configured package boundaries, following requirements transitively.
+    Planned versions remain authoritative; discovery cannot override a conflict.
+    All discovered roots are read again under the publication locks.
+
+    :param groups: Planned additions, extended with read-only dependency boundaries.
+    :param policy: Resolved path templates used to locate installed distributions.
+    :param targets: Requested runtimes, supplemented by retained receipt runtimes.
+    :return: None; groups is updated in place.
+    :raises InstallError: If receipts are corrupt or installed candidates are ambiguous.
+    """
+    states: Dict[Path, InstallState] = {}
+    runtimes = {target.label: target for target in targets}
+    while True:
+        include_companions(groups, states)
+        records = []
+        for root, additions in groups.items():
+            effective = dict(states[root]["artifacts"])
+            effective.update({key: addition[2] for key, addition in additions.items()})
+            records.extend(effective.values())
+        for record in records:
+            for label in record["targets"]:
+                system, arch, python = label.split("-")
+                runtimes.setdefault(label, Target(system, arch, python[2] + "." + python[3:]))
+        discovered = set()
+        for target in runtimes.values():
+            selected = {
+                record["name"]: record
+                for record in records
+                if record.get("component") != "scripts"
+                and (record["pure"] or target.label in record["targets"])
+            }
+            requirements = defaultdict(list)
+            for record in selected.values():
+                for text in record["requires_dist"]:
+                    requirement = Requirement(text)
+                    if requirement.marker:
+                        if any(
+                            field in str(requirement.marker)
+                            for field in ("platform_release", "platform_version")
+                        ):
+                            raise InstallError(f"Cannot evaluate target OS release marker: {text}")
+                        if not requirement.marker.evaluate(marker_environment(target)):
+                            continue
+                    name = canonicalize_name(requirement.name)
+                    if name not in selected:
+                        requirements[name].append(requirement)
+            for name, constraints in requirements.items():
+                candidates = set()
+                for root in policy.installed_roots(name, target):
+                    if root in groups:
+                        continue
+                    if root not in states:
+                        states[root] = read_state(root)
+                    for record in states[root]["artifacts"].values():
+                        if (
+                            record["name"] == name
+                            and record.get("component") != "scripts"
+                            and (record["pure"] or target.label in record["targets"])
+                            and all(
+                                req.specifier.contains(record["version"], prereleases=True)
+                                for req in constraints
+                            )
+                        ):
+                            candidates.add(root)
+                if len(candidates) > 1:
+                    raise InstallError(
+                        f"Multiple installed versions satisfy {name} for {target.label}; "
+                        "include an explicit package version in the install request"
+                    )
+                discovered.update(candidates)
+        if not discovered:
+            return
+        for root in sorted(discovered):
+            groups[root] = {}
 
 
 def plan(groups: Groups, temporary: Path, force: bool) -> Tuple[Changes, List[InstalledArtifact]]:
@@ -162,16 +314,27 @@ def plan(groups: Groups, temporary: Path, force: bool) -> Tuple[Changes, List[In
     changes, records = [], []
     for number, (destination, additions) in enumerate(groups.items()):
         current = read_state(destination)
+        if not additions:
+            records.extend(current["artifacts"].values())
+            continue
         for key, _, provenance, _ in additions.values():
             old = current["artifacts"].get(key)
             if old:
+                if any(
+                    old.get(field, provenance[field]) != provenance[field]
+                    for field in ("library_path", "scripts_path")
+                ):
+                    raise InstallError(
+                        "Changing an existing library/scripts layout requires "
+                        f"a separate deployment root: {destination}"
+                    )
                 provenance["targets"] = sorted(set(old["targets"] + provenance["targets"]))
             before = old["version"] if old else "absent"
             print(f"{key}: {before} -> {provenance['version']} at {destination}")
         staged = temporary / f"revision-{number}"
         state = compose(destination, staged, list(additions.values()))
         records.extend(state["artifacts"].values())
-        if force or not same_state(destination, state):
+        if (force and additions) or not same_state(destination, state):
             changes.append((staged, destination))
         else:
             print(f"Unchanged: {destination}")
@@ -218,6 +381,7 @@ def install(args: argparse.Namespace) -> int:
         with locks(groups, args.dryrun):
             changes, records = plan(groups, temporary, args.force)
             records.extend(project_records)
+            check_script_pairs(records)
             check_targets = {target.label: target for target in targets}
             for record in records:
                 for label in record["targets"]:

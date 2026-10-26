@@ -14,9 +14,9 @@ Follow the [example instructions](https://github.com/rsgalloway/distman/blob/fea
 for preview, installation, import checks, and command execution. These links target
 the feature branch while the examples await merge.
 
-Both base layouts add `${TOOLS_ROOT}/bin` to PATH, plus the current shared wheel
-script directory `${TOOLS_ROOT}/lib/python/bin`. Scripts have not moved yet.
-They do not depend on the proposed recipe catalog or script-path settings. The flat
+Both base layouts add the configured shared bin directory to PATH and shared
+library directory to PYTHONPATH. The NumPy stack adds its runtime-specific bin
+and library directories. These examples do not require the proposed recipe catalog. The flat
 layout is dedicated to one platform, architecture, and Python runtime; the
 separate NumPy example demonstrates package/version/runtime binary activation.
 

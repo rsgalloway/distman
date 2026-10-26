@@ -1,6 +1,6 @@
 # Installation roadmap: recipes and runtime environments
 
-Status: proposed follow-up to the October 19 installation MVP. Updated October 22,
+Status: proposed follow-up to the October 19 installation MVP. Updated October 25,
 2026. This document extends `distman-mvp-planning_v1.md`; existing installation
 behavior remains supported. Recipe acquisition and catalog commands below are not
 implemented. This plan replaces the earlier suggestion to infer package installation
@@ -133,7 +133,7 @@ root per runtime. Do not require long per-package PATH and PYTHONPATH lists for
 the default shared layout. Recipes must honor configured paths, not assume a
 single deployment layout.
 
-Proposed script locations, alongside the existing import layout:
+Implemented script locations, alongside the existing import layout:
 
 | Payload | Import directory | Scripts directory |
 |---|---|---|
@@ -144,9 +144,11 @@ Proposed script locations, alongside the existing import layout:
 it as `${DISTMAN_TARGET_PATH}` avoids repeated layout definitions: envstack expands
 the variable first, then pathbase formats package/runtime tokens. The runtime
 library template uses this composition; recursive pathbase formatting is not needed.
-`DISTMAN_SCRIPTS_PATH` is a proposed control, not an implemented setting. Its final
-schema must support separate pure and binary defaults and user overrides; a single
-unconditional template cannot express both defaults without additional policy.
+`DISTMAN_SHARED_BIN_PATH` and `DISTMAN_RUNTIME_BIN_PATH` select scripts from shared
+and runtime-specific wheels respectively. They apply to generated console/GUI
+entrypoints and wheel-provided scripts, including local packaging projects without
+dist.json. Libraries, scripts, metadata, resources, and other wheel contents do not
+require an additional manifest.
 
 Runtime environment files add the resolved import directory to PYTHONPATH and the
 resolved scripts directory to PATH. For shared pure packages, a common environment
@@ -161,14 +163,47 @@ Loading distman.env as installation policy does not activate the shell. The curr
 repository distman.env adds only `${DEPLOY_ROOT}/bin` and
 `${DEPLOY_ROOT}/lib/python`; it does not yet add the proposed shared tools paths.
 
-Implementation boundary: scripts currently live inside each import root's `bin`,
-so the existing shared revision already includes both libraries and scripts.
-Moving them to a sibling tools-level bin requires a publication design preserving
-that relationship, ownership, upgrade removal, and rollback. Do not simply publish
-TOOLS_ROOT as one managed revision: default binary package roots also live beneath
-it and would overlap. Existing legacy shims in a shared bin also need explicit
-coexistence rules. Until that work lands, retain current defaults and document
-scripts at the current location.
+Implementation boundary: shared libraries and bins are separate managed revisions,
+validated and published together with rollback on caught activation failures.
+Their receipts link the artifacts and detect mismatched library/bin versions.
+Manual rollback must select matching revisions of both roots. Runtime scripts
+inside DISTMAN_TARGET_PATH share the package revision directly. Cross-root
+activation is not globally atomic or durable across process termination.
+Existing unmanaged bin directories and changing previously recorded layout mappings
+are rejected. General migration and coexistence with legacy bin shims remain future
+work. TOOLS_ROOT itself is not one managed boundary because binary package roots
+also live beneath it.
+
+## Named environments and conflict recovery (next branch milestone)
+
+After shared/runtime bin deployment, design an explicit isolated-install and
+activation workflow. Candidate interfaces are `distman install --env NAME` and
+an environment-creation command; settle the CLI before implementation. The existing
+reserved --env flag is not yet functional and must not silently change meanings.
+
+Distman installs and validates files; envstack composes ordinary environment
+variables. Named environments should use separate managed library/bin roots and
+produce an envstack file for those roots, with no third user-authored manifest.
+Record ownership in internal deployment receipts, keep distman.env as path policy,
+and honor a project's optional dist.json custom targets.
+
+A conflict with retained shared dependencies must leave the deployment unchanged,
+report the requested and conflicting versions, and suggest an explicit isolated
+installation. Never silently isolate or choose another environment. The resulting
+envstack file must be discoverable through a documented ENVPATH configuration and
+come with an exact activation/launch command. Support direct PyPI installs and
+local projects as well as future recipes; users must not author path templates
+per dependency.
+
+Specify environment names/locations, root overrides, existing-file ownership,
+activation discovery, generated-config updates, and coordinated rollback.
+Do not modify studio default.env or rely on missing-stack fallback implicitly.
+A distinct root alone is not interpreter isolation: inherited shared PYTHONPATH
+entries and interpreter site-packages can still expose incompatible dependencies.
+Decide whether the workflow filters inherited paths or optionally provisions a
+virtual environment, and state its isolation guarantees. Test conflict recovery,
+imports and entrypoints, explicit interpreter selection, and unchanged shared
+packages before considering this milestone complete.
 
 ## Replacing pipeline-tools scaffolding
 

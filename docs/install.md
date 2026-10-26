@@ -81,6 +81,8 @@ variable expansion without assigning them package or deployment semantics.
 | `TOOLS_ROOT` | Base directory used by the default package templates | `${DEPLOY_ROOT}/tools` |
 | `DISTMAN_SHARED_LIB_PATH` | Shared library import root for platform-independent wheels | See templates below |
 | `DISTMAN_RUNTIME_LIB_PATH` | Import path for a package/runtime variant | See templates below |
+| `DISTMAN_SHARED_BIN_PATH` | Executables from platform-independent wheels | `${TOOLS_ROOT}/bin` |
+| `DISTMAN_RUNTIME_BIN_PATH` | Executables for a package/runtime variant | See templates below |
 | `DISTMAN_TARGET_PATH` | Versioned publication boundary containing binary variants | See templates below |
 
 Policy is resolved in this order, with later values taking precedence:
@@ -93,7 +95,7 @@ Policy is resolved in this order, with later values taking precedence:
 4. Envstack expands the combined values; [pathbase](https://rsgalloway.github.io/pathbase/) formats the package templates.
 
 `DISTMAN_*` is the policy override namespace; arbitrary names in that namespace
-do not automatically gain behavior. The three path variables above are the
+do not automatically gain behavior. The five path variables above are the
 installer's recognized layout controls. Other variables can be referenced by
 custom templates without becoming built-in settings.
 
@@ -134,6 +136,8 @@ all:
   DISTMAN_TARGET_PATH: '{TOOLS_ROOT}/{package}/{version}'
   DISTMAN_SHARED_LIB_PATH: ${TOOLS_ROOT}/lib/python
   DISTMAN_RUNTIME_LIB_PATH: '${DISTMAN_TARGET_PATH}/{platform}/{arch}/python{python_version}/lib/python'
+  DISTMAN_SHARED_BIN_PATH: ${TOOLS_ROOT}/bin
+  DISTMAN_RUNTIME_BIN_PATH: '${DISTMAN_TARGET_PATH}/{platform}/{arch}/python{python_version}/bin'
 ```
 
 Envstack expands `${DISTMAN_TARGET_PATH}` into the runtime library template first;
@@ -168,22 +172,37 @@ Paths must be absolute. Packages can share an identical publication root, but
 distinct roots must not nest inside one another. Shared roots require compatible
 package versions and contents across selected runtimes.
 
-Add the shared and selected binary import roots to your runtime `PYTHONPATH`.
-Wheel scripts currently live in the import root's `bin` directory and require a
-matching Python interpreter on `PATH`. With the default pure layout, add
-`${TOOLS_ROOT}/lib/python/bin` to `PATH` and `${TOOLS_ROOT}/lib/python` to
-`PYTHONPATH`. Installation policy loading does not activate a shell environment.
+Add the selected library roots to `PYTHONPATH` and bin directories to `PATH`.
+POSIX launchers use `python3` from PATH; Windows launchers use `python.exe`.
+Installation policy loading does not activate the parent shell. A shared runtime
+stack can use:
 
-The default shared pure-Python root represents one compatible environment: its
-packages and entrypoints share revision history, with one active version of each
-distribution. All consumers must accept that shared selection. Metadata checks
-help enforce compatibility but do not guarantee application behavior. Use custom
-per-runtime or package/version paths when a shared selection is unsuitable.
+```yaml
+all:
+  PYTHONPATH: ${DISTMAN_SHARED_LIB_PATH}:${PYTHONPATH}
+  PATH: ${DISTMAN_SHARED_BIN_PATH}:${PATH}
+```
 
-A separate `${TOOLS_ROOT}/bin` and configurable script templates are
-[planned](install-planning.md#shared-libraries-scripts-and-activation-policy), not
-implemented. The default remains shared pure libraries and commands; moving scripts
-must preserve their coordinated upgrade and rollback behavior.
+Generated console/GUI entrypoints and wheel-provided scripts use the bin templates.
+Package resources, metadata, bundled native libraries, headers, and other wheel
+data retain their library-side layout. No dist.json or recipe is needed for these
+standard wheel contents, including a locally built project's wheel.
+
+Shared libraries and commands represent one compatible environment, with one
+active version per distribution. Both managed roots are validated and published
+in the same operation; caught activation failures restore previous links. Changes
+to their artifacts produce corresponding revisions. Windows and POSIX launchers
+cannot share a single command payload; use separate runtime paths when necessary.
+Metadata checks do not guarantee application compatibility.
+
+Existing unmanaged bin directories (including those populated by legacy `dist`)
+are rejected rather than overwritten. Choose an empty managed destination. Changing
+an already-recorded library/bin mapping requires a separate deployment root;
+automatic migration between arbitrary layouts is not implemented. Earlier managed
+installs with scripts under lib/python/bin can migrate on reinstall: their owned
+old scripts are removed and the new locations are recorded. Migration affects only
+reinstalled distributions; migrate all command providers before removing the old
+script directory from runtime PATH.
 
 ## distman.env examples
 
@@ -218,9 +237,12 @@ all:
   DISTMAN_SHARED_LIB_PATH: ${TOOLS_ROOT}/lib/python
   DISTMAN_RUNTIME_LIB_PATH: '{TOOLS_ROOT}/lib/python'
   DISTMAN_TARGET_PATH: '{TOOLS_ROOT}/lib/python'
+  DISTMAN_SHARED_BIN_PATH: ${TOOLS_ROOT}/bin
+  DISTMAN_RUNTIME_BIN_PATH: ${DISTMAN_SHARED_BIN_PATH}
 ```
 
-All three templates must match so the installer composes one shared revision.
+The library and target templates match, while both bin templates select the same
+shared command root. Libraries and commands publish together as a pair of revisions.
 Use this root for exactly one platform, architecture, and Python runtime, for example:
 
 ```bash
@@ -229,7 +251,8 @@ distman install numpy --platform linux --arch x86_64 --python 3.11 --dryrun
 
 Add `/etc/tools/lib/python` to the application's `PYTHONPATH`. Later installs
 preserve unrelated managed packages, and rollback restores the entire shared
-root. A pre-existing unmanaged directory cannot be adopted automatically.
+environment (both library and bin revisions). A pre-existing unmanaged directory
+cannot be adopted automatically.
 
 ### One flat root per runtime
 
@@ -242,6 +265,8 @@ all:
   DISTMAN_SHARED_LIB_PATH: '{TOOLS_ROOT}/{platform}/{arch}/python{python_version}/lib/python'
   DISTMAN_RUNTIME_LIB_PATH: '{TOOLS_ROOT}/{platform}/{arch}/python{python_version}/lib/python'
   DISTMAN_TARGET_PATH: '{TOOLS_ROOT}/{platform}/{arch}/python{python_version}/lib/python'
+  DISTMAN_SHARED_BIN_PATH: '{TOOLS_ROOT}/{platform}/{arch}/python{python_version}/bin'
+  DISTMAN_RUNTIME_BIN_PATH: ${DISTMAN_SHARED_BIN_PATH}
 ```
 
 For example, Linux x86_64 Python 3.11 packages share
@@ -256,8 +281,18 @@ installs create no revision unless forced. Upgrades preserve unrelated managed
 packages and reject file collisions, modified installations, and unmanaged
 destinations; `--force` does not bypass these checks.
 
+Dependency checks include retained packages in separate runtime roots located
+through the configured path templates. These roots are validated without being
+republished. If multiple installed versions satisfy a dependency, include an
+explicit package version in the install request. Missing or incompatible
+dependencies stop the install before publication.
+
 Use `dist`'s version options with a `dist.json` target to select an older revision.
-Rolling back a shared import root rolls back all packages in that revision.
+Shared libraries and shared bins have separate revision symlinks. Restore matching
+revisions of both when rolling back the shared environment; moving just one link
+can leave commands and libraries inconsistent. Subsequent installs check their
+paired receipts. Runtime libraries and bins under DISTMAN_TARGET_PATH roll back
+through that single package boundary.
 
 Activation is atomic per root, not across roots. Local `dist.json` publication is
 separate: a later target failure can leave installed dependencies in place.

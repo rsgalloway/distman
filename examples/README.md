@@ -12,10 +12,9 @@ requiring the proposed recipe catalog.
 
 ## Shared PATH setup
 
-Both base layouts explicitly add `${TOOLS_ROOT}/bin` to PATH. They also add
-`${TOOLS_ROOT}/lib/python/bin`, where the installer currently writes shared wheel
-entrypoints. Adding tools/bin does not move those scripts: sibling script
-publication is still planned. Both layouts add the shared import root to PYTHONPATH.
+Both base layouts add DISTMAN_SHARED_BIN_PATH (default `${TOOLS_ROOT}/bin`) to
+PATH and DISTMAN_SHARED_LIB_PATH to PYTHONPATH. The installer writes wheel
+entrypoints into those configured bin directories.
 
 The default example contains no package-specific settings. NumPy is an optional,
 separate example; it does not get included automatically by default.env.
@@ -55,7 +54,8 @@ envstack -- python -c "import packaging; print(packaging.__file__)"
 
 Both pure and binary packages use `${TOOLS_ROOT}/lib/python`. No package-specific
 environment file is needed. Use exactly one platform, architecture, and Python
-runtime per root. Packages form one compatible environment and roll back together.
+runtime per root. Packages form one compatible environment; restore matching library and bin
+revisions when rolling it back.
 Change TOOLS_ROOT once in default.env to relocate both install and activation paths.
 
 ## Default
@@ -104,12 +104,12 @@ runs before activation because command substitution inside envstack's default
 stack can recursively reload that stack.
 
 The include chain is `numpy → tools → distman`; the base default stack remains
-package-independent. NumPy adds its resolved import root to PYTHONPATH and that
-root's bin directory to PATH. For Linux x86_64 Python 3.11:
+package-independent. NumPy adds its resolved import root to PYTHONPATH and the sibling runtime
+bin directory to PATH. For Linux x86_64 Python 3.11:
 
 ```text
 ${TOOLS_ROOT}/numpy/2.2.6/linux/x86_64/python3.11/lib/python
-${TOOLS_ROOT}/numpy/2.2.6/linux/x86_64/python3.11/lib/python/bin
+${TOOLS_ROOT}/numpy/2.2.6/linux/x86_64/python3.11/bin
 ```
 
 The same NUMPY_VERSION selects acquisition and activation. Changing TOOLS_ROOT
@@ -118,12 +118,9 @@ updating numpy.env to match; generating this integration is future recipe work.
 An application can include numpy when it needs it, or launch through the explicit
 numpy stack as shown. Activation does not install missing builds.
 
-## Current launcher limitation
-
-The current POSIX wheel launcher incorrectly quotes `/usr/bin/env python3` as one
-executable. Until fixed, use a package's module interface, as shown above, or invoke
-a generated script explicitly with the intended interpreter. A correct PATH alone
-does not fix that launcher issue.
+Generated POSIX commands select `python3` from PATH; put the application's matching
+interpreter there. Windows commands select `python.exe`. For example, after NumPy
+activation, `envstack numpy -- f2py -v` runs its installed entrypoint directly.
 
 ## Adopt a layout
 

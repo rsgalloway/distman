@@ -34,7 +34,9 @@
 import argparse
 import email
 import hashlib
+import io
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -42,13 +44,16 @@ import zipfile
 from dataclasses import dataclass
 from email.message import Message
 from pathlib import Path, PurePosixPath
-from typing import FrozenSet, List, Optional, Sequence, Set
+from typing import BinaryIO, FrozenSet, Iterable, List, Optional, Sequence, Set, Tuple, Union
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 from installer import install
 from installer.destinations import SchemeDictionaryDestination
 from installer.exceptions import InstallerError
+from installer.records import RecordEntry
+from installer.scripts import Script
 from installer.sources import WheelFile
+from installer.utils import construct_record_file
 from packaging.specifiers import SpecifierSet
 from packaging.tags import Tag
 from packaging.utils import canonicalize_name, parse_wheel_filename
@@ -317,26 +322,123 @@ def build_project(args: argparse.Namespace, directory: Path) -> Path:
     return wheels[0]
 
 
-def stage(artifact: Artifact, directory: Path, target: Target) -> None:
-    """Install one artifact; paths are relative to its eventual import root.
+class WheelDestination(SchemeDictionaryDestination):
+    """Stage complete wheels with portable launchers and external-script records.
 
-    Ancillary schemes stay below that root so a shared-root revision can switch
-    all wheel files together. RECORD contains the resulting relative paths.
-
-    :param artifact: Validated wheel whose complete installation schemes will be preserved.
-    :param directory: Empty staging import root; ancillary schemes are placed beneath it.
-    :param target: Runtime used to select script launcher and interpreter conventions.
-    :return: None.
-    :raises InstallError: If the wheel installer rejects the archive or its RECORD.
-    :raises OSError: If a staged file cannot be written.
+    :ivar external_scripts: Whether scripts live outside the library publication boundary.
     """
-    schemes = {"purelib": ".", "platlib": ".", "headers": "include", "scripts": "bin", "data": "."}
-    destination = SchemeDictionaryDestination(
-        {key: str(directory / value) for key, value in schemes.items()},
+
+    external_scripts: bool = False
+
+    def write_file(
+        self, scheme: str, path: Union[str, os.PathLike], stream: BinaryIO, is_executable: bool
+    ) -> RecordEntry:
+        """Install wheel-provided scripts with executable permissions.
+
+        :param scheme: Wheel installation scheme containing the file.
+        :param path: File path within that scheme.
+        :param stream: Original wheel file bytes.
+        :param is_executable: Executable flag recorded in the source archive.
+        :return: Installed file's hashed RECORD entry.
+        """
+        return super().write_file(scheme, path, stream, is_executable or scheme == "scripts")
+
+    def write_script(self, name: str, module: str, attr: str, section: str) -> RecordEntry:
+        """Generate a launcher using the runtime interpreter available on PATH.
+
+        :param name: Command name declared by the wheel.
+        :param module: Module containing the entrypoint.
+        :param attr: Callable attribute within the module.
+        :param section: Console or GUI script section.
+        :return: Hashed record of the executable written to the scripts scheme.
+        """
+        if self.script_kind != "posix":
+            return super().write_script(name, module, attr, section)
+        script_name, data = Script(name, module, attr, section).generate("python3", "posix")
+        # installer treats its interpreter argument as one executable path, so
+        # supplying '/usr/bin/env python3' there produces an invalid shell wrapper.
+        data = b"#!/usr/bin/env python3\n" + data.partition(b"\n")[2]
+        return self.write_to_fs("scripts", script_name, io.BytesIO(data), is_executable=True)
+
+    def finalize_installation(
+        self, scheme: str, record_file_path: str, records: Iterable[Tuple[str, RecordEntry]]
+    ) -> None:
+        """Write RECORD paths that remain valid across separate revision symlinks.
+
+        :param scheme: Library scheme containing the distribution metadata.
+        :param record_file_path: RECORD path relative to that scheme.
+        :param records: Wheel files and generated launchers to record.
+        :return: None.
+        """
+        if not self.external_scripts:
+            return super().finalize_installation(scheme, record_file_path, records)
+
+        def prefix(file_scheme: str) -> Optional[str]:
+            """Select the installed path prefix for a wheel scheme.
+
+            :param file_scheme: Scheme whose entries are being serialized.
+            :return: Absolute scripts path, relative scheme path, or no prefix.
+            """
+            if file_scheme == scheme:
+                return None
+            if file_scheme == "scripts":
+                # A relative path through '..' would traverse the library's
+                # physical revision directory, not its active logical parent.
+                return Path(self.scheme_dict[file_scheme]).as_posix() + "/"
+            return os.path.relpath(self.scheme_dict[file_scheme], self.scheme_dict[scheme]) + "/"
+
+        with construct_record_file(records, prefix) as stream:
+            self.write_to_fs(scheme, record_file_path, stream, is_executable=False)
+
+
+def staged_path(directory: Path, installed: Path) -> Path:
+    """Map an absolute deployment path into the temporary filesystem image.
+
+    :param directory: Root of the temporary staging filesystem.
+    :param installed: Absolute final deployment path.
+    :return: Corresponding temporary payload path.
+    """
+    return directory / installed.relative_to(installed.anchor)
+
+
+def stage(
+    artifact: Artifact,
+    directory: Path,
+    target: Target,
+    import_root: Path,
+    scripts_root: Path,
+    publication_root: Path,
+) -> None:
+    """Install a wheel into a temporary image of its configured final layout.
+
+    :param artifact: Validated wheel to install completely.
+    :param directory: Temporary filesystem image, never the deployment directory.
+    :param target: Runtime selecting POSIX or Windows launchers.
+    :param import_root: Final library directory used by purelib and platlib schemes.
+    :param scripts_root: Final destination for generated and wheel-provided scripts.
+    :param publication_root: Managed boundary containing the library payload.
+    :return: None.
+    :raises InstallError: If the wheel or its RECORD is invalid.
+    :raises OSError: If staging files cannot be written.
+    """
+    schemes = {
+        "purelib": str(import_root),
+        "platlib": str(import_root),
+        "headers": str(import_root / "include"),
+        "scripts": str(scripts_root),
+        "data": str(import_root),
+    }
+    destination = WheelDestination(
+        schemes,
         interpreter="python.exe" if target.platform == "windows" else "/usr/bin/env python3",
         script_kind="win-amd64" if target.platform == "windows" else "posix",
         bytecode_optimization_levels=(),
+        destdir=str(directory),
     )
+    destination.external_scripts = (
+        scripts_root != publication_root and publication_root not in scripts_root.parents
+    )
+    staged_path(directory, scripts_root).mkdir(parents=True, exist_ok=True)
     try:
         with WheelFile.open(artifact.path) as source:
             source.validate_record()

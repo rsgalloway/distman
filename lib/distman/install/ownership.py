@@ -189,6 +189,29 @@ def marker_environment(target: Target) -> Dict[str, str]:
     return environment
 
 
+def check_script_pairs(records: Iterable[InstalledArtifact]) -> None:
+    """Require paired library/script receipts to describe the same wheel revision.
+
+    :param records: Proposed and retained artifacts from all affected roots.
+    :return: None.
+    :raises InstallError: If independently rolled-back roots disagree or a component is missing.
+    """
+    pairs = {}
+    for record in records:
+        if not record.get("separate_scripts"):
+            continue
+        identity = (record["name"], record["library_path"], record["scripts_path"])
+        pairs.setdefault(identity, {})[record["component"]] = record
+    for identity, components in pairs.items():
+        library = components.get("library")
+        scripts = components.get("scripts")
+        if not library or not scripts or library["sha256"] != scripts["sha256"]:
+            raise InstallError(
+                f"Library and scripts revisions disagree for {identity[0]}; "
+                "restore matching revisions or reinstall the affected package"
+            )
+
+
 def check_dependencies(records: Iterable[InstalledArtifact], target: Target) -> None:
     """Reject broken base dependencies, including retained shared distributions.
 
@@ -204,6 +227,8 @@ def check_dependencies(records: Iterable[InstalledArtifact], target: Target) -> 
     """
     selected = {}
     for record in records:
+        if record.get("component") == "scripts":
+            continue
         if record.get("pure") or target.label in record["targets"]:
             selected[record["name"]] = record
     for record in selected.values():

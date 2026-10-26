@@ -31,10 +31,11 @@
 
 """Resolve optional envstack policy without changing the calling environment."""
 
+import glob
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, List
 
 if TYPE_CHECKING:
     from distman.install.targets import Target
@@ -98,10 +99,42 @@ class Policy:
         :raises KeyError: If the named policy template is absent.
         :raises InstallError: If the result is relative or contains unresolved variable tokens.
         """
+        return self._path(key, artifact.name, artifact.version, target)
+
+    def installed_roots(self, package: str, target: "Target") -> List[Path]:
+        """Find managed package roots using the configured layout across versions.
+
+        :param package: Canonical dependency distribution name.
+        :param target: Runtime supplying platform, architecture, and Python fields.
+        :return: Existing managed boundaries matching the configured path templates.
+        :raises InstallError: If a configured path cannot be resolved safely.
+        """
+        sentinel = "DISTMANVERSIONLOOKUP"
+        roots = set()
+        for key in ("DISTMAN_TARGET_PATH", "DISTMAN_SHARED_LIB_PATH"):
+            path = self._path(key, package, sentinel, target)
+            pattern = glob.escape(str(path)).replace(sentinel, "*")
+            for value in glob.glob(pattern):
+                root = Path(value)
+                if root.is_symlink() and (root / ".distman-install.json").is_file():
+                    roots.add(root)
+        return sorted(roots)
+
+    def _path(self, key: str, package: str, version: str, target: "Target") -> Path:
+        """Format and validate one path from distribution and runtime fields.
+
+        :param key: Policy variable containing the path template.
+        :param package: Canonical distribution name.
+        :param version: Distribution version or discovery placeholder.
+        :param target: Runtime supplying platform, architecture, and Python fields.
+        :return: Absolute resolved deployment path.
+        :raises InstallError: If the path is relative or has unresolved variables.
+        :raises KeyError: If the policy variable is absent.
+        """
         fields = dict(self.values)
         fields.update(
-            package=artifact.name,
-            version=artifact.version,
+            package=package,
+            version=version,
             platform=target.platform,
             arch=target.arch,
             python_version=target.python,

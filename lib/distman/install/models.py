@@ -75,11 +75,21 @@ class Selection(Provenance):
     :ivar pure: Whether the wheel has only platform/ABI-independent tags.
     :ivar targets: Runtime labels sharing this selection.
     :ivar acquisition: Description of the packaging-tool resolution source.
+    :ivar library_boundary: Managed revision root containing the library payload.
+    :ivar library_path: Final import directory for this artifact.
+    :ivar scripts_path: Final executable directory for this artifact.
+    :ivar component: Library payload or separately published scripts payload.
+    :ivar separate_scripts: Whether scripts have their own publication boundary.
     """
 
     pure: bool
     targets: List[str]
     acquisition: str
+    library_boundary: str
+    library_path: str
+    scripts_path: str
+    component: str
+    separate_scripts: bool
 
 
 class InstalledArtifact(Selection):
