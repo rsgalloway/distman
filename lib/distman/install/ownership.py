@@ -189,6 +189,56 @@ def marker_environment(target: Target) -> Dict[str, str]:
     return environment
 
 
+def target_records(
+    records: Iterable[InstalledArtifact], target: Target
+) -> Dict[str, InstalledArtifact]:
+    """Select recorded target installations and their reachable shared dependencies.
+
+    :param records: Receipts for proposed and retained libraries and scripts.
+    :param target: Runtime whose dependency closure is required.
+    :return: Distributions relevant to this runtime, indexed by canonical name.
+    :raises InstallError: If a dependency marker requires unknown OS release data.
+    """
+    available = {
+        record["name"]: record
+        for record in records
+        if record.get("component") != "scripts"
+        and (record["pure"] or target.label in record["targets"])
+    }
+    selected = {
+        name: record for name, record in available.items() if target.label in record["targets"]
+    }
+    pending = list(selected.values())
+    while pending:
+        for requirement in target_requirements(pending.pop(), target):
+            name = canonicalize_name(requirement.name)
+            if name in available and name not in selected:
+                selected[name] = available[name]
+                pending.append(available[name])
+    return selected
+
+
+def target_requirements(record: InstalledArtifact, target: Target) -> Iterator[Requirement]:
+    """Yield base requirements applicable to a selected runtime.
+
+    :param record: Distribution receipt containing declared dependencies.
+    :param target: Runtime supplying known marker values.
+    :yields: Requirements applicable to the runtime.
+    :raises InstallError: If an OS release marker cannot be evaluated.
+    """
+    for text in record["requires_dist"]:
+        requirement = Requirement(text)
+        if requirement.marker:
+            if any(
+                field in str(requirement.marker)
+                for field in ("platform_release", "platform_version")
+            ):
+                raise InstallError(f"Cannot evaluate target OS release marker: {text}")
+            if not requirement.marker.evaluate(marker_environment(target)):
+                continue
+        yield requirement
+
+
 def check_script_pairs(records: Iterable[InstalledArtifact]) -> None:
     """Require paired library/script receipts to describe the same wheel revision.
 
@@ -225,12 +275,7 @@ def check_dependencies(records: Iterable[InstalledArtifact], target: Target) -> 
     :raises InstallError: If a dependency is missing/incompatible or a required OS marker is
         unknown.
     """
-    selected = {}
-    for record in records:
-        if record.get("component") == "scripts":
-            continue
-        if record.get("pure") or target.label in record["targets"]:
-            selected[record["name"]] = record
+    selected = target_records(records, target)
     for record in selected.values():
         if record["pure"]:
             tags = parse_wheel_filename(record["wheel"])[3]
@@ -238,20 +283,12 @@ def check_dependencies(records: Iterable[InstalledArtifact], target: Target) -> 
                 target.python + ".0", prereleases=True
             ):
                 raise InstallError(f"Shared {record['name']} is incompatible with {target.label}")
-        for text in record["requires_dist"]:
-            requirement = Requirement(text)
-            if requirement.marker:
-                if any(
-                    x in str(requirement.marker) for x in ("platform_release", "platform_version")
-                ):
-                    raise InstallError(f"Cannot evaluate target OS release marker: {text}")
-                if not requirement.marker.evaluate(marker_environment(target)):
-                    continue
+        for requirement in target_requirements(record, target):
             dependency = selected.get(canonicalize_name(requirement.name))
             if dependency is None or not requirement.specifier.contains(
                 dependency["version"], prereleases=True
             ):
-                raise InstallError(f"{record['name']} requires {text} for {target.label}")
+                raise InstallError(f"{record['name']} requires {requirement} for {target.label}")
 
 
 @contextmanager

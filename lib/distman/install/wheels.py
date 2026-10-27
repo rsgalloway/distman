@@ -326,9 +326,13 @@ class WheelDestination(SchemeDictionaryDestination):
     """Stage complete wheels with portable launchers and external-script records.
 
     :ivar external_scripts: Whether scripts live outside the library publication boundary.
+    :ivar launcher_kinds: POSIX and/or Windows launcher variants to generate.
+    :ivar extra_scripts: Additional launcher records included in wheel RECORD.
     """
 
     external_scripts: bool = False
+    launcher_kinds: Sequence[str] = ()
+    extra_scripts: List[Tuple[str, RecordEntry]]
 
     def write_file(
         self, scheme: str, path: Union[str, os.PathLike], stream: BinaryIO, is_executable: bool
@@ -352,13 +356,32 @@ class WheelDestination(SchemeDictionaryDestination):
         :param section: Console or GUI script section.
         :return: Hashed record of the executable written to the scripts scheme.
         """
-        if self.script_kind != "posix":
-            return super().write_script(name, module, attr, section)
-        script_name, data = Script(name, module, attr, section).generate("python3", "posix")
-        # installer treats its interpreter argument as one executable path, so
-        # supplying '/usr/bin/env python3' there produces an invalid shell wrapper.
-        data = b"#!/usr/bin/env python3\n" + data.partition(b"\n")[2]
-        return self.write_to_fs("scripts", script_name, io.BytesIO(data), is_executable=True)
+        entries = []
+        for kind in self.launcher_kinds or (self.script_kind,):
+            executable = (
+                ("pythonw.exe" if section == "gui" else "python.exe")
+                if kind != "posix"
+                else "python3"
+            )
+            script_name, data = Script(name, module, attr, section).generate(executable, kind)
+            if kind != "posix":
+                # installer 0.7 embeds wall-clock ZIP timestamps. Normalize them
+                # so repeated installs and platform staging produce identical bytes.
+                with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                    entry = archive.getinfo("__main__.py")
+                    prefix = data[: entry.header_offset]
+                    code = archive.read(entry)
+                stream = io.BytesIO()
+                with zipfile.ZipFile(stream, "w") as archive:
+                    archive.writestr(zipfile.ZipInfo("__main__.py"), code)
+                data = prefix + stream.getvalue()
+            if kind == "posix":
+                data = b"#!/usr/bin/env python3\n" + data.partition(b"\n")[2]
+            entries.append(
+                self.write_to_fs("scripts", script_name, io.BytesIO(data), is_executable=True)
+            )
+        self.extra_scripts.extend(("scripts", entry) for entry in entries[1:])
+        return entries[0]
 
     def finalize_installation(
         self, scheme: str, record_file_path: str, records: Iterable[Tuple[str, RecordEntry]]
@@ -370,6 +393,7 @@ class WheelDestination(SchemeDictionaryDestination):
         :param records: Wheel files and generated launchers to record.
         :return: None.
         """
+        records = list(records) + self.extra_scripts
         if not self.external_scripts:
             return super().finalize_installation(scheme, record_file_path, records)
 
@@ -408,6 +432,7 @@ def stage(
     import_root: Path,
     scripts_root: Path,
     publication_root: Path,
+    launcher_platforms: Sequence[str] = (),
 ) -> None:
     """Install a wheel into a temporary image of its configured final layout.
 
@@ -417,6 +442,7 @@ def stage(
     :param import_root: Final library directory used by purelib and platlib schemes.
     :param scripts_root: Final destination for generated and wheel-provided scripts.
     :param publication_root: Managed boundary containing the library payload.
+    :param launcher_platforms: Platforms sharing generated entrypoints in this boundary.
     :return: None.
     :raises InstallError: If the wheel or its RECORD is invalid.
     :raises OSError: If staging files cannot be written.
@@ -435,6 +461,10 @@ def stage(
         bytecode_optimization_levels=(),
         destdir=str(directory),
     )
+    destination.launcher_kinds = sorted(
+        {"win-amd64" if platform == "windows" else "posix" for platform in launcher_platforms}
+    )
+    destination.extra_scripts = []
     destination.external_scripts = (
         scripts_root != publication_root and publication_root not in scripts_root.parents
     )

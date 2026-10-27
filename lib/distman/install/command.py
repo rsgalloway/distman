@@ -37,7 +37,6 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name, parse_wheel_filename
 
 from distman import util
@@ -50,9 +49,10 @@ from distman.install.ownership import (
     compose,
     inventory,
     locks,
-    marker_environment,
     read_state,
     same_state,
+    target_records,
+    target_requirements,
 )
 from distman.install.projects import (
     Project,
@@ -94,6 +94,7 @@ def collect(
     groups: Groups = defaultdict(dict)
     project_records: List[InstalledArtifact] = []
     payloads = {}
+    existing = {}
     for number, target in enumerate(targets):
         for artifact in acquire(args, target, temporary / f"download-{number}", project):
             provenance = Selection(
@@ -148,6 +149,21 @@ def collect(
                 separate_scripts=external_scripts,
             )
             key = artifact.name if artifact.pure else f"{artifact.name}@{prefix.as_posix()}"
+            launcher_platforms = {target.platform}
+            if artifact.pure:
+                if destination not in existing:
+                    existing[destination] = read_state(destination)
+                old = existing[destination]["artifacts"].get(key)
+                if old:
+                    provenance["targets"] = sorted(set(provenance["targets"] + old["targets"]))
+                    launcher_platforms.update(label.split("-")[0] for label in old["targets"])
+                for requested in targets:
+                    if (
+                        policy.path("DISTMAN_SHARED_LIB_PATH", artifact, requested) == import_root
+                        and policy.path("DISTMAN_SHARED_BIN_PATH", artifact, requested)
+                        == scripts_root
+                    ):
+                        launcher_platforms.add(requested.platform)
             identity = (
                 provenance["sha256"],
                 target.platform,
@@ -157,7 +173,15 @@ def collect(
             )
             if identity not in payloads:
                 payload = temporary / f"wheel-{len(payloads)}"
-                stage(artifact, payload, target, import_root, scripts_root, destination)
+                stage(
+                    artifact,
+                    payload,
+                    target,
+                    import_root,
+                    scripts_root,
+                    destination,
+                    sorted(launcher_platforms),
+                )
                 payloads[identity] = payload
             payload = payloads[identity]
             pieces = [(destination, staged_path(payload, destination), key, "library")]
@@ -251,24 +275,10 @@ def include_dependencies(groups: Groups, policy: Policy, targets: Sequence[Targe
                 runtimes.setdefault(label, Target(system, arch, python[2] + "." + python[3:]))
         discovered = set()
         for target in runtimes.values():
-            selected = {
-                record["name"]: record
-                for record in records
-                if record.get("component") != "scripts"
-                and (record["pure"] or target.label in record["targets"])
-            }
+            selected = target_records(records, target)
             requirements = defaultdict(list)
             for record in selected.values():
-                for text in record["requires_dist"]:
-                    requirement = Requirement(text)
-                    if requirement.marker:
-                        if any(
-                            field in str(requirement.marker)
-                            for field in ("platform_release", "platform_version")
-                        ):
-                            raise InstallError(f"Cannot evaluate target OS release marker: {text}")
-                        if not requirement.marker.evaluate(marker_environment(target)):
-                            continue
+                for requirement in target_requirements(record, target):
                     name = canonicalize_name(requirement.name)
                     if name not in selected:
                         requirements[name].append(requirement)

@@ -191,8 +191,18 @@ standard wheel contents, including a locally built project's wheel.
 Shared libraries and commands represent one compatible environment, with one
 active version per distribution. Both managed roots are validated and published
 in the same operation; caught activation failures restore previous links. Changes
-to their artifacts produce corresponding revisions. Windows and POSIX launchers
-cannot share a single command payload; use separate runtime paths when necessary.
+to their artifacts produce corresponding revisions. Generated entrypoints can
+coexist in a shared bin: Linux/macOS use `tool`, Windows uses `tool.exe`.
+`--platform all` generates both forms, including when run on Linux. Installing
+another platform later preserves existing launcher variants; upgrading regenerates
+all recorded variants from the new wheel and removes obsolete commands.
+Wheel-provided scripts with conflicting platform-specific contents still require
+separate paths.
+
+Dependency validation follows each package's recorded targets and their dependencies.
+Adding Windows support for one package does not require Windows dependencies for
+an unrelated Linux-only application. Shared upgrades must still satisfy existing
+consumers on their recorded runtimes.
 Metadata checks do not guarantee application compatibility.
 
 Existing unmanaged bin directories (including those populated by legacy `dist`)

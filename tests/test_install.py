@@ -1110,3 +1110,100 @@ def test_retained_runtime_dependency_failures_do_not_publish(
     assert (
         "Multiple installed versions" if failure == "ambiguous" else "requires native<2"
     ) in output
+
+
+@pytest.mark.parametrize("platforms", [("all",), ("linux", "windows"), ("windows", "linux")])
+def test_shared_multiplatform_launchers(
+    installation: Tuple[Path, Path], platforms: Tuple[str, ...]
+) -> None:
+    """Preserve and upgrade both launcher forms with one shared library revision.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :param platforms: Target selection order, including a combined installation.
+    :return: None.
+    """
+    root, wheels = installation
+    command_wheel(wheels)
+    args = ("--arch", "x86_64", "--python", "3.11")
+    for platform in platforms:
+        assert invoke(wheels, "sample", "--platform", platform, *args) == 0
+    library = root / "tools/lib/python"
+    scripts = root / "tools/bin"
+    assert (scripts / "sample-cli").read_bytes().startswith(b"#!/usr/bin/env python3\n")
+    assert (scripts / "sample-cli.exe").read_bytes().startswith(b"MZ")
+    entries = list(csv.reader((library / "sample-1.0.dist-info/RECORD").read_text().splitlines()))
+    for script in ("sample-cli", "sample-cli.exe"):
+        entry = next(row for row in entries if row[0].endswith("/" + script))
+        assert Path(entry[0]).read_bytes() == (scripts / script).read_bytes()
+    before = (library.resolve(), scripts.resolve())
+    assert invoke(wheels, "sample", "--platform", platforms[-1], *args) == 0
+    assert (library.resolve(), scripts.resolve()) == before
+    command_wheel(wheels, version="2.0", command="renamed-cli")
+    assert invoke(wheels, "sample==2.0", "--platform", "linux", *args) == 0
+    assert not (scripts / "sample-cli").exists()
+    assert not (scripts / "sample-cli.exe").exists()
+    assert (scripts / "renamed-cli").exists()
+    assert (scripts / "renamed-cli.exe").exists()
+    command_wheel(wheels, version="3.0", command=None)
+    assert invoke(wheels, "sample==3.0", "--platform", "windows", *args) == 0
+    assert not (scripts / "renamed-cli").exists()
+    assert not (scripts / "renamed-cli.exe").exists()
+
+
+def test_foreign_install_does_not_expand_unrelated_application_targets(
+    installation: Tuple[Path, Path], capsys: pytest.CaptureFixture
+) -> None:
+    """Keep Linux application dependencies scoped while adding Windows commands.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :param capsys: Captured dependency diagnostics.
+    :return: None.
+    """
+    root, wheels = installation
+    wheel(wheels, "native", tag="cp311-cp311-manylinux_2_17_x86_64")
+    wheel(wheels, "app", requires=["native>=1", "shared<2"])
+    wheel(wheels, "shared")
+    command_wheel(wheels)
+    args = ("--arch", "x86_64", "--python", "3.11")
+    assert invoke(wheels, "app", "sample", "--platform", "linux", *args) == 0
+    runtime = (root / "tools/native/1.0").resolve()
+    assert invoke(wheels, "sample", "--platform", "windows", *args) == 0
+    assert (root / "tools/native/1.0").resolve() == runtime
+    state = read_state(root / "tools/lib/python")
+    assert state["artifacts"]["app"]["targets"] == ["linux-x86_64-cp311"]
+    assert (root / "tools/bin/sample-cli").exists()
+    assert (root / "tools/bin/sample-cli.exe").exists()
+    wheel(wheels, "shared", version="2.0")
+    before = (root / "tools/lib/python").resolve()
+    assert invoke(wheels, "shared==2.0", "--platform", "windows", *args) == 1
+    assert (root / "tools/lib/python").resolve() == before
+    assert "app requires shared<2" in capsys.readouterr().out
+
+
+def test_multiplatform_gui_launcher_metadata(installation: Tuple[Path, Path]) -> None:
+    """Keep GUI launchers valid and recorded alongside their POSIX entrypoint.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :return: None.
+    """
+    root, wheels = installation
+    wheel(
+        wheels,
+        files={
+            "sample.py": b"def main():\n    pass\n",
+            "sample-1.0.dist-info/entry_points.txt": b"[gui_scripts]\nsample-gui = sample:main\n",
+        },
+    )
+    assert (
+        invoke(wheels, "sample", "--platform", "all", "--python", "3.11", "--arch", "x86_64") == 0
+    )
+    scripts = root / "tools/bin"
+    launcher = scripts / "sample-gui.exe"
+    with zipfile.ZipFile(launcher) as archive:
+        entry = archive.getinfo("__main__.py")
+        assert entry.date_time == (1980, 1, 1, 0, 0, 0)
+        assert b"from sample import main" in archive.read(entry)
+        assert launcher.read_bytes()[: entry.header_offset].endswith(b"#!pythonw.exe\n")
+    assert (scripts / "sample-gui").read_bytes().startswith(b"#!/usr/bin/env python3\n")
+    records = read_state(scripts)["artifacts"]["sample"]["files"]
+    assert set(records) == {"sample-gui", "sample-gui.exe"}
