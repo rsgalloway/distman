@@ -11,8 +11,8 @@ Available guides:
 - [Installing Python Distributions](install.md)
 - [Installation and Activation Examples](examples.md)
 - [Package Catalog](packages.md)
-- [Installation Roadmap](install-planning.md)
-- [Architecture Audit](architecture.md)
+- [Installation Roadmap](planning/install-planning.md)
+- [Architecture Audit](planning/architecture.md)
 - [Transform Pipelines](transform-pipelines.md)
 - [Local Caching](caching.md)
 

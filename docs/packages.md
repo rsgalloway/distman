@@ -2,7 +2,10 @@
 
 The proposed `distman-packages` catalog will provide versioned installation recipes
 and runtime environment files. Catalog installation is not implemented yet, and
-no catalog recipes are currently advertised as supported.
+no catalog recipes are currently advertised as supported. Direct
+package and launcher tests do not imply recipe availability; see the
+[validation plan](planning/install-planning.md#validation-and-remaining-checks) for
+validation evidence and remaining checks.
 
 **You do not need a recipe to install Python packages.** Direct installation already
 uses pip to resolve compatible wheels from PyPI or your configured sources:
@@ -18,7 +21,7 @@ A package's absence from this catalog does not prevent direct installation.
 
 ## Planned catalog entries
 
-These are migration candidates from pipeline-tools, not validated catalog releases.
+These are proposed integrations, not validated catalog releases.
 
 | Package | Recipe package version | Target coverage | Status |
 |---|---|---|---|
@@ -26,7 +29,7 @@ These are migration candidates from pipeline-tools, not validated catalog releas
 | FFmpeg | To be selected | To be validated per OS and architecture | Archive acquisition design needed |
 
 As recipes are validated, this table will link to their source and record exact
-package versions, recipe revisions, and tested targets. Other pipeline-tools
+package versions, recipe revisions, and tested targets. Other
 packages can be added as their integrations are migrated. The site table should
 ultimately be generated from validated catalog data rather than maintained as a
 second version list.
@@ -48,5 +51,5 @@ Direct `distman install numpy` will retain its existing meaning and will not sil
 select a catalog recipe. Local and private recipes are also planned; no new hosted
 registry service is required.
 
-See the [installation roadmap](install-planning.md) for authoring, versioning, and
+See the [installation roadmap](planning/install-planning.md) for authoring, versioning, and
 migration decisions.

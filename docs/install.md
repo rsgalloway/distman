@@ -308,5 +308,5 @@ Activation is atomic per root, not across roots. Local `dist.json` publication i
 separate: a later target failure can leave installed dependencies in place.
 Windows deployment requires symlink permission.
 
-See the [CLI reference](cli-reference.md) and [architecture guide](architecture.md)
+See the [CLI reference](cli-reference.md) and [architecture guide](planning/architecture.md)
 for command and implementation details.
