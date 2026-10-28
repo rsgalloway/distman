@@ -8,7 +8,8 @@ policy rather than inferring packages from arbitrary envstack variables.
 
 | Area | Status | Evidence / remaining boundary |
 |---|---|---|
-| Direct PyPI requirements, pins, and requirements files | Implemented | pip-backed resolution and offline installer tests |
+| Direct PyPI requirements, pins, and requirements files | Implemented | pip-backed resolution and offline installer tests; preserving satisfactory installed versions is pending |
+| Explicit upgrades and package removal | Planned | `-U` and `uninstall` are not implemented |
 | Local packaging, requirements-only, dist-only, and combined projects | Implemented | Exact-directory discovery; dist.json owns custom publication; project tests |
 | Bounded architecture refactor | Implemented | Central CLI, shared policy, staged publication, compatibility wrappers; [architecture audit](architecture.md) |
 | Configurable shared/runtime libraries and bins | Implemented | Five DISTMAN path templates, packaged fallback, active overrides, custom-layout tests |
@@ -54,6 +55,88 @@ Remaining validation and tooling work:
 
 Recipe/catalog/archive work below remains proposed follow-up work. No new
 manifest format, package solver, or hosted registry is required for the wheel installer.
+
+## Install and upgrade semantics
+
+The agreed contract uses the selected deployment's receipts as installed state.
+Configuration through ENVPATH, distman.env, and active root/path overrides selects
+that deployment. Packages do not need to be activated or importable by the Python
+interpreter running distman. Development, test, production, and project deployments
+may contain different packages and versions. Distinct names alone do not isolate
+state: configurations pointing at the same library/bin roots share ownership.
+
+| Operation | Intended behavior |
+|---|---|
+| `install PACKAGE` | Retain a satisfactory installed version; install missing packages and target variants |
+| `install PACKAGE==VERSION` | Satisfy the explicit version, including an upgrade or downgrade when necessary |
+| `install -U PACKAGE` / `--upgrade` | Select the latest compatible version permitted by the request and configured sources |
+| Dependencies | Prefer satisfactory deployed versions; change them when required by the requested operation and reject conflicts with retained consumers |
+
+This is not current behavior: resolution currently uses pip's `--ignore-installed`
+and does not supply deployment receipts to the solve. An unpinned install can
+therefore upgrade packages without an explicit upgrade flag. Adding an alias for
+`-U` is insufficient; installed-state-aware resolution must be implemented using
+pip tooling without introducing a separate solver.
+
+Shared upgrades replace library contents in DISTMAN_SHARED_LIB_PATH and generated
+entrypoints in DISTMAN_SHARED_BIN_PATH together, preserving supported launcher
+variants and removing obsolete commands. Binary upgrades install into the configured
+package/version boundary and its runtime library/bin paths, retaining older
+version roots. Neither operation changes PYTHONPATH, PATH, package-version
+environment variables, or envstack files automatically. Activation selects the
+binary version separately.
+
+Implementation and acceptance work:
+
+- Discover managed state only through the selected policy; report the effective
+  deployment and changed library/bin roots. Never infer deployed packages from
+  distman's interpreter environment or a different tier's fallback paths.
+- Preserve compatible deployed versions during pip resolution, including transitive
+  dependencies. Document how version preferences are represented and how resolution
+  changes them when a request requires it.
+- For multiple installed binary versions, define deterministic reuse or an explicit
+  ambiguity diagnostic; do not infer the active application version from installation.
+- Preserve explicit requirements, constraints, target compatibility, and local-project
+  rebuild behavior. An installed version does not justify skipping changed local source.
+- Test no-upgrade installs when a newer wheel exists; explicit upgrades/downgrades;
+  dependency changes only when required; retained-consumer conflicts; new target
+  variants; launcher upgrades; dry runs; and idempotency.
+- Test independent dev/test/prod/project roots with different versions, an unrelated
+  package installed in distman's interpreter, and intentionally shared deployment paths.
+
+## Package lifecycle follow-ups
+
+`distman uninstall` is proposed, not implemented. It should compose revisions
+without the selected package's owned library, metadata, and launcher files; preserve
+unrelated distributions and rollback history; and reject broken retained dependencies.
+Do not delete a shared directory or automatically remove dependencies. Define version
+and runtime selection, discovery of reverse dependencies across managed roots,
+shared-file ownership, and empty-boundary behavior before implementation.
+
+Source-distribution fallback is another proposed extension. Named-package acquisition
+currently requires prebuilt wheels, while local projects can be built into wheels.
+Host source fallback could build a temporary wheel and reuse staging/publication.
+Cross-target builds must not substitute host binaries for foreign artifacts; any
+built wheel must match its selected targets. Build policy and a prebuilt-only option
+need a separate design and tests.
+
+## Proposed release scope
+
+Make package installation the focus of 0.9: the wheel installer, explicit install
+versus upgrade behavior, shared/runtime launcher support, documentation, and the
+remaining validation gates. Associate the package-installation work with that
+milestone. This is a release recommendation, not a record of tracker changes.
+
+Review existing milestone items for concrete dependencies before moving them.
+General distribution operations, target hashing, diff, configuration includes,
+post-deployment steps, and file-sequence support can move to a later milestone
+unless they fix a demonstrated installer or regression requirement. Existing internal
+ownership hashes do not establish completion of a general target-hashing feature.
+
+Proposed subsequent work is safe uninstall and host source-build fallback, followed
+by named-environment creation and recipe/catalog integration. These features can be
+tracked separately; full environment lifecycle management is not required to ship
+the wheel installer. Exact later release assignments remain open.
 
 ## Independent installation operations
 
