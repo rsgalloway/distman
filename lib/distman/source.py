@@ -37,7 +37,7 @@ import json
 import os
 from functools import wraps
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 import git
 from git.exc import GitCommandError
@@ -47,10 +47,20 @@ from distman.logger import log
 
 
 def requires_git(func: Callable) -> Callable:
-    """Ensure Git metadata has been loaded before calling an instance method."""
+    """Ensure Git metadata has been loaded before calling an instance method.
+
+    :param func: GitRepo instance method to wrap with lazy metadata loading.
+    :return: Wrapped method that initializes Git metadata before forwarding the call.
+    """
 
     @wraps(func)
-    def wrapper(self, *args, **kwargs):
+    def wrapper(self: "GitRepo", *args: Any, **kwargs: Any) -> Any:
+        """Lazily load Git metadata before forwarding the wrapped method call.
+
+        :param args: Positional arguments forwarded to the wrapped GitRepo method.
+        :param kwargs: Keyword arguments forwarded to the wrapped GitRepo method.
+        :return: Result returned by the wrapped method.
+        """
         if self.repo is None:
             self.read_git_info()
         return func(self, *args, **kwargs)
@@ -61,7 +71,7 @@ def requires_git(func: Callable) -> Callable:
 class Source(object):
     """Base class for reading ``dist.json`` metadata."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize default source metadata."""
         self.author = os.getenv("USERNAME", os.getenv("USER", "unknown"))
         self.changed_files: List[str] = []
@@ -71,11 +81,17 @@ class Source(object):
         self.root = None
 
     def get_targets(self) -> Optional[dict]:
-        """Return the targets defined in the loaded dist file."""
+        """Return the targets defined in the loaded dist file.
+
+        :return: Configured target mapping, or None if no distribution metadata is loaded.
+        """
         return self.root.get(config.TAG_TARGETS) if self.root else None
 
     def log_distribution_info(self) -> None:
-        """Log basic source information."""
+        """Log basic source information.
+
+        :return: None.
+        """
         log.info("Name: %s", self.name)
         log.info("Path: %s", self.path)
 
@@ -128,7 +144,7 @@ class Source(object):
 class GitRepo(Source):
     """Extend :class:`Source` with Git repository metadata."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize Git-specific state."""
         super(GitRepo, self).__init__()
         self.branch_name = ""
@@ -180,7 +196,10 @@ class GitRepo(Source):
         return untracked_files, untracked_dirs
 
     def get_path(self) -> str:
-        """Return the repository URL, or the local path when no remote exists."""
+        """Return the repository URL, or the local path when no remote exists.
+
+        :return: Origin/first remote URL when available; otherwise the stored source path.
+        """
         if self.repo and self.repo.remotes:
             if "origin" in [r.name for r in self.repo.remotes]:
                 return self.repo.remotes.origin.url
@@ -188,14 +207,20 @@ class GitRepo(Source):
         return self.path
 
     def log_distribution_info(self) -> None:
-        """Log source and Git revision details."""
+        """Log source and Git revision details.
+
+        :return: None.
+        """
         log.info("Name: %s", self.name)
         log.info("Path: %s", self.path)
         log.info("Branch: %s", self.branch_name)
         log.info("Head: %s (%s)", self.head, self.short_head)
 
     def read_git_info(self) -> bool:
-        """Populate repository, branch, and commit metadata."""
+        """Populate repository, branch, and commit metadata.
+
+        :return: True after inspection, including when the source is not a Git repository.
+        """
         self.branch_name = ""
         self.head = ""
         self.short_head = ""

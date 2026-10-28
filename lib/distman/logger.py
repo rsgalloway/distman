@@ -67,7 +67,7 @@ log.addHandler(logging.NullHandler())
 class DryRunFilter(logging.Filter):
     """Filter that removes log records when in dry run mode."""
 
-    def __init__(self, dryrun: bool = False):
+    def __init__(self, dryrun: bool = False) -> None:
         """Initialize the filter.
 
         :param dryrun: dry run flag.
@@ -75,7 +75,7 @@ class DryRunFilter(logging.Filter):
         super().__init__()
         self.dryrun = dryrun
 
-    def filter(self, record: logging.LogRecord):
+    def filter(self, record: logging.LogRecord) -> bool:
         """Filter the log record.
         :param record: log record.
         :return: True if the record should be logged, False otherwise.
@@ -86,7 +86,7 @@ class DryRunFilter(logging.Filter):
 class UserFilter(logging.Filter):
     """Adds the username to the log record."""
 
-    def filter(self, record: logging.LogRecord):
+    def filter(self, record: logging.LogRecord) -> bool:
         """Add the username to the log record.
 
         :param record: log record.
@@ -112,7 +112,7 @@ class UserRotatingFileHandler(RotatingFileHandler):
         backupCount: int = 0,
         encoding: str = None,
         delay: bool = False,
-    ):
+    ) -> None:
         """Initialize the rotating file handler.
 
         :param filename: name of the log file.
@@ -126,7 +126,7 @@ class UserRotatingFileHandler(RotatingFileHandler):
         self.addFilter(UserFilter())
 
 
-def setup_stream_handler(level: int = LOG_LEVEL):
+def setup_stream_handler(level: int = LOG_LEVEL) -> logging.StreamHandler:
     """Adds a new stdout stream handler.
 
     :param level: log level.
@@ -151,7 +151,7 @@ def setup_file_handler(
     level: int = LOG_LEVEL,
     logdir: str = config.LOG_DIR,
     dryrun: bool = False,
-):
+) -> UserRotatingFileHandler:
     """Adds a new rotating file handler.
 
     :param maxBytes: max bytes per file.
@@ -181,10 +181,12 @@ def setup_file_handler(
     return handler
 
 
-def setup_logging(dryrun: bool = False):
+def setup_logging(dryrun: bool = False) -> None:
     """Setup log handlers.
 
     :param dryrun: dry run flag
+
+    :return: None.
     """
     setup_stream_handler()
 

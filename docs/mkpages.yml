@@ -9,6 +9,12 @@ navigation:
     href: /getting-started/
   - label: CLI
     href: /cli-reference/
+  - label: Install
+    href: /install/
+  - label: Examples
+    href: /examples/
+  - label: Packages
+    href: /packages/
   - label: Config
     href: /distribution-config/
   - label: Pipelines

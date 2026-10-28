@@ -55,9 +55,19 @@ IGNORABLE_PATHS = re.compile(
 
 
 def add_symlink_support() -> None:
-    """Adds symlink support on Windows by monkeypatching os.symlink."""
+    """Adds symlink support on Windows by monkeypatching os.symlink.
 
-    def symlink_ms(source, link_name, target_is_directory=False):
+    :return: None.
+    """
+
+    def symlink_ms(source: str, link_name: str, target_is_directory: bool = False) -> None:
+        """Adapt the Windows symlink API to the os.symlink calling convention.
+
+        :param source: Target path to pass to the Windows symbolic-link API.
+        :param link_name: Path of the symbolic link to create.
+        :param target_is_directory: Whether the target is a directory rather than a file.
+        :return: None.
+        """
         csl = ctypes.windll.kernel32.CreateSymbolicLinkW
         csl.argtypes = (ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32)
         csl.restype = ctypes.c_ubyte
@@ -105,6 +115,8 @@ def copy_file(source: str, dest: str) -> None:
 
     :param source: Path to source file.
     :param dest: Path to destination file.
+
+    :return: None.
     """
     try:
         destdir = os.path.dirname(dest)
@@ -157,6 +169,8 @@ def copy_directory(source: str, dest: str, all_files: bool = False) -> None:
     :param source: Path to source directory.
     :param dest: Path to destination directory.
     :param all_files: Copy all files, including hidden and ignorable files.
+
+    :return: None.
     """
     source = os.path.abspath(source)
 
@@ -173,6 +187,8 @@ def copy_object(source: str, dest: str, all_files: bool = False) -> None:
     :param dest: Path to destination file or directory.
     :param all_files: Copy all files in a directory, including hidden and
         ignorable files.
+
+    :return: None.
     """
     if os.path.islink(source):
         link_target = os.readlink(source)
@@ -250,7 +266,12 @@ def compare_objects(path1: str, path2: str) -> bool:
 
 
 def parse_versioned_filename(name: str, prefix: str) -> Optional[Tuple[str, int, str]]:
-    """Parse ``<prefix>.<version>.<commit>[.*]`` style version filenames."""
+    """Parse ``<prefix>.<version>.<commit>[.*]`` style version filenames.
+
+    :param name: Filename to parse, without its parent directory.
+    :param prefix: Expected unversioned target basename.
+    :return: Target prefix, integer revision, and optional commit suffix; None if parsing fails.
+    """
     if not name.startswith(prefix + "."):
         return None
 
@@ -372,7 +393,7 @@ def is_file_hidden(filepath: str) -> bool:
 def is_ignorable(filepath: str, include_hidden: bool = False) -> bool:
     """Return ``True`` when a path should be skipped during distribution.
 
-    :param path: a file system path.
+    :param filepath: a file system path.
     :param include_hidden: include hidden files flag.
     :return: True if filepath is ignorable.
     """
@@ -382,7 +403,11 @@ def is_ignorable(filepath: str, include_hidden: bool = False) -> bool:
 
 
 def get_root_dir(path: str) -> str:
-    """Returns the root directory of a path."""
+    """Returns the root directory of a path.
+
+    :param path: Filesystem path whose parent is split using the host path separator.
+    :return: First component of the parent path; may be empty for an absolute POSIX path.
+    """
     return os.path.dirname(path).split(os.path.sep)[0]
 
 
@@ -443,6 +468,8 @@ def sanitize_path(path: str) -> str:
 
     :param path: file system path.
     :returns: sanitized path.
+
+    :return: Normalized path with Windows extended-path handling where applicable.
     """
     path = path.replace("\\", "/")
     if path[:2] != "//":  # unc paths
@@ -849,12 +876,14 @@ def resolve_vars_path(path: str) -> str:
     return sanitize_path(replace_vars(path))
 
 
-def safe_copytree(src: str, dst: str):
+def safe_copytree(src: str, dst: str) -> None:
     """Safely copies a directory tree, avoiding infinite recursion, and skipping
     ignorable file patterns defined in config.IGNORABLE.
 
     :param src: Source directory path.
     :param dst: Destination directory path.
+
+    :return: None.
     """
 
     if os.path.abspath(src) == os.path.abspath(dst):

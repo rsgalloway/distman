@@ -8,6 +8,11 @@ Available guides:
 - [Getting Started](getting-started.md)
 - [Distribution Configuration](distribution-config.md)
 - [CLI Reference](cli-reference.md)
+- [Installing Python Distributions](install.md)
+- [Installation and Activation Examples](examples.md)
+- [Package Catalog](packages.md)
+- [Installation Roadmap](install-planning.md)
+- [Architecture Audit](architecture.md)
 - [Transform Pipelines](transform-pipelines.md)
 - [Local Caching](caching.md)
 

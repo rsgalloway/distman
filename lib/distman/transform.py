@@ -37,7 +37,7 @@ import os
 import py_compile
 import re
 import shutil
-from typing import Optional
+from typing import Any, Optional
 
 from distman import util
 from distman.logger import log
@@ -49,14 +49,14 @@ class TransformError(Exception):
     pass
 
 
-def dummy_transform(input, output, **kwargs):
+def dummy_transform(input: str, output: str, **kwargs: Any) -> None:
     """A dummy transform function that copies the input file to the output file.
 
     :param input: Path to the input file.
     :param output: Path to the output file.
     :param kwargs: Additional keyword arguments (not used).
     :raises TransformError: If the input file does not exist or is not a file.
-    :return: The path to the output file.
+    :return: None; the demonstration transform writes its output in place.
     """
     with open(input, "r") as f_in, open(output, "w") as f_out:
         f_out.write(f_in.read().upper())

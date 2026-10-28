@@ -1,0 +1,477 @@
+#!/usr/bin/env python3
+#
+# Copyright (c) 2024-2025, Ryan Galloway (ryan@rsgalloway.com)
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+#  - Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
+#
+#  - Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
+#
+#  - Neither the name of the software nor the names of its contributors
+#    may be used to endorse or promote products derived from this software
+#    without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+#
+
+"""Use pip for resolution and PyPA installer for complete wheel installation."""
+
+import argparse
+import email
+import hashlib
+import io
+import json
+import os
+import shutil
+import subprocess
+import sys
+import zipfile
+from dataclasses import dataclass
+from email.message import Message
+from pathlib import Path, PurePosixPath
+from typing import BinaryIO, FrozenSet, Iterable, List, Optional, Sequence, Set, Tuple, Union
+from urllib.parse import unquote, urlsplit, urlunsplit
+
+from installer import install
+from installer.destinations import SchemeDictionaryDestination
+from installer.exceptions import InstallerError
+from installer.records import RecordEntry
+from installer.scripts import Script
+from installer.sources import WheelFile
+from installer.utils import construct_record_file
+from packaging.specifiers import SpecifierSet
+from packaging.tags import Tag
+from packaging.utils import canonicalize_name, parse_wheel_filename
+from packaging.version import Version
+
+from distman.install import InstallError
+from distman.install.models import Provenance
+from distman.install.targets import Target
+
+
+def sha256(path: Path) -> str:
+    """Hash file bytes incrementally without loading the entire artifact into memory.
+
+    :param path: File whose bytes will be hashed.
+    :return: Lowercase hexadecimal SHA-256 digest.
+    :raises OSError: If the file cannot be read.
+    """
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+@dataclass
+class Artifact:
+    """A verified wheel and the metadata used to classify its installation layout.
+
+    :param path: Local wheel archive retained for staging and hashing.
+    :param name: Canonical distribution name, distinct from import package names.
+    :param version: Normalized upstream package version.
+    :param tags: Compatibility tags parsed from the wheel filename.
+    :param metadata: Parsed wheel METADATA headers.
+    :param origin: Sanitized artifact URL, or original directory URI for a built project.
+    """
+
+    path: Path
+    name: str
+    version: str
+    tags: FrozenSet[Tag]
+    metadata: Message
+    origin: str = ""
+
+    @property
+    def pure(self) -> bool:
+        """Whether every declared tag is independent of platform and binary ABI.
+
+        :return: True when all declared tags have the none ABI and any platform.
+        """
+        return all(tag.abi == "none" and tag.platform == "any" for tag in self.tags)
+
+    @property
+    def provenance(self) -> Provenance:
+        """Describe the original wheel and dependency declarations for its receipt.
+
+        :return: Receipt fields describing the source, wheel hash, tags, and dependencies.
+        """
+        return {
+            "source_url": self.origin,
+            "name": self.name,
+            "version": self.version,
+            "wheel": self.path.name,
+            "sha256": sha256(self.path),
+            "tags": sorted(map(str, self.tags)),
+            "requires_python": self.metadata.get("Requires-Python", ""),
+            "requires_dist": self.metadata.get_all("Requires-Dist", []),
+        }
+
+
+def inspect_wheel(path: Path, target: Target) -> Artifact:
+    """Validate member paths, identity, Python constraints, and target wheel tags.
+
+    :param path: Wheel archive to inspect without extracting its payload.
+    :param target: Runtime against which tags and Requires-Python are checked.
+    :return: Validated wheel identity, tags, and parsed distribution metadata.
+    :raises InstallError: If member paths, metadata identity, or runtime compatibility are
+        invalid.
+    :raises zipfile.BadZipFile: If the artifact is not a readable ZIP archive.
+    :raises ValueError: If a wheel filename, version, or Python constraint is malformed.
+    """
+    name, version, _, tags = parse_wheel_filename(path.name)
+    with zipfile.ZipFile(path) as archive:
+        for member in archive.namelist():
+            relative = PurePosixPath(member)
+            if relative.is_absolute() or ".." in relative.parts or "\\" in member or ":" in member:
+                raise InstallError(f"Unsafe wheel member: {member}")
+        metadata = [n for n in archive.namelist() if n.endswith(".dist-info/METADATA")]
+        if len(metadata) != 1:
+            raise InstallError(f"Expected one METADATA in {path.name}")
+        message = email.message_from_bytes(archive.read(metadata[0]))
+    if (
+        canonicalize_name(message.get("Name", "")) != name
+        or Version(message.get("Version", "0")) != version
+    ):
+        raise InstallError(f"Wheel metadata does not match filename: {path.name}")
+    if not tags & target.tags or not SpecifierSet(message.get("Requires-Python", "")).contains(
+        target.python + ".0", prereleases=True
+    ):
+        raise InstallError(f"Incompatible wheel for {target.label}: {path.name}")
+    return Artifact(path, name, str(version), tags, message)
+
+
+def pip(command: Sequence[str], verbose: bool = False) -> None:
+    """Run pip in the current interpreter and expose actionable failure output.
+
+    :param command: Pip subcommand and arguments, excluding the Python executable prefix.
+    :param verbose: If True, print captured pip output even after a successful command.
+    :return: None.
+    :raises InstallError: If pip exits with a nonzero status.
+    :raises OSError: If the subprocess cannot be started.
+    """
+    process = subprocess.run(
+        [sys.executable, "-m", "pip", *command, "--disable-pip-version-check", "--no-input"],
+        capture_output=True,
+        text=True,
+    )
+    if verbose or process.returncode:
+        print(process.stdout, end="")
+    if process.returncode:
+        raise InstallError(process.stderr.strip() or "pip failed")
+
+
+def acquire(
+    args: argparse.Namespace,
+    target: Target,
+    directory: Path,
+    project_wheel: Optional[Path] = None,
+) -> List[Artifact]:
+    """Resolve with pip, fetch its exact selections, and verify reported hashes.
+
+    :param args: Install options containing packages, requirement files, index policy, and
+        verbosity.
+    :param target: Runtime whose compatibility flags constrain pip resolution.
+    :param directory: New download directory; its parent must already exist.
+    :param project_wheel: Optional locally built wheel to include in dependency resolution.
+    :return: Verified artifacts downloaded from the exact selections in pip's report.
+    :raises InstallError: If resolution fails, selects non-wheel artifacts, or fails
+        hash/compatibility checks.
+    """
+    directory.mkdir()
+    report = directory.parent / (directory.name + "-report.json")
+    command = [
+        "install",
+        "--dry-run",
+        "--ignore-installed",
+        "--only-binary=:all:",
+        "--report",
+        str(report),
+        "--target",
+        str(directory.parent / "resolve"),
+    ]
+    command += ["--python-version", target.python, "--implementation", "cp"]
+    for abi in (target.abi, "abi3", "none"):
+        command += ["--abi", abi]
+    for platform_tag in target.platforms:
+        command += ["--platform", platform_tag]
+    if args.no_index:
+        command.append("--no-index")
+    for location in args.find_links:
+        command += ["--find-links", location]
+    for requirement in args.requirement:
+        command += ["--requirement", requirement]
+    command += args.packages
+    if project_wheel:
+        command.append(str(project_wheel))
+    try:
+        pip(command, bool(args.verbose))
+        resolved = json.loads(report.read_text())["install"]
+        sources = {}
+        urls = []
+        for item in resolved:
+            download = item["download_info"]
+            url = urlsplit(download["url"])
+            filename = PurePosixPath(unquote(url.path)).name
+            if not filename.endswith(".whl"):
+                raise InstallError(f"Only prebuilt wheels are supported: {filename}")
+            digest = download.get("archive_info", {}).get("hashes", {}).get("sha256")
+            if not digest:
+                raise InstallError(f"pip did not report a wheel SHA-256: {filename}")
+            urls.append(urlunsplit(url._replace(fragment="sha256=" + digest)))
+            safe_url = urlunsplit(
+                url._replace(netloc=url.netloc.rsplit("@", 1)[-1], query="", fragment="")
+            )
+            sources[filename] = (safe_url, digest)
+        # Download the exact artifacts from pip's resolution report, avoiding a
+        # second solve that could choose a different release/index artifact.
+        fetch = ["download", "--no-deps", "--only-binary=:all:", "--dest", str(directory)]
+        fetch += ["--python-version", target.python, "--implementation", "cp"]
+        for abi in (target.abi, "abi3", "none"):
+            fetch += ["--abi", abi]
+        for platform_tag in target.platforms:
+            fetch += ["--platform", platform_tag]
+        if not urls:
+            raise InstallError(f"No wheels selected for {target.label}")
+        pip(fetch + urls, bool(args.verbose))
+    except InstallError as exc:
+        raise InstallError(f"Wheel resolution failed for {target.label}: {exc}") from exc
+    files = sorted(directory.glob("*.whl"))
+    if not files or len(files) != len(list(directory.iterdir())):
+        raise InstallError(f"Expected only prebuilt wheels for {target.label}")
+    artifacts = []
+    for path in files:
+        origin, expected = sources[path.name]
+        if sha256(path) != expected:
+            raise InstallError(f"Wheel hash differs from pip resolution: {path.name}")
+        artifact = inspect_wheel(path, target)
+        artifact.origin = (
+            Path(args.project).absolute().as_uri()
+            if project_wheel and path.name == project_wheel.name
+            else origin
+        )
+        artifacts.append(artifact)
+    return artifacts
+
+
+def build_project(args: argparse.Namespace, directory: Path) -> Path:
+    """Ask pip to build one local project wheel through its supported backend.
+
+    :param args: Install options specifying the project path, dry run, index policy, and
+        verbosity.
+    :param directory: Output directory where pip should place the single built wheel.
+    :return: Path of the wheel produced by the project's build backend.
+    :raises InstallError: If packaging metadata is missing, the build fails, or output is
+        ambiguous.
+    """
+    project = Path(args.project).absolute()
+    from distman.install.projects import inspect_project
+
+    if not inspect_project(project).buildable:
+        raise InstallError("Local project does not contain buildable packaging metadata")
+    if args.dryrun:
+        # Build backends may write egg-info or other generated files. Isolate
+        # those writes from the requested source tree during a read-only preview.
+        copy = directory.parent / "project-source"
+        ignored_patterns = shutil.ignore_patterns(
+            ".git", ".venv", "venv", "venv3", "__pycache__", directory.parent.name
+        )
+
+        def ignore_unavailable(source: str, names: List[str]) -> Set[str]:
+            """Exclude generated directories and dangling links from the snapshot.
+
+            :param source: Source directory currently being copied.
+            :param names: Entry names found in the source directory.
+            :return: Names to omit from the temporary project copy.
+            """
+            ignored = ignored_patterns(source, names)
+            for name in names:
+                path = Path(source) / name
+                if path.is_symlink() and not path.exists():
+                    ignored.add(name)
+            return ignored
+
+        # Resolve relative link targets against their source directory. Keep
+        # dereferencing valid links so backend writes affect only the copy.
+        shutil.copytree(project, copy, ignore=ignore_unavailable)
+        project = copy
+    command = ["wheel", "--no-deps", "--wheel-dir", str(directory), str(project)]
+    if args.no_index:
+        command.append("--no-index")
+    for location in args.find_links:
+        command += ["--find-links", location]
+    pip(command, bool(args.verbose))
+    wheels = list(directory.glob("*.whl"))
+    if len(wheels) != 1:
+        raise InstallError("Project build did not produce exactly one wheel")
+    return wheels[0]
+
+
+class WheelDestination(SchemeDictionaryDestination):
+    """Stage complete wheels with portable launchers and external-script records.
+
+    :ivar external_scripts: Whether scripts live outside the library publication boundary.
+    :ivar launcher_kinds: POSIX and/or Windows launcher variants to generate.
+    :ivar extra_scripts: Additional launcher records included in wheel RECORD.
+    """
+
+    external_scripts: bool = False
+    launcher_kinds: Sequence[str] = ()
+    extra_scripts: List[Tuple[str, RecordEntry]]
+
+    def write_file(
+        self, scheme: str, path: Union[str, os.PathLike], stream: BinaryIO, is_executable: bool
+    ) -> RecordEntry:
+        """Install wheel-provided scripts with executable permissions.
+
+        :param scheme: Wheel installation scheme containing the file.
+        :param path: File path within that scheme.
+        :param stream: Original wheel file bytes.
+        :param is_executable: Executable flag recorded in the source archive.
+        :return: Installed file's hashed RECORD entry.
+        """
+        return super().write_file(scheme, path, stream, is_executable or scheme == "scripts")
+
+    def write_script(self, name: str, module: str, attr: str, section: str) -> RecordEntry:
+        """Generate a launcher using the runtime interpreter available on PATH.
+
+        :param name: Command name declared by the wheel.
+        :param module: Module containing the entrypoint.
+        :param attr: Callable attribute within the module.
+        :param section: Console or GUI script section.
+        :return: Hashed record of the executable written to the scripts scheme.
+        """
+        entries = []
+        for kind in self.launcher_kinds or (self.script_kind,):
+            executable = (
+                ("pythonw.exe" if section == "gui" else "python.exe")
+                if kind != "posix"
+                else "python3"
+            )
+            script_name, data = Script(name, module, attr, section).generate(executable, kind)
+            if kind != "posix":
+                # installer 0.7 embeds wall-clock ZIP timestamps. Normalize them
+                # so repeated installs and platform staging produce identical bytes.
+                with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                    entry = archive.getinfo("__main__.py")
+                    prefix = data[: entry.header_offset]
+                    code = archive.read(entry)
+                stream = io.BytesIO()
+                with zipfile.ZipFile(stream, "w") as archive:
+                    archive.writestr(zipfile.ZipInfo("__main__.py"), code)
+                data = prefix + stream.getvalue()
+            if kind == "posix":
+                data = b"#!/usr/bin/env python3\n" + data.partition(b"\n")[2]
+            entries.append(
+                self.write_to_fs("scripts", script_name, io.BytesIO(data), is_executable=True)
+            )
+        self.extra_scripts.extend(("scripts", entry) for entry in entries[1:])
+        return entries[0]
+
+    def finalize_installation(
+        self, scheme: str, record_file_path: str, records: Iterable[Tuple[str, RecordEntry]]
+    ) -> None:
+        """Write RECORD paths that remain valid across separate revision symlinks.
+
+        :param scheme: Library scheme containing the distribution metadata.
+        :param record_file_path: RECORD path relative to that scheme.
+        :param records: Wheel files and generated launchers to record.
+        :return: None.
+        """
+        records = list(records) + self.extra_scripts
+        if not self.external_scripts:
+            return super().finalize_installation(scheme, record_file_path, records)
+
+        def prefix(file_scheme: str) -> Optional[str]:
+            """Select the installed path prefix for a wheel scheme.
+
+            :param file_scheme: Scheme whose entries are being serialized.
+            :return: Absolute scripts path, relative scheme path, or no prefix.
+            """
+            if file_scheme == scheme:
+                return None
+            if file_scheme == "scripts":
+                # A relative path through '..' would traverse the library's
+                # physical revision directory, not its active logical parent.
+                return Path(self.scheme_dict[file_scheme]).as_posix() + "/"
+            return os.path.relpath(self.scheme_dict[file_scheme], self.scheme_dict[scheme]) + "/"
+
+        with construct_record_file(records, prefix) as stream:
+            self.write_to_fs(scheme, record_file_path, stream, is_executable=False)
+
+
+def staged_path(directory: Path, installed: Path) -> Path:
+    """Map an absolute deployment path into the temporary filesystem image.
+
+    :param directory: Root of the temporary staging filesystem.
+    :param installed: Absolute final deployment path.
+    :return: Corresponding temporary payload path.
+    """
+    return directory / installed.relative_to(installed.anchor)
+
+
+def stage(
+    artifact: Artifact,
+    directory: Path,
+    target: Target,
+    import_root: Path,
+    scripts_root: Path,
+    publication_root: Path,
+    launcher_platforms: Sequence[str] = (),
+) -> None:
+    """Install a wheel into a temporary image of its configured final layout.
+
+    :param artifact: Validated wheel to install completely.
+    :param directory: Temporary filesystem image, never the deployment directory.
+    :param target: Runtime selecting POSIX or Windows launchers.
+    :param import_root: Final library directory used by purelib and platlib schemes.
+    :param scripts_root: Final destination for generated and wheel-provided scripts.
+    :param publication_root: Managed boundary containing the library payload.
+    :param launcher_platforms: Platforms sharing generated entrypoints in this boundary.
+    :return: None.
+    :raises InstallError: If the wheel or its RECORD is invalid.
+    :raises OSError: If staging files cannot be written.
+    """
+    schemes = {
+        "purelib": str(import_root),
+        "platlib": str(import_root),
+        "headers": str(import_root / "include"),
+        "scripts": str(scripts_root),
+        "data": str(import_root),
+    }
+    destination = WheelDestination(
+        schemes,
+        interpreter="python.exe" if target.platform == "windows" else "/usr/bin/env python3",
+        script_kind="win-amd64" if target.platform == "windows" else "posix",
+        bytecode_optimization_levels=(),
+        destdir=str(directory),
+    )
+    destination.launcher_kinds = sorted(
+        {"win-amd64" if platform == "windows" else "posix" for platform in launcher_platforms}
+    )
+    destination.extra_scripts = []
+    destination.external_scripts = (
+        scripts_root != publication_root and publication_root not in scripts_root.parents
+    )
+    staged_path(directory, scripts_root).mkdir(parents=True, exist_ok=True)
+    try:
+        with WheelFile.open(artifact.path) as source:
+            source.validate_record()
+            install(source, destination, additional_metadata={"INSTALLER": b"distman\n"})
+    except (InstallerError, zipfile.BadZipFile) as exc:
+        raise InstallError(f"Invalid wheel {artifact.path.name}: {exc}") from exc

@@ -42,6 +42,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple, Union
 
 from distman import config, util
+from distman.deployment import get_version_dest
 from distman.logger import log, setup_logging
 from distman.pipeline import (
     ValidationError,
@@ -60,6 +61,13 @@ class Target:
     ``source`` is the repository path to distribute, ``dest`` is the resolved
     deployment path, and ``pipeline`` / ``options`` contain the effective
     target-specific settings.
+
+    :param name: Configured target name used for selection and logging.
+    :param source: Source path interpreted relative to the distributor directory.
+    :param dest: Resolved active deployment destination.
+    :param type: Filesystem object type used for logging.
+    :param pipeline: Optional effective transform pipeline specification.
+    :param options: Optional effective target settings, including version-matching policy.
     """
 
     name: str
@@ -114,21 +122,6 @@ def update_symlink(dest: str, target: str, dryrun: bool) -> bool:
         return True
     version_dest = os.path.join(config.DIR_VERSIONS, os.path.basename(target))
     return util.link_object(version_dest, dest, target)
-
-
-def get_version_dest(dest: str, version_num: int, short_head: Optional[str]) -> str:
-    """Generate the destination path for a versioned file.
-
-    :param dest: The original destination path.
-    :param version_num: The version number to append.
-    :param short_head: Optional short hash of the latest commit.
-    :return: The versioned destination path.
-    """
-    versions_dir = os.path.join(os.path.dirname(dest), config.DIR_VERSIONS)
-    version_dest = os.path.join(versions_dir, os.path.basename(dest) + f".{version_num}")
-    if short_head:
-        version_dest += f".{short_head}"
-    return util.sanitize_path(version_dest)
 
 
 def should_skip_target(target_name: str, patterns: Optional[Union[str, List[str]]]) -> bool:
@@ -196,6 +189,8 @@ def validate_destination_template(destination: str) -> None:
 
     :param destination: Destination path or template to validate.
     :raises ValueError: If unresolved ``%N`` placeholders remain.
+
+    :return: None.
     """
     if re.search(r"%\d+", destination):
         raise ValueError(f"Unresolved wildcard placeholders: {destination}")
@@ -204,14 +199,17 @@ def validate_destination_template(destination: str) -> None:
 class Distributor(GitRepo):
     """Deploy targets from a loaded ``dist.json`` file."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the distributor and ensure symlink support is available."""
         super().__init__()
         if not callable(getattr(os, "symlink", None)):
             util.add_symlink_support()
 
     def close(self) -> None:
-        """Release repository resources held by the distributor."""
+        """Release repository resources held by the distributor.
+
+        :return: None.
+        """
         try:
             if self.repo:
                 self.repo.close()
@@ -911,118 +909,14 @@ class Distributor(GitRepo):
 
 
 def build_parser(prog: str = "dist") -> argparse.ArgumentParser:
-    """Build the argument parser for the deploy/version-management CLI.
+    """Build the legacy parser through the centralized command-line interface.
 
-    :param prog: Program name to display in parser help.
-    :return: Configured argument parser.
+    :param prog: Executable name to display in the standalone distribution parser.
+    :return: Distribution parser supplied by the centralized CLI.
     """
-    from distman import __version__
+    from distman.cli import build_command_parser
 
-    parser = argparse.ArgumentParser(
-        prog=prog,
-        description="dist: distribute files and directories to versioned destinations",
-        formatter_class=argparse.RawTextHelpFormatter,
-    )
-    parser.add_argument(
-        "location",
-        metavar="LOCATION",
-        nargs="?",
-        default=".",
-        help="source directory and optional dist file location (default is cwd)",
-    )
-    parser.add_argument(
-        "-t",
-        "--target",
-        nargs="+",
-        metavar="TARGET",
-        help="target name in the dist file (supports wildcards)",
-    )
-    parser.add_argument(
-        "--source",
-        metavar="PATH",
-        help="source file or directory; matches dist.json source patterns when present",
-    )
-    parser.add_argument(
-        "--dest",
-        metavar="PATH",
-        help="deployment destination override; requires --source or --target",
-    )
-    parser.add_argument(
-        "-s",
-        "--show",
-        action="store_true",
-        help="show current distributed versions only",
-    )
-    parser.add_argument(
-        "-c",
-        "--commit",
-        metavar="HASH",
-        help="change TARGET version number to point to commit HASH",
-    )
-    parser.add_argument(
-        "-n",
-        "--number",
-        metavar="NUMBER",
-        help="change TARGET version number to point to NUMBER",
-    )
-    parser.add_argument(
-        "--reset",
-        action="store_true",
-        help="reset version for TARGET to point to latest version",
-    )
-    parser.add_argument(
-        "--delete",
-        action="store_true",
-        help="delete dist TARGET from deployment folder",
-    )
-    parser.add_argument(
-        "-y",
-        "--yes",
-        action="store_true",
-        help="answer yes to all questions, skipping user interaction",
-    )
-    parser.add_argument(
-        "--all",
-        action="store_true",
-        help="dist all files, including ignorable files",
-    )
-    parser.add_argument(
-        "--ignore-missing",
-        action="store_true",
-        default=config.IGNORE_MISSING,
-        help="ignore missing files in dist file",
-    )
-    parser.add_argument(
-        "-f",
-        "--force",
-        action="store_true",
-        help="force action, e.g. disting uncommitted file changes",
-    )
-    parser.add_argument(
-        "--version-only",
-        action="store_true",
-        help="distribute files only, do not create links",
-    )
-    parser.add_argument(
-        "-d",
-        "--dryrun",
-        action="store_true",
-        help="do a dry run, no actions will be performed",
-    )
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="count",
-        default=0,
-        help="output verbosity (-v for INFO, -vv for DEBUG)",
-    )
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=f"distman {__version__}",
-    )
-
-    return parser
+    return build_command_parser("dist", prog=prog)
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
