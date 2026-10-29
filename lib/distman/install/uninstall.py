@@ -51,15 +51,10 @@ from distman.deployment import publish_directories
 from distman.install import InstallError
 from distman.install.command import include_companions
 from distman.install.models import Changes, InstalledArtifact, InstallState
-from distman.install.ownership import (
-    MANIFEST,
-    check_script_pairs,
-    locks,
-    read_state,
-    target_requirements,
-)
+from distman.install.ownership import MANIFEST, check_script_pairs, read_state, target_requirements
 from distman.install.targets import Target
-from distman.install.wheels import sha256
+from distman.inventory import sha256
+from distman.locking import deployment_lock, locks
 from distman.policy import Policy
 
 
@@ -344,29 +339,34 @@ def uninstall(args: argparse.Namespace) -> int:
     selectors = requests(args.packages)
     policy = Policy()
     print(f"Effective deployment root: {policy.deploy_root}")
-    groups = {root: {} for root in policy.managed_roots()}
-    include_companions(groups)
-    roots = sorted(groups)
-    for i, root in enumerate(roots):
-        if any(root in other.parents for other in roots[i + 1 :]):
-            raise InstallError(f"Overlapping managed boundaries: {root}")
-    with locks(roots, args.dryrun):
-        states = {root: read_state(root) for root in roots}
-        records = [record for state in states.values() for record in state["artifacts"].values()]
-        labels = runtime_labels(args, records)
-        proposed = removal_states(states, selectors, labels)
-        retained = [record for state in proposed.values() for record in state["artifacts"].values()]
-        validate_removal(records, retained, force=args.force)
-        with tempfile.TemporaryDirectory(prefix="distman-uninstall-") as work:
-            changes = stage_removal(states, proposed, Path(work))
-            if args.dryrun:
-                print(f"Dry run: {len(changes)} revision(s); deployment directories unchanged")
-                return 0
-            if not changes:
-                print("Unchanged: selected packages/runtimes are not installed")
-                return 0
-            if not args.yes and not util.yesNo(f"Remove packages from {policy.deploy_root}?"):
-                return 1
-            publish_directories(changes, policy.deploy_root)
-            print(f"Uninstalled: {len(changes)} revision(s)")
-    return 0
+    with deployment_lock(policy.deploy_root, args.dryrun):
+        groups = {root: {} for root in policy.managed_roots()}
+        include_companions(groups)
+        roots = sorted(groups)
+        for i, root in enumerate(roots):
+            if any(root in other.parents for other in roots[i + 1 :]):
+                raise InstallError(f"Overlapping managed boundaries: {root}")
+        with locks(roots, args.dryrun):
+            states = {root: read_state(root) for root in roots}
+            records = [
+                record for state in states.values() for record in state["artifacts"].values()
+            ]
+            labels = runtime_labels(args, records)
+            proposed = removal_states(states, selectors, labels)
+            retained = [
+                record for state in proposed.values() for record in state["artifacts"].values()
+            ]
+            validate_removal(records, retained, force=args.force)
+            with tempfile.TemporaryDirectory(prefix="distman-uninstall-") as work:
+                changes = stage_removal(states, proposed, Path(work))
+                if args.dryrun:
+                    print(f"Dry run: {len(changes)} revision(s); deployment directories unchanged")
+                    return 0
+                if not changes:
+                    print("Unchanged: selected packages/runtimes are not installed")
+                    return 0
+                if not args.yes and not util.yesNo(f"Remove packages from {policy.deploy_root}?"):
+                    return 1
+                publish_directories(changes, policy.deploy_root)
+                print(f"Uninstalled: {len(changes)} revision(s)")
+        return 0

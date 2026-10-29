@@ -167,9 +167,11 @@ def distribute_project(
     if args.force:
         command.append("--force")
     command.extend(["--verbose"] * args.verbose)
-    return subprocess.run(
-        command, env=project_environment(environment), cwd=project.path
-    ).returncode
+    from distman.locking import lock_environment
+
+    child_environment = project_environment(environment)
+    child_environment.update(lock_environment(Path(environment["DEPLOY_ROOT"])))
+    return subprocess.run(command, env=child_environment, cwd=project.path).returncode
 
 
 def project_environment(environment: Mapping[str, str]) -> Dict[str, str]:

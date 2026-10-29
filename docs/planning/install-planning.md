@@ -274,13 +274,14 @@ active deployment; a single metadata file must not become the only recovery sour
 ## Unified deployment metadata (proposed)
 
 Consolidate legacy target metadata, installer ownership, and the cache generation
-marker behind one versioned metadata contract. A candidate storage layout is one
-`${DEPLOY_ROOT}/.distman/state.json` per deployment, with target/revision records,
-package ownership and dependencies, and a generation value for cache invalidation.
-This is a proposed migration; current metadata locations remain unchanged. Finalize
-the recovery contract and benchmark inventory storage before choosing a single JSON
-file; a unified metadata interface does not require repeating every file inventory
-in one large document. Optional verification snapshots can remain external artifacts.
+marker behind one versioned metadata contract. The concrete proposal uses target
+and immutable revision records beneath `${DEPLOY_ROOT}/.distman/`, with operation
+records for interrupted publication and a cache invalidation token. See the
+[architecture audit](architecture.md#proposed-metadata-layout-and-compatibility)
+for the layout, legacy read policy, writer upgrade requirement, and implementation
+sequence. This supersedes the initial single `state.json` sketch; current metadata
+locations remain unchanged. Benchmark inventory storage and test recovery before
+migration. Optional verification snapshots remain separate from ownership records.
 
 The central state must retain immutable ownership inventories for historical
 revisions, so rollback still restores the correct package/dependency information.
@@ -298,9 +299,11 @@ deployments. Consolidation is broader than renaming the installer receipt file.
 ### Shared network deployments (proposed)
 
 Multi-host access to shared network storage is a primary deployment use case.
-Current install/uninstall locks reject overlapping writers immediately; legacy dist
-has no shared installer locking protocol. Coordinate all modifying commands with
-bounded waiting, owner diagnostics, and fresh state reads after lock acquisition.
+Install/uninstall and modifying dist operations now share a deployment-root writer
+lock with bounded waiting and owner diagnostics. Planning reads state after acquiring
+that lock. Transitional per-target locks still reject older concurrent installers
+immediately. Cache-destination coordination remains outstanding; see the
+[implementation progress](architecture.md#first-infrastructure-slice-implementation-progress).
 Address overlapping paths, aliases, cross-user permissions, stale locks, disconnects,
 and interrupted publication. Do not reclaim a lock solely because it is old or a
 remote PID cannot be inspected. Validate concurrency on supported NFS/SMB setups;

@@ -33,7 +33,6 @@
 
 import argparse
 import email
-import hashlib
 import io
 import json
 import os
@@ -62,20 +61,7 @@ from packaging.version import Version
 from distman.install import InstallError
 from distman.install.models import Provenance
 from distman.install.targets import Target
-
-
-def sha256(path: Path) -> str:
-    """Hash file bytes incrementally without loading the entire artifact into memory.
-
-    :param path: File whose bytes will be hashed.
-    :return: Lowercase hexadecimal SHA-256 digest.
-    :raises OSError: If the file cannot be read.
-    """
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
+from distman.inventory import sha256
 
 
 @dataclass

@@ -34,16 +34,7 @@
 from pathlib import Path
 from typing import Dict, List, Tuple, TypedDict
 
-
-class FileDigest(TypedDict):
-    """Integrity and permission data for one installed relative file path.
-
-    :ivar sha256: SHA-256 digest of installed file bytes.
-    :ivar mode: Installed permission bits masked to 0o777.
-    """
-
-    sha256: str
-    mode: int
+from distman.inventory import FileDigest
 
 
 class Provenance(TypedDict):

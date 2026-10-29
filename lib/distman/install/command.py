@@ -47,8 +47,6 @@ from distman.install.ownership import (
     check_dependencies,
     check_script_pairs,
     compose,
-    inventory,
-    locks,
     read_state,
     same_state,
     target_records,
@@ -62,6 +60,8 @@ from distman.install.projects import (
 )
 from distman.install.targets import Target, expand_targets
 from distman.install.wheels import acquire, build_project, stage, staged_path
+from distman.inventory import inventory
+from distman.locking import deployment_lock, locks
 from distman.policy import Policy
 
 
@@ -368,47 +368,50 @@ def install(args: argparse.Namespace) -> int:
     if project:
         print(f"Local project: {project.path}")
         print(f"Effective deployment root: {policy.deploy_root}")
-    with tempfile.TemporaryDirectory(prefix="distman-install-") as work:
-        temporary = Path(work)
-        groups, project_records = (
-            collect(args, policy, targets, temporary, project)
-            if args.packages or args.requirement or args.project
-            else ({}, [])
-        )
-        if project and project.distribution:
-            for custom in distribution_paths(project, policy.values):
-                for package_root in groups:
-                    if (
-                        custom == package_root
-                        or custom in package_root.parents
-                        or package_root in custom.parents
-                    ):
-                        raise InstallError(
-                            f"dist.json target overlaps package publication: {custom}"
-                        )
-            if distribute_project(project, args, policy.values, dryrun=True):
-                raise InstallError("Local dist.json preflight failed; no packages were published")
-        with locks(groups, args.dryrun):
-            changes, records = plan(groups, temporary, args.force)
-            records.extend(project_records)
-            check_script_pairs(records)
-            check_targets = {target.label: target for target in targets}
-            for record in records:
-                for label in record["targets"]:
-                    system, arch, python = label.split("-")
-                    check_targets.setdefault(
-                        label, Target(system, arch, python[2] + "." + python[3:])
-                    )
-            for target in check_targets.values():
-                check_dependencies(records, target)
-            if args.dryrun:
-                print(f"Dry run: {len(changes)} revision(s); deployment directories unchanged")
-                return 0
-            if (changes or project) and not args.yes:
-                if not util.yesNo(f"Publish installation to {policy.deploy_root}?"):
-                    return 1
-            publish_directories(changes, policy.deploy_root)
-            print(f"Installed: {len(changes)} revision(s)")
+    with deployment_lock(policy.deploy_root, args.dryrun):
+        with tempfile.TemporaryDirectory(prefix="distman-install-") as work:
+            temporary = Path(work)
+            groups, project_records = (
+                collect(args, policy, targets, temporary, project)
+                if args.packages or args.requirement or args.project
+                else ({}, [])
+            )
             if project and project.distribution:
-                return distribute_project(project, args, policy.values, dryrun=False)
-    return 0
+                for custom in distribution_paths(project, policy.values):
+                    for package_root in groups:
+                        if (
+                            custom == package_root
+                            or custom in package_root.parents
+                            or package_root in custom.parents
+                        ):
+                            raise InstallError(
+                                f"dist.json target overlaps package publication: {custom}"
+                            )
+                if distribute_project(project, args, policy.values, dryrun=True):
+                    raise InstallError(
+                        "Local dist.json preflight failed; no packages were published"
+                    )
+            with locks(groups, args.dryrun):
+                changes, records = plan(groups, temporary, args.force)
+                records.extend(project_records)
+                check_script_pairs(records)
+                check_targets = {target.label: target for target in targets}
+                for record in records:
+                    for label in record["targets"]:
+                        system, arch, python = label.split("-")
+                        check_targets.setdefault(
+                            label, Target(system, arch, python[2] + "." + python[3:])
+                        )
+                for target in check_targets.values():
+                    check_dependencies(records, target)
+                if args.dryrun:
+                    print(f"Dry run: {len(changes)} revision(s); deployment directories unchanged")
+                    return 0
+                if (changes or project) and not args.yes:
+                    if not util.yesNo(f"Publish installation to {policy.deploy_root}?"):
+                        return 1
+                publish_directories(changes, policy.deploy_root)
+                print(f"Installed: {len(changes)} revision(s)")
+                if project and project.distribution:
+                    return distribute_project(project, args, policy.values, dryrun=False)
+        return 0

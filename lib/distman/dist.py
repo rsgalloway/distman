@@ -39,14 +39,17 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Optional, Sequence, Tuple, Union
 
 from distman import config, util
 from distman.deployment import get_version_dest
+from distman.locking import LockError, deployment_lock, locks
 from distman.logger import log, setup_logging
 from distman.pipeline import (
     ValidationError,
     get_pipeline_for_target,
+    pipeline_workspace,
     run_pipeline,
     validate_pipeline_spec,
 )
@@ -422,196 +425,205 @@ class Distributor(GitRepo):
         :param verbose: Verbosity level.
         :return: True if distribution was successful, False otherwise.
         """
-        if not self.read_git_info():
-            return False
-        if verbose >= 2:
-            self.log_distribution_info()
-
-        changed_files = self.git_changed_files()
-        changed_dirs = util.get_common_root_dirs(changed_files)
-        did_mutate = False
-
-        if self.root and config.DIST_FILE in changed_files:
-            log.warning(f"Uncommitted changes in {config.DIST_FILE}")
-
-        if dest and not source and not target:
-            log.error("--dest requires --source or --target")
-            return False
-
-        target_list = self.iter_config_targets(
-            target=target,
-            source=source,
-            dest=dest,
-        )
-
-        if target_list is None and self.root:
-            return False
-        if (not target_list) and source and dest:
-            try:
-                target_list = [self.get_direct_target(source, dest)]
-            except Exception as e:
-                log.error(f"{e} in --dest")
+        with deployment_lock(Path(config.DEPLOY_ROOT), dryrun or show):
+            if not self.read_git_info():
                 return False
-        elif (not target_list) and not self.root:
-            log.error(f"{config.DIST_FILE} not found or invalid")
-            return False
+            if verbose >= 2:
+                self.log_distribution_info()
 
-        if not target_list:
-            if source:
-                log.info(f"No matching targets found for source '{source}'")
-            else:
-                log.info(f"No matching targets in {config.DIST_FILE}")
-            return False
+            changed_files = self.git_changed_files()
+            changed_dirs = util.get_common_root_dirs(changed_files)
+            did_mutate = False
 
-        if not show and not force and self.is_git_behind():
-            return False
+            if self.root and config.DIST_FILE in changed_files:
+                log.warning(f"Uncommitted changes in {config.DIST_FILE}")
 
-        if dryrun:
-            log.info(config.DRYRUN_MESSAGE)
-
-        for t in target_list:
-            if not os.path.exists(t.source):
-                if t.options.get("ignore_missing", ignore_missing):
-                    log.info(f"Target {t.name}: Source '{t.source}' not found, skipping")
-                    continue
-                log.error(f"Target {t.name}: Source '{t.source}' does not exist")
+            if dest and not source and not target:
+                log.error("--dest requires --source or --target")
                 return False
 
-            if not show and not force and (t.source in changed_files or t.source in changed_dirs):
-                log.info(
-                    f"Target {t.name}: Source '{t.source}' has uncommitted changes. "
-                    "Commit or use --force."
-                )
-                return False
+            target_list = self.iter_config_targets(
+                target=target,
+                source=source,
+                dest=dest,
+            )
 
-            destination_dir = os.path.dirname(t.dest)
-            if not show and not dryrun and not os.path.exists(destination_dir):
-                question = (
-                    f"Target {t.name}: Destination dir '{destination_dir}' "
-                    "doesn't exist. Create?"
-                )
-                if not confirm(question, yes, dryrun):
-                    return False
+            if target_list is None and self.root:
+                return False
+            if (not target_list) and source and dest:
                 try:
-                    os.makedirs(os.path.dirname(t.dest), exist_ok=True)
-                except Exception as err:
-                    log.error(str(err))
-                    return False
-
-            if t.type == "?":
-                t.type = util.get_path_type(t.source)[0]
-
-            util.create_dest_folder(t.dest, dryrun, yes)
-
-            # determine if the commit hash will be used for matching versions
-            match_option = t.options.get("match", "commit")
-
-            # FIXME: fallback shim until match option is fully implemented
-            if match_option not in ["commit", "content"]:
-                raise ValueError(f"Unsupported version match option '{match_option}'")
-
-            if match_option == "commit":
-                commit_hash = self.short_head
-            else:
-                commit_hash = None  # don't use commit_hash in version matching
-
-            if not dryrun and not show:
-                util.write_dist_file(
-                    t.dest,
-                    {
-                        "name": self.name,
-                        "origin": self.path,
-                        "branch": self.branch_name,
-                        "commit": self.short_head,
-                        "source": t.source,
-                        "author": self.author,
-                    },
-                )
-                did_mutate = True
-
-            source_path = t.source
-
-            # run the pipeline if defined
-            if not dryrun and not show and t.pipeline:
-                try:
-                    source_path = run_pipeline(
-                        target=t,
-                        pipeline=t.pipeline,
-                        input_path=t.source,
-                        build_dir=config.BUILD_DIR,
-                    )
-                except ValidationError as e:
-                    log.error(f"Pipeline validation error: {e}")
-                    raise
-                except TransformError as e:
-                    log.error(f"Pipeline transform error: {e}")
-                    raise
+                    target_list = [self.get_direct_target(source, dest)]
                 except Exception as e:
-                    log.error(f"Pipeline unhandled error: {e}")
-                    raise
+                    log.error(f"{e} in --dest")
+                    return False
+            elif (not target_list) and not self.root:
+                log.error(f"{config.DIST_FILE} not found or invalid")
+                return False
 
-            # get existing versions for the target
-            if show:
-                if verbose >= 1:
-                    version_list = util.get_file_versions(t.dest)
+            if not target_list:
+                if source:
+                    log.info(f"No matching targets found for source '{source}'")
                 else:
-                    version_list = []
-                self.show_distribution_info(t.source, t.dest, version_list, verbose)
-                continue
-            else:
-                version_list = util.get_file_versions(t.dest, limit=config.MAX_VERSIONS)
+                    log.info(f"No matching targets in {config.DIST_FILE}")
+                return False
 
-            # determine the next version number
-            version_num = version_list[-1][1] + 1 if version_list else 0
+            if not show and not force and self.is_git_behind():
+                return False
 
-            # look for matches in existing versions unless forced
-            matches = []
-            if not force:
-                matches = util.find_matching_versions(
-                    source_path=source_path,
-                    dest=t.dest,
-                    commit_hash=commit_hash,
-                    version_list=version_list,
-                )
+            if dryrun:
+                log.info(config.DRYRUN_MESSAGE)
 
-            # if a match is found, update the symlink if needed
-            if matches:
-                match_file, _, _ = matches[-1]
-                if os.path.islink(t.dest) and os.readlink(t.dest).endswith(
-                    os.path.basename(match_file)
-                ):
-                    log.info(f"Unchanged: {t.source} ={t.type}> {match_file}")
-                    continue
-                if versiononly and not force:
-                    log.info(f"Match: {t.source} ={t.type}> {match_file}")
-                    continue
-                if confirm(
-                    f"Match: {t.source} ={t.type}> {match_file}. Update link?",
-                    yes,
-                    dryrun,
-                ):
-                    if update_symlink(t.dest, match_file, dryrun):
-                        log.info(f"Updated: {t.source} ={t.type}> {match_file}")
-                        did_mutate = True
-                    continue
+            for t in target_list:
+                with pipeline_workspace(
+                    config.BUILD_DIR, enabled=bool(t.pipeline) and not (dryrun or show)
+                ) as build_dir:
+                    if not os.path.exists(t.source):
+                        if t.options.get("ignore_missing", ignore_missing):
+                            log.info(f"Target {t.name}: Source '{t.source}' not found, skipping")
+                            continue
+                        log.error(f"Target {t.name}: Source '{t.source}' does not exist")
+                        return False
 
-            # get the destination path for the versioned file
-            version_dest = get_version_dest(t.dest, version_num, self.short_head)
+                    if (
+                        not show
+                        and not force
+                        and (t.source in changed_files or t.source in changed_dirs)
+                    ):
+                        log.info(
+                            f"Target {t.name}: Source '{t.source}' has uncommitted changes. "
+                            "Commit or use --force."
+                        )
+                        return False
 
-            # copy the source file to the versioned destination
-            if not dryrun:
-                util.copy_object(source_path, version_dest, all_files=all)
-                did_mutate = True
-                if not versiononly:
-                    if not update_symlink(t.dest, version_dest, dryrun):
-                        continue
+                    destination_dir = os.path.dirname(t.dest)
+                    if not show and not dryrun and not os.path.exists(destination_dir):
+                        question = (
+                            f"Target {t.name}: Destination dir '{destination_dir}' "
+                            "doesn't exist. Create?"
+                        )
+                        if not confirm(question, yes, dryrun):
+                            return False
+                        try:
+                            os.makedirs(os.path.dirname(t.dest), exist_ok=True)
+                        except Exception as err:
+                            log.error(str(err))
+                            return False
 
-            log.info(f"Updated: {t.source} ={t.type}> {version_dest}")
+                    if t.type == "?":
+                        t.type = util.get_path_type(t.source)[0]
 
-        if did_mutate and not dryrun and not show:
-            util.write_epoch_file(config.DEPLOY_ROOT)
+                    with locks([Path(t.dest)], dryrun or show):
+                        util.create_dest_folder(t.dest, dryrun, yes)
 
-        return True
+                        # determine if the commit hash will be used for matching versions
+                        match_option = t.options.get("match", "commit")
+
+                        # FIXME: fallback shim until match option is fully implemented
+                        if match_option not in ["commit", "content"]:
+                            raise ValueError(f"Unsupported version match option '{match_option}'")
+
+                        if match_option == "commit":
+                            commit_hash = self.short_head
+                        else:
+                            commit_hash = None  # don't use commit_hash in version matching
+
+                        if not dryrun and not show:
+                            util.write_dist_file(
+                                t.dest,
+                                {
+                                    "name": self.name,
+                                    "origin": self.path,
+                                    "branch": self.branch_name,
+                                    "commit": self.short_head,
+                                    "source": t.source,
+                                    "author": self.author,
+                                },
+                            )
+                            did_mutate = True
+
+                        source_path = t.source
+
+                        # run the pipeline if defined
+                        if not dryrun and not show and t.pipeline:
+                            try:
+                                source_path = run_pipeline(
+                                    target=t,
+                                    pipeline=t.pipeline,
+                                    input_path=t.source,
+                                    build_dir=build_dir,
+                                )
+                            except ValidationError as e:
+                                log.error(f"Pipeline validation error: {e}")
+                                raise
+                            except TransformError as e:
+                                log.error(f"Pipeline transform error: {e}")
+                                raise
+                            except Exception as e:
+                                log.error(f"Pipeline unhandled error: {e}")
+                                raise
+
+                        # get existing versions for the target
+                        if show:
+                            if verbose >= 1:
+                                version_list = util.get_file_versions(t.dest)
+                            else:
+                                version_list = []
+                            self.show_distribution_info(t.source, t.dest, version_list, verbose)
+                            continue
+                        else:
+                            version_list = util.get_file_versions(t.dest, limit=config.MAX_VERSIONS)
+
+                        # determine the next version number
+                        version_num = version_list[-1][1] + 1 if version_list else 0
+
+                        # look for matches in existing versions unless forced
+                        matches = []
+                        if not force:
+                            matches = util.find_matching_versions(
+                                source_path=source_path,
+                                dest=t.dest,
+                                commit_hash=commit_hash,
+                                version_list=version_list,
+                            )
+
+                        # if a match is found, update the symlink if needed
+                        if matches:
+                            match_file, _, _ = matches[-1]
+                            if os.path.islink(t.dest) and os.readlink(t.dest).endswith(
+                                os.path.basename(match_file)
+                            ):
+                                log.info(f"Unchanged: {t.source} ={t.type}> {match_file}")
+                                continue
+                            if versiononly and not force:
+                                log.info(f"Match: {t.source} ={t.type}> {match_file}")
+                                continue
+                            if confirm(
+                                f"Match: {t.source} ={t.type}> {match_file}. Update link?",
+                                yes,
+                                dryrun,
+                            ):
+                                if update_symlink(t.dest, match_file, dryrun):
+                                    log.info(f"Updated: {t.source} ={t.type}> {match_file}")
+                                    did_mutate = True
+                                continue
+
+                        # get the destination path for the versioned file
+                        version_dest = get_version_dest(t.dest, version_num, self.short_head)
+
+                        # copy the source file to the versioned destination
+                        if not dryrun:
+                            util.copy_object(source_path, version_dest, all_files=all)
+                            did_mutate = True
+                            if not versiononly:
+                                if not update_symlink(t.dest, version_dest, dryrun):
+                                    continue
+
+                        log.info(f"Updated: {t.source} ={t.type}> {version_dest}")
+
+            if did_mutate and not dryrun and not show:
+                util.write_epoch_file(config.DEPLOY_ROOT)
+
+            return True
 
     def reset_file_version(
         self,
@@ -624,56 +636,58 @@ class Distributor(GitRepo):
         :param dryrun: If True, simulates the reset without making changes.
         :return: True if any targets were reset, False otherwise.
         """
-        targets_node = self.get_targets()
-        if not targets_node:
-            return False
-        if dryrun:
-            log.info(config.DRYRUN_MESSAGE)
-
-        any_found = False
-        target_list = []
-
-        for target_name, target_dict in targets_node.items():
-            if should_skip_target(target_name, target):
-                continue
-            pair = get_source_and_dest(target_dict)
-            if not pair:
-                continue
-
-            source, dest = pair
-            any_found = True
-
-            # check for wildcard in source
-            if "*" in source:
-                for src_path, dst_path in util.expand_wildcard_entry(source, dest):
-                    target_type = util.get_path_type(src_path)[0]
-                    try:
-                        dest = util.sanitize_path(util.replace_vars(dst_path))
-                        target_list.append((src_path, dest))
-                    except Exception as e:
-                        log.error(f"{e} resolving wildcard target {target}")
-                        return False
-
-            else:
-                target_list.append((source, dest))
-
-        for source, dest in target_list:
-            version_list = util.get_file_versions(dest)
-            if not version_list:
-                log.info(f"Target {target_name}: No versioned files found for '{source}'")
-                continue
-            latest_ver = version_list[-1][0]
-            target_type = util.get_path_type(latest_ver)[0]
+        with deployment_lock(Path(config.DEPLOY_ROOT), dryrun):
+            targets_node = self.get_targets()
+            if not targets_node:
+                return False
             if dryrun:
-                log.info(f"{source} ={target_type}> {latest_ver}")
-            else:
-                if update_symlink(dest, latest_ver, dryrun):
-                    log.info(f"{source} ={target_type}> {latest_ver}")
+                log.info(config.DRYRUN_MESSAGE)
 
-        if not any_found:
-            log.info("No targets found to reset")
+            any_found = False
+            target_list = []
 
-        return any_found
+            for target_name, target_dict in targets_node.items():
+                if should_skip_target(target_name, target):
+                    continue
+                pair = get_source_and_dest(target_dict)
+                if not pair:
+                    continue
+
+                source, dest = pair
+                any_found = True
+
+                # check for wildcard in source
+                if "*" in source:
+                    for src_path, dst_path in util.expand_wildcard_entry(source, dest):
+                        target_type = util.get_path_type(src_path)[0]
+                        try:
+                            dest = util.sanitize_path(util.replace_vars(dst_path))
+                            target_list.append((src_path, dest))
+                        except Exception as e:
+                            log.error(f"{e} resolving wildcard target {target}")
+                            return False
+
+                else:
+                    target_list.append((source, dest))
+
+            for source, dest in target_list:
+                with locks([Path(dest)], dryrun):
+                    version_list = util.get_file_versions(dest)
+                    if not version_list:
+                        log.info(f"Target {target_name}: No versioned files found for '{source}'")
+                        continue
+                    latest_ver = version_list[-1][0]
+                    target_type = util.get_path_type(latest_ver)[0]
+                    if dryrun:
+                        log.info(f"{source} ={target_type}> {latest_ver}")
+                    else:
+                        if update_symlink(dest, latest_ver, dryrun):
+                            log.info(f"{source} ={target_type}> {latest_ver}")
+
+            if not any_found:
+                log.info("No targets found to reset")
+
+            return any_found
 
     def show_distribution_info(
         self,
@@ -725,80 +739,82 @@ class Distributor(GitRepo):
         :param dryrun: If True, simulates the change without making changes.
         :return: True if any targets were changed, False otherwise.
         """
-        targets_node = self.get_targets()
-        if not targets_node:
-            return False
-        if dryrun:
-            log.info(config.DRYRUN_MESSAGE)
+        with deployment_lock(Path(config.DEPLOY_ROOT), dryrun):
+            targets_node = self.get_targets()
+            if not targets_node:
+                return False
+            if dryrun:
+                log.info(config.DRYRUN_MESSAGE)
 
-        any_found = False
-        target_list = []
+            any_found = False
+            target_list = []
 
-        for target_name, target_dict in targets_node.items():
-            if should_skip_target(target_name, target):
-                continue
-
-            pair = get_source_and_dest(target_dict)
-            if not pair:
-                continue
-            source, dest = pair
-
-            # check for wildcard in source
-            if "*" in source:
-                for src_path, dst_path in util.expand_wildcard_entry(source, dest):
-                    target_type = util.get_path_type(src_path)[0]
-                    try:
-                        dest = util.sanitize_path(util.replace_vars(dst_path))
-                        target_list.append((src_path, dest))
-                    except Exception as e:
-                        log.error(f"{e} resolving wildcard target {target}")
-                        return False
-
-            else:
-                target_list.append((source, dest))
-
-        for source, dest in target_list:
-            version_list = util.get_file_versions(dest)
-            if not version_list:
-                log.info(f"Target {target_name}: No versioned files found for {source}")
-                continue
-
-            dest_target_version = target_version
-            if isinstance(target_version, int) and target_version < 0:
-                if abs(target_version) > len(version_list) - 1:
-                    log.warning(
-                        "Requested to roll back %d versions but only %d exist for %s",
-                        abs(target_version),
-                        len(version_list) - 1,
-                        source,
-                    )
+            for target_name, target_dict in targets_node.items():
+                if should_skip_target(target_name, target):
                     continue
-                # get the version number to roll back to for this source
-                dest_target_version = version_list[target_version - 1][1]
 
-            matched = False
-            for verfile, vernum, vercommit in version_list:
-                if (target_commit and util.hashes_equal(target_commit, vercommit)) or (
-                    target_version is not None and vernum == dest_target_version
-                ):
-                    any_found = True
-                    matched = True
-                    target_type = util.get_path_type(verfile)[0]
-                    log.info(f"{source} ={target_type}> {verfile}")
-                    if not dryrun:
-                        update_symlink(dest, verfile, dryrun)
-                    break
+                pair = get_source_and_dest(target_dict)
+                if not pair:
+                    continue
+                source, dest = pair
 
-            if not matched:
-                if target_commit:
-                    log.info(f"Target commit {target_commit} not found for {source}")
+                # check for wildcard in source
+                if "*" in source:
+                    for src_path, dst_path in util.expand_wildcard_entry(source, dest):
+                        target_type = util.get_path_type(src_path)[0]
+                        try:
+                            dest = util.sanitize_path(util.replace_vars(dst_path))
+                            target_list.append((src_path, dest))
+                        except Exception as e:
+                            log.error(f"{e} resolving wildcard target {target}")
+                            return False
+
                 else:
-                    log.info(f"Target version {target_version} not found for {source}")
+                    target_list.append((source, dest))
 
-        if not any_found:
-            log.info("No targets found to change version")
+            for source, dest in target_list:
+                with locks([Path(dest)], dryrun):
+                    version_list = util.get_file_versions(dest)
+                    if not version_list:
+                        log.info(f"Target {target_name}: No versioned files found for {source}")
+                        continue
 
-        return any_found
+                    dest_target_version = target_version
+                    if isinstance(target_version, int) and target_version < 0:
+                        if abs(target_version) > len(version_list) - 1:
+                            log.warning(
+                                "Requested to roll back %d versions but only %d exist for %s",
+                                abs(target_version),
+                                len(version_list) - 1,
+                                source,
+                            )
+                            continue
+                        # get the version number to roll back to for this source
+                        dest_target_version = version_list[target_version - 1][1]
+
+                    matched = False
+                    for verfile, vernum, vercommit in version_list:
+                        if (target_commit and util.hashes_equal(target_commit, vercommit)) or (
+                            target_version is not None and vernum == dest_target_version
+                        ):
+                            any_found = True
+                            matched = True
+                            target_type = util.get_path_type(verfile)[0]
+                            log.info(f"{source} ={target_type}> {verfile}")
+                            if not dryrun:
+                                update_symlink(dest, verfile, dryrun)
+                            break
+
+                    if not matched:
+                        if target_commit:
+                            log.info(f"Target commit {target_commit} not found for {source}")
+                        else:
+                            log.info(f"Target version {target_version} not found for {source}")
+
+            if not any_found:
+                log.info("No targets found to change version")
+
+            return any_found
 
     def delete_target(
         self,
@@ -817,95 +833,102 @@ class Distributor(GitRepo):
         :param dryrun: If True, simulates the deletion without making changes.
         :return: True if any targets were deleted, False otherwise.
         """
-        targets_node = self.get_targets()
-        if not targets_node:
-            return False
-        if dryrun:
-            log.info(config.DRYRUN_MESSAGE)
+        with deployment_lock(Path(config.DEPLOY_ROOT), dryrun):
+            targets_node = self.get_targets()
+            if not targets_node:
+                return False
+            if dryrun:
+                log.info(config.DRYRUN_MESSAGE)
 
-        target_list = []
-        any_found = False
+            target_list = []
+            any_found = False
 
-        for target_name, target_dict in targets_node.items():
-            if should_skip_target(target_name, target):
-                continue
+            for target_name, target_dict in targets_node.items():
+                if should_skip_target(target_name, target):
+                    continue
 
-            pair = get_source_and_dest(target_dict)
-            if not pair:
-                continue
-            source, dest = pair
+                pair = get_source_and_dest(target_dict)
+                if not pair:
+                    continue
+                source, dest = pair
 
-            # check for wildcard in source
-            if "*" in source:
-                for src_path, dst_path in util.expand_wildcard_entry(source, dest):
-                    try:
-                        dest = util.sanitize_path(util.replace_vars(dst_path))
-                        target_list.append((src_path, dest))
-                    except Exception as e:
-                        log.error(f"{e} resolving wildcard target {target_name}")
-                        return False
+                # check for wildcard in source
+                if "*" in source:
+                    for src_path, dst_path in util.expand_wildcard_entry(source, dest):
+                        try:
+                            dest = util.sanitize_path(util.replace_vars(dst_path))
+                            target_list.append((src_path, dest))
+                        except Exception as e:
+                            log.error(f"{e} resolving wildcard target {target_name}")
+                            return False
 
-            else:
-                target_list.append((source, dest))
-
-            for source, dest in target_list:
-                version_list = util.get_file_versions(dest)
-                if version_list:
-                    if target_version is not None:
-                        version_list = [v for v in version_list if int(v[1]) == int(target_version)]
-                    elif target_commit:
-                        version_list = [
-                            v for v in version_list if util.hashes_equal(target_commit, v[2])
-                        ]
-
-                if version_list:
-                    if len(version_list) == 1:
-                        question = f"Delete {version_list[0][0]}?"
-                    else:
-                        question = (
-                            f"Delete {len(version_list)} versions for target '{target_name}'?"
-                        )
-                    if not confirm(question, yes, dryrun):
-                        continue
                 else:
-                    continue
+                    target_list.append((source, dest))
 
-                any_found = True
-                dist_file = util.get_dist_file(dest=dest)
-                link_path = util.get_link_full_path(dest)
+                for source, dest in target_list:
+                    with locks([Path(dest)], dryrun):
+                        version_list = util.get_file_versions(dest)
+                        if version_list:
+                            if target_version is not None:
+                                version_list = [
+                                    v for v in version_list if int(v[1]) == int(target_version)
+                                ]
+                            elif target_commit:
+                                version_list = [
+                                    v
+                                    for v in version_list
+                                    if util.hashes_equal(target_commit, v[2])
+                                ]
 
-                linked_to_version = link_path in [v[0] for v in version_list]
-                if (target_commit or target_version) and linked_to_version:
-                    log.warning(
-                        "Cannot delete target '%s' because it is linked to the "
-                        "version being deleted",
-                        target_name,
-                    )
-                    continue
+                        if version_list:
+                            if len(version_list) == 1:
+                                question = f"Delete {version_list[0][0]}?"
+                            else:
+                                question = (
+                                    f"Delete {len(version_list)} versions "
+                                    f"for target '{target_name}'?"
+                                )
+                            if not confirm(question, yes, dryrun):
+                                continue
+                        else:
+                            continue
 
-                if target_commit is None and target_version is None:
-                    if os.path.lexists(dest):
-                        log.info(f"Delete: {dest}")
-                        if not dryrun:
-                            util.remove_object(dest)
-                    else:
-                        log.info(f"Missing: {dest}")
-                    if os.path.lexists(dist_file):
-                        log.info(f"Delete: {dist_file}")
-                        if not dryrun:
-                            os.remove(dist_file)
-                    else:
-                        log.info(f"Missing: {dist_file}")
+                        any_found = True
+                        dist_file = util.get_dist_file(dest=dest)
+                        link_path = util.get_link_full_path(dest)
 
-                for verfile, _, _ in version_list:
-                    log.info(f"Delete: {verfile}")
-                    if not dryrun:
-                        util.remove_object(verfile, recurse=True)
+                        linked_to_version = link_path in [v[0] for v in version_list]
+                        if (target_commit or target_version) and linked_to_version:
+                            log.warning(
+                                "Cannot delete target '%s' because it is linked to the "
+                                "version being deleted",
+                                target_name,
+                            )
+                            continue
 
-        if not any_found:
-            log.info("No targets found to delete")
+                        if target_commit is None and target_version is None:
+                            if os.path.lexists(dest):
+                                log.info(f"Delete: {dest}")
+                                if not dryrun:
+                                    util.remove_object(dest)
+                            else:
+                                log.info(f"Missing: {dest}")
+                            if os.path.lexists(dist_file):
+                                log.info(f"Delete: {dist_file}")
+                                if not dryrun:
+                                    os.remove(dist_file)
+                            else:
+                                log.info(f"Missing: {dist_file}")
 
-        return any_found
+                        for verfile, _, _ in version_list:
+                            log.info(f"Delete: {verfile}")
+                            if not dryrun:
+                                util.remove_object(verfile, recurse=True)
+
+            if not any_found:
+                log.info("No targets found to delete")
+
+            return any_found
 
 
 def build_parser(prog: str = "dist") -> argparse.ArgumentParser:
@@ -1023,6 +1046,9 @@ def run(args: argparse.Namespace) -> int:
             print("Stopping dist...")
             return 2
 
+    except LockError as exc:
+        log.error(str(exc))
+        return 1
     finally:
         distributor.close()
 

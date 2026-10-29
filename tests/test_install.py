@@ -305,7 +305,8 @@ def test_missing_wheel_and_unmanaged_destination(installation: Tuple[Path, Path]
     root, wheels = installation
     wheel(wheels, tag="cp311-cp311-win_amd64")
     assert invoke(wheels, "sample", "--platform", "linux", "--python", "3.11") == 1
-    assert not root.exists()
+    assert list(root.iterdir()) == [root / ".distman"]
+    assert not (root / ".distman/locks/write").exists()
     wheel(wheels)
     target = root / "tools/lib/python"
     target.mkdir(parents=True)
@@ -1012,7 +1013,8 @@ def test_combined_project_rejects_overlapping_destinations(
         )
     )
     assert invoke(wheels, str(project)) == 1
-    assert not root.exists()
+    assert list(root.iterdir()) == [root / ".distman"]
+    assert not (root / ".distman/locks/write").exists()
 
 
 def test_invalid_custom_targets_block_dependency_publication(
@@ -1563,3 +1565,55 @@ def test_uninstall_force_still_requires_confirmation_and_integrity(
     (library / "sample/__init__.py").write_text("modified")
     assert remove("sample", "--force") == 1
     assert library.resolve() == before
+
+
+def test_parallel_installs_and_dist_share_writer_lock(
+    installation: Tuple[Path, Path], tmp_path: Path
+) -> None:
+    """Serialize independent CLI processes without losing shared package ownership.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :param tmp_path: Workspace for the separate dist target.
+    :return: None.
+    """
+    from distman.locking import deployment_lock
+
+    root, wheels = installation
+    wheel(wheels, "first")
+    wheel(wheels, "second")
+    source = tmp_path / "source.txt"
+    source.write_text("distributed\n")
+    environment = dict(os.environ)
+    environment["PYTHONPATH"] = os.pathsep.join(str(Path(p).resolve()) for p in sys.path if p)
+    environment["DISTMAN_LOCK_TIMEOUT"] = "30"
+    command = [sys.executable, "-c", "from distman.cli import main; raise SystemExit(main())"]
+    arguments = [
+        ["install", "first", "--yes", "--no-index", "--find-links", str(wheels)],
+        ["install", "second", "--yes", "--no-index", "--find-links", str(wheels)],
+        ["dist", "--source", str(source), "--dest", str(root / "bin/tool"), "--yes", "--force"],
+    ]
+    processes = []
+    try:
+        with deployment_lock(root):
+            for args in arguments:
+                process = subprocess.Popen(
+                    command + args,
+                    env=environment,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                processes.append(process)
+                assert "Waiting for deployment lock" in process.stderr.readline()
+        for process in processes:
+            output, error = process.communicate(timeout=60)
+            assert process.returncode == 0, output + error
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+                process.communicate()
+    state = read_state(root / "tools/lib/python")
+    assert {record["name"] for record in state["artifacts"].values()} == {"first", "second"}
+    assert (root / "bin/tool").read_text() == "distributed\n"
+    assert not (root / ".distman/locks/write").exists()

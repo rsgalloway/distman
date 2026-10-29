@@ -38,7 +38,10 @@ import os
 import shlex
 import shutil
 import subprocess
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
+import tempfile
+from contextlib import contextmanager
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 from distman import config, util
 from distman.logger import log
@@ -129,6 +132,23 @@ def _quote_shell_arg(value: str, windows: Optional[bool] = None) -> str:
     if windows:
         return '"' + value.replace('"', r"\"") + '"'
     return shlex.quote(value)
+
+
+@contextmanager
+def pipeline_workspace(build_dir: str, enabled: bool = True) -> Iterator[str]:
+    """Provide an operation-private transform directory under the configured build root.
+
+    :param build_dir: Configured parent for transform staging.
+    :param enabled: If False, yield the path without creating a workspace.
+    :yields: Private build directory, removed when the operation finishes.
+    :raises OSError: If staging cannot be created or cleaned up.
+    """
+    if not enabled:
+        yield build_dir
+        return
+    Path(build_dir).mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="distman-transform-", dir=build_dir) as workspace:
+        yield workspace
 
 
 def run_pipeline(

@@ -521,6 +521,14 @@ def cache(
     ) as plan:
         for root, dirs, files in os.walk(src_root, followlinks=False):
             _skip_versions_dir(dirs)
+            # Coordination state belongs to the source, never to its cached replica.
+            if Path(root) == src_root / config.DISTMAN_META_DIR:
+                dirs[:] = [name for name in dirs if name != "locks"]
+            dirs[:] = [
+                name
+                for name in dirs
+                if not (name.startswith(".") and name.endswith(".install-lock"))
+            ]
 
             if util.is_ignorable(root, include_hidden=True):
                 dirs[:] = []

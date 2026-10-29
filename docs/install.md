@@ -365,3 +365,31 @@ Windows deployment requires symlink permission.
 
 See the [CLI reference](cli-reference.md) and [architecture guide](planning/architecture.md)
 for command and implementation details.
+
+### Concurrent writers
+
+`install`, `uninstall`, and modifying `dist` operations share one writer lock per
+resolved `DEPLOY_ROOT`, at `.distman/locks/write/`. A competing command waits up to
+30 seconds, then fails with the lock owner's details. Set the process environment
+variable `DISTMAN_LOCK_TIMEOUT` to change the wait in seconds (`0` fails immediately).
+For example:
+
+```bash
+DISTMAN_LOCK_TIMEOUT=120 ENVPATH=examples/default distman install pygments
+```
+
+The lock covers planning, acquisition, confirmation, and publication. Waiting writers
+read current state after acquiring it. Independent deployment roots can proceed in
+parallel. Dry runs do not lock or create deployment directories, so previews may
+become outdated. A failed real operation may leave empty `.distman/locks/` directories.
+
+Use the same resolved deployment root and metadata-directory configuration for all
+writers sharing targets. Different policy roots that overlap the same files are not
+safe merely because they each have a lock. Existing per-target installer locks are
+also checked temporarily; these still fail immediately when occupied. Older dist
+commands do not honor the shared lock, so upgrade all writers for full coordination.
+
+Never delete a lock without checking that its owner has stopped. A killed process
+can leave a stale lock; automatic crash recovery is not implemented. Local concurrent
+process tests pass, but multi-host NFS/SMB behavior remains to be validated. Multiple
+library/bin links still switch individually, and manual edits do not honor locks.
