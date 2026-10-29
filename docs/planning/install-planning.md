@@ -9,7 +9,8 @@ policy rather than inferring packages from arbitrary envstack variables.
 | Area | Status | Evidence / remaining boundary |
 |---|---|---|
 | Direct PyPI requirements, pins, and requirements files | Implemented | pip-backed resolution and offline installer tests; preserving satisfactory installed versions is pending |
-| Explicit upgrades and package removal | Planned | `-U` and `uninstall` are not implemented |
+| Explicit upgrades | Planned | `-U` is not implemented |
+| Package removal | Implemented | Receipt-owned revisions, version/runtime selection, dependency checks, and retained history |
 | Local packaging, requirements-only, dist-only, and combined projects | Implemented | Exact-directory discovery; dist.json owns custom publication; project tests |
 | Bounded architecture refactor | Implemented | Central CLI, shared policy, staged publication, compatibility wrappers; [architecture audit](architecture.md) |
 | Configurable shared/runtime libraries and bins | Implemented | Five DISTMAN path templates, packaged fallback, active overrides, custom-layout tests |
@@ -106,12 +107,14 @@ Implementation and acceptance work:
 
 ## Package lifecycle follow-ups
 
-`distman uninstall` is proposed, not implemented. It should compose revisions
-without the selected package's owned library, metadata, and launcher files; preserve
-unrelated distributions and rollback history; and reject broken retained dependencies.
-Do not delete a shared directory or automatically remove dependencies. Define version
-and runtime selection, discovery of reverse dependencies across managed roots,
-shared-file ownership, and empty-boundary behavior before implementation.
+`distman uninstall` is implemented. It composes revisions without selected owned
+files, preserves unrelated distributions and rollback history, and rejects newly
+broken dependencies in configured managed roots unless explicitly forced. Force
+reports the affected consumers and does not bypass ownership or integrity checks. Unqualified names select all
+versions/runtimes; exact pins and runtime filters narrow removal. Shared payloads
+remain until their last runtime is removed, and empty roots retain managed receipts.
+Dependencies are not automatically removed. See [package removal](../install.md#removing-packages)
+for activation limits and legacy-receipt behavior.
 
 Source-distribution fallback is another proposed extension. Named-package acquisition
 currently requires prebuilt wheels, while local projects can be built into wheels.
@@ -119,6 +122,217 @@ Host source fallback could build a temporary wheel and reuse staging/publication
 Cross-target builds must not substitute host binaries for foreign artifacts; any
 built wheel must match its selected targets. Build policy and a prebuilt-only option
 need a separate design and tests.
+
+## Ownership, verification, and recovery findings
+
+Current behavior and limits:
+
+- Legacy `.<target>.dist` contents have no parser in the current command paths.
+  Their existence is checked when initializing destinations, and target deletion
+  cleans them up. Verbose distribution display uses symlinks, revision filenames,
+  filesystem timestamps, and Git metadata. Preserve these files during migration
+  because their existence still affects behavior.
+- `.distman-install.json` records ownership, package provenance/dependencies, and
+  each managed revision's file paths, SHA-256 hashes, and permission modes. It is
+  not a deployment-wide history log. Each historical revision retains its snapshot.
+- Ownership inventories prevent collisions and identify exactly which files an
+  upgrade or uninstall can remove. Hashes and modes detect changed or incomplete
+  contents. These are separate responsibilities even though stored together.
+- Hashing currently uses standard-library hashlib in streamed blocks. Validation
+  hashes entire managed roots, sometimes repeatedly in one operation. Measure
+  full-tree reads, metadata size, and revision duplication before scaling this
+  design. Reuse verified results within a safe operation boundary where possible.
+- Missing or invalid ownership metadata prevents updates to affected existing roots;
+  force does not override this. Packages can still run because Python imports do
+  not need the distman receipt. Uninstall discovery can skip versioned roots with
+  missing receipts, which needs an explicit unknown/unmanaged-state diagnostic.
+- There is no automatic repair or reconstruction command. Restoring a matching
+  metadata backup or a complete known-good revision is currently required. A new
+  file scan alone cannot recover historical ownership or original artifact identity.
+
+### Deployment inventory and status (proposed)
+
+Provide read-only operations for the deployment selected by installation policy,
+including independent development, production, test, and project roots. These must
+not depend on packages being activated on the running interpreter's PYTHONPATH.
+Command names below are proposals, not implemented CLI options.
+
+| Operation | Purpose | Baseline |
+| --- | --- | --- |
+| `distman list` | List installed packages and distributed targets, active revisions, versions, source when recorded, runtime targets, and deployment paths | Recorded ownership and distribution metadata; no full content scan |
+| `distman status` | Report modified, missing, and untracked files, changed modes or active links, and missing/corrupt metadata | Recorded hashes, modes, ownership, and revision identity |
+| Optional verification operation | Verify a saved snapshot or a transferred deployment, optionally using hashio | Explicitly selected snapshot and root mapping |
+
+Keep package versions distinct from dist revision numbers. Include both installer
+packages and ordinary dist targets, showing unavailable provenance explicitly.
+Legacy metadata must be associated with the exact active revision before presenting
+it as that revision's source; a new scan cannot establish historical provenance.
+Legacy targets without content baselines must report verification as unavailable.
+
+Status must collect diagnostics across roots even when normal install validation
+would stop at the first damaged receipt. Do not report a root as clean when its
+metadata is missing, invalid, or insufficient. Hash managed file contents for a
+full status check so edits with preserved timestamps are detected. An optional fast
+mode must identify its weaker guarantees. The cache generation marker cannot detect
+external edits because those edits do not update it.
+
+Distinguish added/untracked files from owned files; a scan must not claim ownership.
+Document exclusions such as generated bytecode and verification output. Compare
+symlink identity separately from target contents and detect changes during a scan
+rather than presenting an inconsistent observation as clean. Report divergence from
+the baseline without claiming whether a human or another program caused it.
+
+Listing and status must not repair metadata, refresh baselines, or modify deployment
+files. Define machine-readable output and exit statuses for clean, changed, and
+unverifiable/error results. Test missing and edited files, preserved timestamps,
+mode/link changes, corrupt metadata, untracked files, and independent policy roots.
+
+### Supplemental hashio snapshots
+
+Keep hashlib as the baseline; evaluate optional hashio integration for independent
+inventory, verification, transfer checks, and diagnostics. Hashio's manifest remains
+supplemental evidence rather than a replacement for package ownership records.
+Its own format can be imported through an adapter without becoming distman's
+installation schema or a new required configuration file.
+
+Store optional snapshots beneath `${DEPLOY_ROOT}/.distman/verification/`, scoped by
+managed root and revision, with an explicit snapshot destination for transfer use.
+Exclude snapshot output from its own inventory. Keep the saved baseline immutable
+during verification; creating or accepting a replacement baseline is a separate,
+explicit operation. Missing hashio snapshots must not prevent installation, listing,
+or receipt-based status checks.
+
+Dependency review found that the published hashio 0.5.1 distribution declares
+`lxml==5.3.0`, `tqdm==4.67.1`, and `xxhash==3.5.0`. The source tree's dependency
+specification differs: it selects lxml 5.4.0 below Python 3.14 and 6.0.4 otherwise.
+Use [published package metadata](https://pypi.org/pypi/hashio/0.5.1/json) when assessing
+what installation actually requires, rather than assuming the source tree matches
+the release. lxml and xxhash introduce native dependencies; tqdm is already used by
+distman, but the exact pin narrows compatibility. Check wheel availability and
+resolver compatibility across supported Python/platform targets before offering an
+optional integration. No dependency compatibility matrix has been validated yet.
+Keep standard-library hashlib for core status checks and do not make hashio a
+required dependency. An external command or optional extra can supply the adapter;
+choose that packaging after the compatibility checks.
+
+The supplied sample contains 804 file entries, approximately 290 KB of JSON, with
+xxh64 hashes, sizes, timestamps, inode/device identifiers, and names. Every entry
+uses an absolute path under the legacy deployment's `lib/python/versions` tree;
+it does not cover the installer's separate `tools/lib/python` root. No permission
+modes or active symlink targets are recorded in this sample. The reported roughly
+one-second scan is useful evidence for that workload, not a like-for-like benchmark
+against strict installer validation.
+
+For portable snapshots, use relative paths and an explicit source-root/destination-root
+mapping. Hashio documents relative output and `--start` for relocation. Compare
+content hashes and relevant permissions when transferring; inode/device identifiers,
+access times, and change times need not remain equal across filesystems. Capture
+active links, revision layout, and ownership records as part of a deployment backup.
+Byte verification alone does not make an installation relocatable: current external
+script RECORD entries and receipts may contain absolute paths, and application
+activation configuration may need explicit updates.
+
+Hashio's documented verification can accept matching modification times rather
+than rehashing bytes. Define separate fast verification and full byte-verification
+modes; do not treat cached/stat-only checks as equivalent to a strict integrity scan.
+Test preserved timestamps with changed bytes, exclusions, symlinks, executable modes,
+and missing/extra files before using it in destructive-operation preflight.
+See the [hashio documentation](https://pypi.org/project/hashio/) for its API and
+verification behavior.
+
+Preserve the original snapshot before rescanning. Regeneration describes the files
+as they exist now; it does not prove that changes were intended or restore missing
+provenance. Keep wheel artifact identity separate from observed filesystem state.
+A checksum documents content relative to a baseline, not who installed it or why.
+
+### Recovery and rebuild workflow (proposed)
+
+Design explicit inspect/verify, metadata recovery, and artifact rebuild operations;
+command names remain undecided. Recovery must be usable when normal install
+preflight cannot load its receipts.
+
+1. Report missing/corrupt records, changed/missing/extra files, ownership ambiguity,
+   and inconsistent active links without making changes.
+2. Prefer restoring metadata from a backup for the exact revision, or restoring a
+   complete known-good revision. Validate ownership and content before activation.
+3. Where backups are unavailable, use installed `.dist-info/METADATA` and `RECORD`
+   plus independently verified original wheels as reconstruction evidence. Account
+   for generated launchers, external bins, target selection, and file modes. Do not
+   invent missing provenance or claim unowned files from a directory scan.
+4. If reconstruction is ambiguous, report unresolved ownership and rebuild from
+   selected artifacts into a separate clean managed root. Keep the existing tree
+   available until the rebuilt deployment is validated and explicitly activated.
+5. Preview recovery changes, preserve damaged metadata for diagnosis, and publish
+   replacements with the same locking and rollback guarantees as installation.
+
+Acceptance coverage must include missing receipts, invalid JSON, stale metadata,
+modified files with preserved timestamps, overlapping ownership, missing artifacts,
+independent deployment environments, paired library/bin restoration, interrupted
+recovery, and transfer to a different root. Preserve backups independently of the
+active deployment; a single metadata file must not become the only recovery source.
+
+## Unified deployment metadata (proposed)
+
+Consolidate legacy target metadata, installer ownership, and the cache generation
+marker behind one versioned metadata contract. A candidate storage layout is one
+`${DEPLOY_ROOT}/.distman/state.json` per deployment, with target/revision records,
+package ownership and dependencies, and a generation value for cache invalidation.
+This is a proposed migration; current metadata locations remain unchanged. Finalize
+the recovery contract and benchmark inventory storage before choosing a single JSON
+file; a unified metadata interface does not require repeating every file inventory
+in one large document. Optional verification snapshots can remain external artifacts.
+
+The central state must retain immutable ownership inventories for historical
+revisions, so rollback still restores the correct package/dependency information.
+Define how active symlinks and state stay consistent after interrupted publication,
+and serialize concurrent updates from dist, install, uninstall, and cache tooling.
+Explicitly address custom destinations outside DEPLOY_ROOT and destinations shared
+by multiple policies; a root-local index must not create conflicting ownership.
+Measure metadata size and cache-check costs before finalizing a single-file format.
+
+Provide backward-compatible reads of `.<target>.dist`, `.distman-install.json`, and
+`.distman/epoch`, with a tested migration before stopping legacy writes. Test
+rollback, cache freshness, concurrent writers, interrupted operations, and old
+deployments. Consolidation is broader than renaming the installer receipt file.
+
+### Shared network deployments (proposed)
+
+Multi-host access to shared network storage is a primary deployment use case.
+Current install/uninstall locks reject overlapping writers immediately; legacy dist
+has no shared installer locking protocol. Coordinate all modifying commands with
+bounded waiting, owner diagnostics, and fresh state reads after lock acquisition.
+Address overlapping paths, aliases, cross-user permissions, stale locks, disconnects,
+and interrupted publication. Do not reclaim a lock solely because it is old or a
+remote PID cannot be inspected. Validate concurrency on supported NFS/SMB setups;
+a lock file alone does not establish network safety.
+
+Avoid a required multi-client SQLite database on the deployment share. SQLite
+explains its [network filesystem caveats](https://www.sqlite.org/useovernet.html)
+and [WAL same-host requirement](https://www.sqlite.org/wal.html). Preserve portable
+metadata and operation without a database service. Filesystem publication still
+needs coordination and recovery regardless of the metadata storage format.
+
+### Dashboard direction (long-term, optional)
+
+A deployment dashboard is a long-term goal, not an installer requirement or a
+release gate. A separate service could mount a deployment read-only and build a
+query index, optionally using PostgreSQL and containers. Its database would be
+rebuildable from deployment metadata; CLI operation would not depend on it.
+No dashboard implementation or service dependency is planned for this work.
+
+Keep metadata discoverable and versioned so a future service can bootstrap by
+pointing at a managed deployment root. Legacy or unmanaged files must show unknown
+ownership/provenance when evidence is unavailable. A future index could poll small
+change markers and refresh changed revision records instead of repeatedly scanning
+every file. Marker publication needs a concurrency/recovery contract; the current
+epoch is not a durable event journal. Periodic metadata reconciliation would still
+be needed after missed updates, interrupted publication, or rollback.
+
+Inventory freshness and content verification are separate: external edits do not
+update distman change markers. Scheduled or requested status scans would detect
+those changes. Show last successful index refresh and content verification times,
+coverage, and stale/unreachable states rather than promising instantaneous status.
+These are future design considerations, not reasons to migrate storage now.
 
 ## Proposed release scope
 
@@ -133,7 +347,7 @@ post-deployment steps, and file-sequence support can move to a later milestone
 unless they fix a demonstrated installer or regression requirement. Existing internal
 ownership hashes do not establish completion of a general target-hashing feature.
 
-Proposed subsequent work is safe uninstall and host source-build fallback, followed
+Package uninstall is implemented. Proposed subsequent work is host source-build fallback, followed
 by named-environment creation and recipe/catalog integration. These features can be
 tracked separately; full environment lifecycle management is not required to ship
 the wheel installer. Exact later release assignments remain open.

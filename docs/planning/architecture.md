@@ -16,6 +16,7 @@ and remaining architectural constraints.
 | `resources/install.env` | Packaged fallback policy, formerly install/defaults.env | Configuration moved out of command implementation |
 | `install/wheels.py` | pip resolution, wheel inspection, build, and staging | Typed artifacts and provenance; stages shared platform launchers |
 | `install/ownership.py` | Validate and compose temporary snapshots; writer locks | Shared typed records and target-scoped checks; publication stays in deployment |
+| `install/uninstall.py` | Package removal from configured managed roots | Receipt-based selection, reverse dependency checks, staged removal, and retained history |
 | `install/command.py` | Orchestrates acquisition and publication | Added explicit local-project planning and retained dependency discovery |
 | Former `install/cli.py` | Separate installer parser and error reporting | Removed; options and error handling now live in `cli.py` |
 | `pipeline.py`, `transform.py` | Transform specification, callable imports, shell execution | Preserved callable paths and behavior |
@@ -91,3 +92,30 @@ pair validation and publication rollback remain in the ownership/deployment laye
 This supports cross-generation on Linux; native Windows execution is a separate
 validation requirement. See the [installation roadmap](install-planning.md) for
 remaining validation checks and unimplemented features.
+
+## Refactoring direction (proposed)
+
+Review distribution from its responsibilities outward before choosing new module
+boundaries. Preserve established dist behavior with characterization coverage for
+Git checks, transforms, revision selection, publication, and existing public imports.
+The goal is clearer acquisition, artifact, planning, and deployment responsibilities,
+not a rewrite of working behavior or a class hierarchy created for symmetry.
+
+`GitRepo` represents repository behavior, while a wheel `Artifact` represents a
+selected payload. A package-index acquisition interface, if needed, should support
+indexes beyond PyPI. Keep source acquisition separate from artifact identity and
+shared publication. Extract metadata, inventory, and locking from installer-specific
+modules so distribution and package lifecycle commands share them. Consider `dist/`
+and `pipeline/` packages only where cohesive responsibilities justify the split.
+
+The intended scope is uninstall, list, status, shared writer coordination, and
+metadata under `.distman/`. Preserve limited reads of existing legacy dist info
+files, document the compatibility boundary, and stop authoring new legacy records
+when the new metadata writer is introduced. Preserve historical ownership needed
+for rollback. Finalize storage and migration rules before building list/status.
+
+Review CLI consistency alongside these boundaries: help, progress, diagnostics,
+confirmation, and exit statuses. Optional terminal animations must not obscure errors
+or contaminate redirected or machine-readable output. Keep noninteractive behavior
+predictable and assess the existing tqdm dependency before adding presentation
+libraries. CLI polish follows the current uninstall implementation checkpoint.

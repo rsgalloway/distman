@@ -1207,3 +1207,359 @@ def test_multiplatform_gui_launcher_metadata(installation: Tuple[Path, Path]) ->
     assert (scripts / "sample-gui").read_bytes().startswith(b"#!/usr/bin/env python3\n")
     records = read_state(scripts)["artifacts"]["sample"]["files"]
     assert set(records) == {"sample-gui", "sample-gui.exe"}
+
+
+def remove(*args: str) -> int:
+    """Run package removal without interactive confirmation.
+
+    :param args: Package selectors and uninstall options.
+    :return: CLI exit status.
+    """
+    return cli.main(["uninstall", "--yes", *args])
+
+
+def test_uninstall_shared_package_history_and_idempotency(installation: Tuple[Path, Path]) -> None:
+    """Remove only selected ownership while preserving history and unrelated commands.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :return: None.
+    """
+    root, wheels = installation
+    command_wheel(wheels)
+    command_wheel(wheels, name="other", command="other-cli")
+    assert invoke(wheels, "sample", "other", "--platform", "all", "--python", "3.11") == 0
+    library, scripts = root / "tools/lib/python", root / "tools/bin"
+    history = library.resolve(), scripts.resolve()
+    assert remove("sample", "--dryrun") == 0
+    assert (library.resolve(), scripts.resolve()) == history
+    assert remove("sample") == 0
+    assert not (library / "sample.py").exists()
+    assert not (library / "sample-1.0.dist-info").exists()
+    assert not (scripts / "sample-cli").exists()
+    assert not (scripts / "sample-cli.exe").exists()
+    assert (scripts / "other-cli").exists()
+    assert (scripts / "other-cli.exe").exists()
+    assert (history[0] / "sample.py").exists()
+    assert (history[1] / "sample-cli.exe").exists()
+    current = library.resolve(), scripts.resolve()
+    assert remove("sample") == 0
+    assert (library.resolve(), scripts.resolve()) == current
+    assert remove("other") == 0
+    assert not read_state(library)["artifacts"]
+    assert not read_state(scripts)["artifacts"]
+    assert library.is_symlink() and scripts.is_symlink()
+
+
+def test_uninstall_runtime_selection_and_record(installation: Tuple[Path, Path]) -> None:
+    """Keep POSIX launchers for retained platforms and update external RECORD paths.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :return: None.
+    """
+    root, wheels = installation
+    command_wheel(wheels)
+    assert invoke(wheels, "sample", "--platform", "all", "--python", "3.11,3.12") == 0
+    library, scripts = root / "tools/lib/python", root / "tools/bin"
+    assert remove("sample", "--platform", "linux") == 0
+    assert (scripts / "sample-cli").exists()  # macOS still needs it
+    assert remove("sample", "--platform", "windows", "--python", "3.11") == 0
+    assert (scripts / "sample-cli.exe").exists()  # Windows 3.12 still needs it
+    assert remove("sample", "--platform", "windows") == 0
+    assert not (scripts / "sample-cli.exe").exists()
+    assert (scripts / "sample-cli").exists()
+    record = read_state(library)["artifacts"]["sample"]
+    assert record["targets"] == ["darwin-x86_64-cp311", "darwin-x86_64-cp312"]
+    rows = list(csv.reader((library / "sample-1.0.dist-info/RECORD").read_text().splitlines()))
+    assert not any(row[0].endswith("sample-cli.exe") for row in rows)
+    assert any(row[0].endswith("sample-cli") for row in rows)
+    assert read_state(scripts)["artifacts"]["sample"]["targets"] == record["targets"]
+    assert invoke(wheels, "sample", "--platform", "windows", "--python", "3.11") == 0
+    assert (scripts / "sample-cli.exe").exists()
+
+
+def test_uninstall_binary_versions_and_reverse_dependencies(
+    installation: Tuple[Path, Path]
+) -> None:
+    """Check consumers in separate runtime roots and preserve unselected versions.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :return: None.
+    """
+    root, wheels = installation
+    tag = "cp311-cp311-manylinux_2_17_x86_64"
+    wheel(wheels, "native", tag=tag)
+    wheel(wheels, "app", tag=tag, requires=["native==1.0"])
+    wheel(wheels, "native", version="2.0", tag=tag)
+    args = ("--platform", "linux", "--python", "3.11")
+    assert invoke(wheels, "app", *args) == 0
+    assert invoke(wheels, "native==2.0", *args) == 0
+    original = (root / "tools/native/1.0").resolve()
+    assert remove("native==1.0") == 1
+    assert (root / "tools/native/1.0").resolve() == original
+    assert remove("app", "native==1.0") == 0
+    assert not read_state(root / "tools/native/1.0")["artifacts"]
+    assert read_state(root / "tools/native/2.0")["artifacts"]
+    assert remove("native") == 0
+    assert not read_state(root / "tools/native/2.0")["artifacts"]
+
+
+def test_uninstall_keeps_dependencies_and_namespace_files(installation: Tuple[Path, Path]) -> None:
+    """Keep dependencies and namespace contents owned by other distributions.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :return: None.
+    """
+    root, wheels = installation
+    wheel(wheels, "dependency", files={"namespace/shared.py": b"value = 1"})
+    wheel(wheels, "app", files={"namespace/app.py": b"value = 2"}, requires=["dependency"])
+    assert invoke(wheels, "app") == 0
+    assert remove("dependency") == 1
+    assert remove("app") == 0
+    assert (root / "tools/lib/python/namespace/shared.py").exists()
+    assert not (root / "tools/lib/python/namespace/app.py").exists()
+    assert read_state(root / "tools/lib/python")["artifacts"]["dependency"]
+
+
+def test_uninstall_failure_restores_links(
+    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Restore the prior shared library and command revisions after activation failure.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :param monkeypatch: Fixture replacing the activation primitive.
+    :return: None.
+    """
+    root, wheels = installation
+    command_wheel(wheels)
+    assert invoke(wheels, "sample") == 0
+    library, scripts = root / "tools/lib/python", root / "tools/bin"
+    original = library.resolve(), scripts.resolve()
+    replace = deployment.replace_link
+    calls = []
+
+    def fail_once(destination: Path, target: Path) -> None:
+        """Fail the second activation, allowing the rollback operation to succeed.
+
+        :param destination: Active managed link.
+        :param target: New link target.
+        :return: None.
+        :raises OSError: On the second activation attempt.
+        """
+        calls.append(destination)
+        if len(calls) == 2:
+            raise OSError("injected failure")
+        replace(destination, target)
+
+    monkeypatch.setattr(deployment, "replace_link", fail_once)
+    assert remove("sample") == 1
+    assert (library.resolve(), scripts.resolve()) == original
+    assert (scripts / "sample-cli").exists()
+
+
+def test_uninstall_scoped_roots_confirmation_and_integrity(
+    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Respect the selected deployment and reject declined or corrupt removals.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :param monkeypatch: Fixture selecting deployment policy and confirmation responses.
+    :param tmp_path: Root for the second independently managed environment.
+    :return: None.
+    """
+    root, wheels = installation
+    command_wheel(wheels)
+    assert invoke(wheels, "sample") == 0
+    other = tmp_path / "production"
+    monkeypatch.setenv("DEPLOY_ROOT", str(other))
+    assert invoke(wheels, "sample") == 0
+    monkeypatch.setattr(util, "yesNo", lambda prompt: False)
+    assert cli.main(["uninstall", "sample"]) == 1
+    assert (other / "tools/lib/python/sample.py").exists()
+    assert remove("sample") == 0
+    assert (root / "tools/lib/python/sample.py").exists()
+    monkeypatch.setenv("DEPLOY_ROOT", str(root))
+    (root / "tools/lib/python/sample.py").write_text("changed")
+    assert remove("sample") == 1
+    assert (root / "tools/bin/sample-cli").exists()
+
+
+@pytest.mark.parametrize(
+    "selector", ["sample>=1", "sample[extra]", "sample==1.*", "sample; python_version>'3'"]
+)
+def test_uninstall_rejects_ambiguous_selectors(
+    installation: Tuple[Path, Path], selector: str
+) -> None:
+    """Reject unsupported selector syntax without creating deployment directories.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :param selector: Unsupported requirement expression.
+    :return: None.
+    """
+    root, _ = installation
+    assert remove(selector) == 1
+    assert not root.exists()
+
+
+def test_uninstall_binary_runtime_preserves_other_variants(installation: Tuple[Path, Path]) -> None:
+    """Remove one runtime's library and commands without removing another runtime.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :return: None.
+    """
+    root, wheels = installation
+    for python in ("311", "312"):
+        command_wheel(wheels, tag=f"cp{python}-cp{python}-win_amd64")
+    assert invoke(wheels, "sample", "--platform", "windows", "--python", "3.11,3.12") == 0
+    boundary = root / "tools/sample/1.0"
+    assert remove("sample", "--platform", "windows", "--python", "3.11") == 0
+    assert not (boundary / "windows/x86_64/python3.11").exists()
+    assert (boundary / "windows/x86_64/python3.12/bin/sample-cli.exe").exists()
+    assert len(read_state(boundary)["artifacts"]) == 1
+
+
+def test_uninstall_custom_roots_and_unmanaged_destination(
+    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Discover configured package roots without replacing unmanaged destinations.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :param monkeypatch: Fixture configuring versioned pure library and command roots.
+    :param tmp_path: Parent for an unmanaged library destination.
+    :return: None.
+    """
+    root, wheels = installation
+    monkeypatch.setenv("DISTMAN_SHARED_LIB_PATH", "{TOOLS_ROOT}/custom/{package}/{version}/lib")
+    monkeypatch.setenv("DISTMAN_SHARED_BIN_PATH", "{TOOLS_ROOT}/custom/{package}/{version}/bin")
+    command_wheel(wheels)
+    assert invoke(wheels, "sample") == 0
+    assert remove("sample==1.0") == 0
+    assert not read_state(root / "tools/custom/sample/1.0/lib")["artifacts"]
+    assert not read_state(root / "tools/custom/sample/1.0/bin")["artifacts"]
+    foreign = tmp_path / "unmanaged"
+    foreign.mkdir()
+    (foreign / "keep.py").write_text("unowned")
+    monkeypatch.setenv("DISTMAN_SHARED_LIB_PATH", str(foreign))
+    assert remove("sample") == 1
+    assert (foreign / "keep.py").read_text() == "unowned"
+
+
+def test_uninstall_honors_writer_locks(installation: Tuple[Path, Path]) -> None:
+    """Do not remove packages while another writer owns a managed boundary lock.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :return: None.
+    """
+    root, wheels = installation
+    command_wheel(wheels)
+    assert invoke(wheels, "sample") == 0
+    library = root / "tools/lib/python"
+    before = library.resolve()
+    lock = library.with_name(".python.install-lock")
+    lock.mkdir()
+    assert remove("sample") == 1
+    assert library.resolve() == before
+    assert lock.is_dir()
+
+
+def test_uninstall_partial_shared_target_protects_dependents(
+    installation: Tuple[Path, Path]
+) -> None:
+    """Do not withdraw required target support even when shared files remain elsewhere.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :return: None.
+    """
+    root, wheels = installation
+    command_wheel(wheels)
+    wheel(wheels, "app", requires=["sample"])
+    assert invoke(wheels, "sample", "--platform", "all", "--python", "3.11") == 0
+    assert invoke(wheels, "app", "--platform", "windows", "--python", "3.11") == 0
+    library = root / "tools/lib/python"
+    before = library.resolve()
+    assert remove("sample", "--platform", "windows") == 1
+    assert library.resolve() == before
+    assert (root / "tools/bin/sample-cli.exe").exists()
+    assert remove("sample", "--platform", "linux") == 0
+
+
+@pytest.mark.parametrize("dryrun", [False, True])
+def test_uninstall_dependency_diagnostic_explains_unchanged_deployment(
+    installation: Tuple[Path, Path], capsys: pytest.CaptureFixture, dryrun: bool
+) -> None:
+    """Explain every dependency blocker without implying planned files were deleted.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :param capsys: Captured CLI diagnostics.
+    :param dryrun: Whether removal is a preview.
+    :return: None.
+    """
+    root, wheels = installation
+    wheel(wheels, "dependency")
+    wheel(wheels, "app", requires=["dependency"])
+    wheel(wheels, "other", requires=["dependency>=1"])
+    assert invoke(wheels, "app", "other") == 0
+    library = root / "tools/lib/python"
+    before = library.resolve()
+    capsys.readouterr()
+    assert remove("dependency", *(["--dryrun"] if dryrun else [])) == 1
+    output = capsys.readouterr().out
+    assert "Planned removal: dependency==1.0" in output
+    assert "Removal would break packages that remain installed" in output
+    assert "app==1.0 requires dependency" in output
+    assert "other==1.0 requires dependency>=1" in output
+    assert "removal would withdraw dependency==1.0" in output
+    assert "No packages were removed; deployment directories are unchanged" in output
+    assert "explicitly include their dependent packages" in output
+    assert library.resolve() == before
+    assert (library / "dependency").exists()
+
+
+@pytest.mark.parametrize("dryrun", [False, True])
+def test_uninstall_force_overrides_only_dependencies(
+    installation: Tuple[Path, Path], capsys: pytest.CaptureFixture, dryrun: bool
+) -> None:
+    """Allow explicit dependency breakage while preserving dependents and preview semantics.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :param capsys: Captured force warnings.
+    :param dryrun: Whether publication should be suppressed.
+    :return: None.
+    """
+    root, wheels = installation
+    wheel(wheels, "dependency")
+    wheel(wheels, "app", requires=["dependency"])
+    assert invoke(wheels, "app") == 0
+    library = root / "tools/lib/python"
+    previous = library.resolve()
+    capsys.readouterr()
+    assert remove("dependency", "--force", *(["--dryrun"] if dryrun else [])) == 0
+    output = capsys.readouterr().out
+    assert "WARNING: --force allows removal" in output
+    assert "app==1.0 requires dependency" in output
+    assert "may stop working" in output
+    assert (library / "app").exists()
+    assert (library / "dependency").exists() == dryrun
+    assert (library.resolve() == previous) == dryrun
+    assert (previous / "dependency").exists()
+
+
+def test_uninstall_force_still_requires_confirmation_and_integrity(
+    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Force cannot authorize publication or bypass changed owned files.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :param monkeypatch: Fixture declining the confirmation prompt.
+    :return: None.
+    """
+    root, wheels = installation
+    wheel(wheels)
+    assert invoke(wheels, "sample") == 0
+    library = root / "tools/lib/python"
+    before = library.resolve()
+    monkeypatch.setattr(util, "yesNo", lambda prompt: False)
+    assert cli.main(["uninstall", "sample", "-f"]) == 1
+    assert library.resolve() == before
+    (library / "sample/__init__.py").write_text("modified")
+    assert remove("sample", "--force") == 1
+    assert library.resolve() == before

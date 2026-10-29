@@ -15,6 +15,7 @@ The `distman` suite command provides equivalent namespaced interfaces:
 distman dist [OPTIONS] [LOCATION]
 distman cache [OPTIONS]
 distman install [OPTIONS] [REQUIREMENTS...]
+distman uninstall [OPTIONS] PACKAGES...
 distman --version
 ```
 
@@ -115,3 +116,18 @@ distman install numpy
 distman install -r requirements.txt --dryrun
 distman install ./myapp --yes
 ```
+
+## Python package removal
+
+```bash
+distman uninstall cowsay --dryrun
+distman uninstall cowsay pygments --yes
+distman uninstall 'numpy==1.24.4' --platform linux --python 3.8
+```
+
+Package names select all installed versions and runtimes in the configured deployment;
+exact version pins and runtime filters narrow that selection. Options are `--platform`,
+`--arch`, `--python`, `-d`/`--dryrun`, `-y`/`--yes`, and `-f`/`--force`.
+Force permits broken retained dependencies; ownership and integrity checks still apply. See
+[Removing packages](install.md#removing-packages) for ownership, dependency checks,
+activation limits, and rollback history.

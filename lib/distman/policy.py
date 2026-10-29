@@ -120,6 +120,40 @@ class Policy:
                     roots.add(root)
         return sorted(roots)
 
+    def managed_roots(self) -> List[Path]:
+        """Discover managed boundaries in the selected policy for lifecycle operations.
+
+        :return: Active receipt-bearing symlinks matching configured boundary templates.
+        :raises InstallError: If a template is unsafe or a fixed destination is unmanaged.
+        """
+        fields = dict(self.values)
+        tokens = {
+            name: "DISTMANLOOKUP" + name.upper()
+            for name in ("package", "version", "platform", "arch", "python_version")
+        }
+        fields.update(tokens)
+        roots = set()
+        for key in (
+            "DISTMAN_TARGET_PATH",
+            "DISTMAN_SHARED_LIB_PATH",
+            "DISTMAN_SHARED_BIN_PATH",
+            "DISTMAN_RUNTIME_BIN_PATH",
+        ):
+            value = self.template(self.values[key], env=self.values).format(**fields)
+            path = Path(value).expanduser()
+            if not path.is_absolute() or ".." in path.parts or any(c in value for c in "${}"):
+                raise InstallError(f"Invalid discovery path: {value}")
+            pattern = glob.escape(str(path))
+            for token in tokens.values():
+                pattern = pattern.replace(token, "*")
+            for value in glob.glob(pattern):
+                root = Path(value)
+                if root.is_symlink() and (root / ".distman-install.json").is_file():
+                    roots.add(root)
+                elif not any(token in str(path) for token in tokens.values()):
+                    raise InstallError(f"Refusing unmanaged destination: {root}")
+        return sorted(roots)
+
     def _path(self, key: str, package: str, version: str, target: "Target") -> Path:
         """Format and validate one path from distribution and runtime fields.
 

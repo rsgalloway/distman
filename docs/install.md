@@ -284,6 +284,61 @@ For example, Linux x86_64 Python 3.11 packages share
 Pure packages are copied into each selected runtime root. Each root has its own
 revision history and holds one active version of each distribution.
 
+## Installed ownership metadata
+
+A *receipt* is distman's internal `.distman-install.json` file inside each managed
+library, bin, or package revision. It records package versions, wheel provenance,
+declared dependencies, target runtimes, and owned files with hashes and modes.
+For shared defaults, inspect `tools/lib/python/.distman-install.json` and
+`tools/bin/.distman-install.json` beneath the deployment root. These records let
+uninstall distinguish one package's files from unrelated files in a shared directory.
+Packages acquired as dependencies are recorded too; no explicit install request
+for each dependency is needed. Receipts do not record the original command line.
+
+These differ from legacy `dist`'s `.<target>.dist` files beside deployed targets
+and `.distman/epoch`, which signals deployment changes to cache clients. Python's
+standard `.dist-info` metadata is also preserved. Receipts are generated internal
+state, not configuration files users need to author or edit.
+
+## Removing packages
+
+```bash
+distman uninstall cowsay --dryrun
+distman uninstall cowsay --yes
+distman uninstall 'numpy==1.24.4' --platform linux --python 3.8
+```
+
+Uninstall reads managed receipts through the selected installation policy; it does
+not inspect distman's own Python environment or need network access. An unqualified
+name selects all installed versions and runtimes in those configured roots. Exact
+`name==version` pins and `--platform`, `--arch`, and `--python` narrow the selection;
+omitted runtime filters mean all installed values, not the host defaults.
+
+Removal publishes new revisions without the selected owned files. Shared libraries
+and POSIX launchers remain while retained runtimes still need them; generated Windows
+launchers are removed when no Windows target remains. Wheel-provided scripts remain
+with a partially retained shared package. Dependencies are not automatically removed,
+and removal is rejected by default if it eliminates a required dependency of a retained package
+in the discoverable managed roots. Environment files and activation variables remain
+unchanged; application-specific version selections are not inferred from those files.
+
+A dependency refusal is a preflight check: nothing is removed, with or without
+`--dryrun`. Diagnostics list the retained dependent packages, their requirements,
+and affected runtimes. Keep the required package, or explicitly request removal
+of its dependents too if that is intended. `-f`/`--force` overrides dependency blockers
+after listing the affected packages. It leaves those dependents installed and may
+make them unusable. Force does not bypass ownership, integrity, paired-revision
+checks, writer locks, confirmation, or dry-run behavior. `Planned removal` lines describe proposed
+changes, not completed deletion.
+
+Uninstall previews its selected roots and asks for confirmation unless `--yes` is
+supplied. Already absent selections succeed without new revisions. Empty managed
+roots retain an empty receipt and active revision link, so history and rollback stay
+available. Modified contents and unmanaged fixed destinations are rejected. Packages
+outside the current policy's discovery paths are not managed by this operation;
+use their original path policy. Legacy receipts without a scripts mapping require
+reinstallation before partial removal of shared entrypoint runtimes.
+
 ## Revisions
 
 Installs create complete revisions and switch the active symlink. Unchanged

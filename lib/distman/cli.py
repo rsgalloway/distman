@@ -55,7 +55,7 @@ from distman.logger import setup_logging
 def build_parser() -> argparse.ArgumentParser:
     """Build the top-level argument parser.
 
-    :return: Suite parser containing dist, cache, and install subcommands.
+    :return: Suite parser containing distribution, cache, and package lifecycle subcommands.
     """
 
     from distman import __version__
@@ -96,13 +96,19 @@ def build_parser() -> argparse.ArgumentParser:
         add_help=False,
     )
 
+    sub.add_parser(
+        "uninstall",
+        help="Remove managed Python packages while preserving revision history",
+        parents=[build_command_parser("uninstall", prog="distman uninstall")],
+        add_help=False,
+    )
     return parser
 
 
 def build_command_parser(command: str, prog: Optional[str] = None) -> argparse.ArgumentParser:
     """Build one command parser while retaining legacy standalone program names.
 
-    :param command: Command name: dist, cache, or install.
+    :param command: Command name: dist, cache, install, or uninstall.
     :param prog: Optional executable name displayed in usage and error messages.
     :return: Parser configured with the selected command's options.
     :raises ValueError: If the command name is unknown.
@@ -114,6 +120,7 @@ def build_command_parser(command: str, prog: Optional[str] = None) -> argparse.A
         ),
         "cache": ("Cross-platform caching with optional diff.", _add_cache_options),
         "install": ("Resolve wheels and publish versioned installations", _add_install_options),
+        "uninstall": ("Remove packages from the configured deployment", _add_uninstall_options),
     }
     if command not in definitions:
         raise ValueError(f"Unknown command: {command}")
@@ -331,6 +338,48 @@ def _add_install_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("-v", "--verbose", action="count", default=0, help="show pip output")
 
 
+def _add_uninstall_options(parser: argparse.ArgumentParser) -> None:
+    """Add explicit package and runtime removal selectors.
+
+    :param parser: Parser receiving uninstall options.
+    :return: None.
+    """
+    parser.add_argument("packages", nargs="+", help="package names or exact NAME==VERSION pins")
+    parser.add_argument("--platform", help="comma-separated platforms; default: all installed")
+    parser.add_argument("--arch", help="architecture; default: all installed")
+    parser.add_argument("--python", help="comma-separated Python versions; default: all installed")
+    parser.add_argument(
+        "-d", "--dryrun", action="store_true", help="preview without deployment writes"
+    )
+    parser.add_argument("-y", "--yes", action="store_true", help="confirm removal")
+    parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="allow broken retained dependencies; never bypass ownership or integrity checks",
+    )
+
+
+def _run_uninstall(args: argparse.Namespace) -> int:
+    """Run package removal with concise optional-dependency and validation errors.
+
+    :param args: Parsed package removal options.
+    :return: Command exit status, or one on failure.
+    """
+    from distman.install import InstallError
+
+    try:
+        from distman.install.uninstall import uninstall
+
+        return uninstall(args)
+    except ImportError as exc:
+        print(f"uninstall requires optional dependencies: pip install 'distman[install]' ({exc})")
+        return 1
+    except (InstallError, OSError, ValueError) as exc:
+        print(f"Uninstall failed: {exc}")
+        return 1
+
+
 def _run_install(args: argparse.Namespace) -> int:
     """Validate input and translate expected installation failures into exit codes.
 
@@ -377,6 +426,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.command == "cache":
         return cache.run(args)
+
+    if args.command == "uninstall":
+        return _run_uninstall(args)
 
     if args.command == "install":
         return _run_install(args)
