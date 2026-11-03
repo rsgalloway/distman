@@ -301,14 +301,18 @@ def test_standalone_fallback(
 
 
 @pytest.mark.parametrize("host_architecture", ["x86_64", "arm64"])
-def test_missing_wheel_and_unmanaged_destination(
-    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, host_architecture: str
+def test_missing_wheel(
+    installation: Tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    host_architecture: str,
+    capsys: pytest.CaptureFixture,
 ) -> None:
-    """Abort missing runtime selection and refuse unmanaged active directories.
+    """Reject an unavailable wheel for the explicitly selected runtime.
 
     :param installation: Isolated deployment root and offline wheelhouse.
     :param monkeypatch: Fixture overriding the host architecture.
     :param host_architecture: Simulated host default for explicit target selection.
+    :param capsys: Captured CLI diagnostics.
     :return: None.
     """
     monkeypatch.setattr("distman.install.targets.host_arch", lambda: host_architecture)
@@ -317,14 +321,53 @@ def test_missing_wheel_and_unmanaged_destination(
     assert (
         invoke(wheels, "sample", "--platform", "linux", "--arch", "x86_64", "--python", "3.11") == 1
     )
+    assert "Wheel resolution failed for linux-x86_64-cp311" in capsys.readouterr().out
     assert list(root.iterdir()) == [root / ".distman"]
     assert not (root / ".distman/locks/write").exists()
+
+
+@pytest.mark.parametrize("host_architecture", ["x86_64", "arm64"])
+@pytest.mark.parametrize("target_platform", ["linux", "windows", "darwin"])
+def test_unmanaged_shared_destination(
+    installation: Tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    host_architecture: str,
+    target_platform: str,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Refuse an unmanaged shared library directory even when force is requested.
+
+    :param installation: Isolated deployment root and wheelhouse containing only a pure wheel.
+    :param monkeypatch: Fixture overriding the host architecture.
+    :param host_architecture: Simulated host default for explicit target selection.
+    :param target_platform: Platform to target independently of the host.
+    :param capsys: Captured CLI diagnostics.
+    :return: None.
+    """
+    monkeypatch.setattr("distman.install.targets.host_arch", lambda: host_architecture)
+    root, wheels = installation
     wheel(wheels)
     target = root / "tools/lib/python"
     target.mkdir(parents=True)
     (target / "unowned.py").write_text("keep me")
-    assert invoke(wheels, "sample", "--force") == 1
+    assert (
+        invoke(
+            wheels,
+            "sample",
+            "--force",
+            "--platform",
+            target_platform,
+            "--arch",
+            "x86_64",
+            "--python",
+            "3.11",
+        )
+        == 1
+    )
+    assert f"Refusing unmanaged destination: {target}" in capsys.readouterr().out
+    assert not target.is_symlink()
     assert (target / "unowned.py").read_text() == "keep me"
+    assert not (root / "tools/sample").exists()
 
 
 def test_abi3_and_requires_python(tmp_path: Path) -> None:
