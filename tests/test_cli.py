@@ -36,7 +36,8 @@ from typing import List
 
 import pytest
 
-from distman import cache, cli, dist
+from distman import cache, cli
+from distman.dist import command as dist
 
 
 @pytest.mark.parametrize(

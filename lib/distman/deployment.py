@@ -36,13 +36,22 @@ writers and validate ownership before publishing. Each link replacement is
 atomic; multiple targets have exception rollback, not global atomic visibility.
 """
 
+import hashlib
 import os
 import shutil
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Optional, Tuple, Union
+from typing import Iterable, List, Optional, Tuple, Union
 
 from distman import config, util
+from distman.metadata import (
+    RecoveryRequired,
+    Store,
+    atomic_write,
+    durable_directory,
+    sync_directory,
+)
 
 
 def get_version_dest(dest: str, version_num: int, short_head: Optional[str]) -> str:
@@ -71,8 +80,9 @@ def replace_link(destination: Union[str, Path], target: Union[str, Path]) -> Non
     destination = Path(destination)
     temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.link")
     try:
-        os.symlink(target, temporary, target_is_directory=True)
+        os.symlink(target, temporary, target_is_directory=(destination.parent / target).is_dir())
         os.replace(temporary, destination)
+        sync_directory(destination.parent)
     finally:
         if temporary.is_symlink():
             temporary.unlink()
@@ -90,48 +100,222 @@ def prepare_revision(source: Path, destination: Path) -> Path:
     versions = util.get_file_versions(str(destination))
     number = versions[-1][1] + 1 if versions else 0
     revision = Path(get_version_dest(str(destination), number, None))
-    revision.parent.mkdir(parents=True, exist_ok=True)
+    durable_directory(revision.parent)
     temporary = revision.with_name(f".{revision.name}.{uuid.uuid4().hex}.staging")
     try:
         shutil.copytree(source, temporary, symlinks=True)
+        flush_payload(temporary)
         os.rename(temporary, revision)
+        sync_directory(revision.parent)
     finally:
         if temporary.exists():
             shutil.rmtree(temporary)
     return revision
 
 
-def publish_directories(changes: Iterable[Tuple[Path, Path]], deploy_root: Path) -> None:
-    """Publish (staged directory, destination) pairs, restoring links on error.
+def flush_payload(directory: Path) -> None:
+    """Flush newly copied payload files and directory entries before activation.
 
-    Existing unmanaged destinations are never replaced. Completed revisions
-    remain available for inspection/rollback after a failed activation.
-
-    :param changes: Pairs of staged source directories and active destination paths.
-    :param deploy_root: Selected write root whose deployment epoch will be updated.
+    :param directory: Prepared revision tree; symbolic links are not followed.
     :return: None.
-    :raises ValueError: If an existing destination is not a managed symlink.
-    :raises OSError: If preparation, activation, or epoch publication fails.
+    :raises OSError: If a file or supported directory flush fails.
     """
-    prepared = []
-    for source, destination in changes:
-        destination = Path(destination)
-        if os.path.lexists(destination) and not destination.is_symlink():
-            raise ValueError(f"Refusing to replace unmanaged directory: {destination}")
-        previous = os.readlink(destination) if destination.is_symlink() else None
-        revision = prepare_revision(source, destination)
-        prepared.append((destination, revision, previous))
-    activated = []
-    try:
-        for destination, revision, previous in prepared:
-            replace_link(destination, os.path.relpath(revision, destination.parent))
-            activated.append((destination, previous))
-        if prepared:
-            util.write_epoch_file(str(deploy_root))
-    except BaseException:
-        for destination, previous in reversed(activated):
-            if previous is None:
+    for root, _, files in os.walk(directory, topdown=False, followlinks=False):
+        for name in files:
+            path = Path(root) / name
+            if not path.is_symlink():
+                with path.open("rb") as stream:
+                    os.fsync(stream.fileno())
+        sync_directory(Path(root))
+
+
+def observed_link(destination: Path) -> Optional[str]:
+    """Inspect active link identity without confusing absence with an unmanaged object.
+
+    :param destination: Active deployment destination.
+    :return: Stored link text, or None for an absent path.
+    :raises RecoveryRequired: If an unexpected non-link object occupies the destination.
+    """
+    if destination.is_symlink():
+        return os.readlink(destination)
+    if os.path.lexists(destination):
+        raise RecoveryRequired(f"Unexpected non-link destination: {destination}")
+    return None
+
+
+def recover_publication(deploy_root: Path, dryrun: bool = False) -> List[str]:
+    """Restore a pending publication, or finalize an already committed operation.
+
+    The command orchestrator must hold the deployment writer lock. Validate all
+    destinations before changing any; do not overwrite unexpected external changes.
+
+    :param deploy_root: Deployment boundary owning the pending operation.
+    :param dryrun: Report recovery actions without changing links or metadata.
+    :return: Human-readable actions, or an empty list if no operation is pending.
+    :raises RecoveryRequired: If state conflicts or required previous revisions are missing.
+    :raises OSError: If restoration or durable metadata updates fail.
+    """
+    store = Store(deploy_root)
+    record = store.pending()
+    if record is None:
+        return []
+    current = store.current()
+    previous, selected = record["previous_snapshot"], record["snapshot"]
+    if current not in (previous, selected):
+        raise RecoveryRequired("Current snapshot changed outside the pending publication")
+    if previous is not None:
+        baseline = store.read(f"snapshots/{previous}.json")
+        if baseline is None or baseline.get("id") != previous:
+            raise RecoveryRequired(f"Previous snapshot is missing: {previous}")
+    if record["phase"] == "restored" and current != previous:
+        raise RecoveryRequired("Restored publication has an inconsistent snapshot pointer")
+    committed = record["phase"] == "committed"
+    if committed and current != selected:
+        raise RecoveryRequired("Committed publication has an inconsistent snapshot pointer")
+    actions = []
+    for change in record["changes"]:
+        destination = Path(change["destination"])
+        actual = observed_link(destination)
+        before, after = change["before"], change["after"]
+        expected = after if committed else before
+        if actual not in (before, after) or (committed and actual != after):
+            raise RecoveryRequired(f"Recovery conflict at {destination}: unexpected active link")
+        if expected is not None and not (destination.parent / expected).exists():
+            raise RecoveryRequired(f"Recovery revision is missing: {destination.parent / expected}")
+        if not committed and actual != before:
+            actions.append(f"Restore: {destination} -> {before or '(absent)'}")
+    actions.append(f"Finalize {'committed' if committed else 'restored'} operation: {record['id']}")
+    if dryrun:
+        return actions
+    if not committed:
+        for change in reversed(record["changes"]):
+            destination = Path(change["destination"])
+            before = change["before"]
+            actual = observed_link(destination)
+            if actual == before:
+                continue
+            if actual != change["after"]:
+                raise RecoveryRequired(f"Recovery conflict at {destination}")
+            if before is None:
                 destination.unlink()
+                sync_directory(destination.parent)
             else:
-                replace_link(destination, previous)
+                if not (destination.parent / before).exists():
+                    raise RecoveryRequired(f"Recovery revision disappeared: {destination}")
+                replace_link(destination, before)
+        if previous is None:
+            store.remove("current.json")
+        else:
+            store.write("current.json", {"schema": 1, "snapshot": previous})
+        atomic_write(store.directory / config.DISTMAN_EPOCH_FILE, uuid.uuid4().hex + "\n")
+        record["phase"] = "restored"
+        store.write(f"operations/{record['id']}.json", record)
+    store.remove("pending.json")
+    return actions
+
+
+def publish_directories(changes: Iterable[Tuple[Path, Path]], deploy_root: Path) -> None:
+    """Publish prepared directories with a durable journal and incremental snapshot.
+
+    Callers hold the deployment writer lock. Retained revisions provide rollback
+    bytes; only selected link changes are journaled, without scanning the deployment.
+
+    :param changes: Staged-source/destination pairs to publish.
+    :param deploy_root: Deployment boundary owning publication records.
+    :return: None.
+    :raises RecoveryRequired: If earlier work is pending or rollback cannot complete safely.
+    :raises OSError: If preparation, activation, or durable metadata writes fail.
+    """
+    store = Store(deploy_root)
+    store.ensure_clean()
+    changes = [(Path(source), Path(destination).absolute()) for source, destination in changes]
+    destinations = [destination for _, destination in changes]
+    for i, destination in enumerate(destinations):
+        if (
+            ".." in destination.parts
+            or destination == store.root
+            or destination in store.root.parents
+            or destination == store.directory
+            or store.directory in destination.parents
+        ):
+            raise ValueError(f"Reserved or invalid publication destination: {destination}")
+        if any(
+            destination == other or destination in other.parents or other in destination.parents
+            for other in destinations[i + 1 :]
+        ):
+            raise ValueError(f"Overlapping publication destinations: {destination}")
+    if not changes:
+        return
+    identifier = uuid.uuid4().hex
+    previous_snapshot = store.current()
+    prepared = []
+    selections = {}
+    for source, destination in changes:
+        previous = observed_link(destination)
+        if previous is not None and not (destination.parent / previous).exists():
+            raise RecoveryRequired(f"Previous revision is missing: {destination}")
+        revision = prepare_revision(source, destination)
+        link = os.path.relpath(revision, destination.parent)
+        prepared.append({"destination": str(destination), "before": previous, "after": link})
+        try:
+            target_path = destination.relative_to(store.root).as_posix()
+            payload_path = revision.relative_to(store.root).as_posix()
+        except ValueError:
+            target_path, payload_path = str(destination), str(revision)
+        target_id = hashlib.sha256(target_path.encode()).hexdigest()
+        revision_record = f"targets/{target_id}/revisions/{identifier}.json"
+        store.write(
+            revision_record,
+            {
+                "schema": 1,
+                "destination": target_path,
+                "payload": payload_path,
+                "kind": "directory",
+                "id": identifier,
+                "ownership": (
+                    "embedded-receipt"
+                    if (revision / ".distman-install.json").is_file()
+                    else "unknown"
+                ),
+            },
+        )
+        selections[target_path] = revision_record
+    snapshot = {
+        "schema": 1,
+        "id": identifier,
+        "parent": previous_snapshot,
+        "created": datetime.now(timezone.utc).isoformat(),
+        "coverage": "recorded-targets",
+        "changes": selections,
+    }
+    store.write(f"snapshots/{identifier}.json", snapshot)
+    journal = {
+        "schema": 1,
+        "id": identifier,
+        "root": str(store.root),
+        "phase": "prepared",
+        "snapshot": identifier,
+        "previous_snapshot": previous_snapshot,
+        "changes": prepared,
+    }
+    store.write(f"operations/{identifier}.json", journal)
+    store.write("pending.json", {"schema": 1, "operation": identifier})
+    try:
+        for change in prepared:
+            destination = Path(change["destination"])
+            if observed_link(destination) != change["before"]:
+                raise RecoveryRequired(f"Destination changed before activation: {destination}")
+            replace_link(destination, change["after"])
+        store.write("current.json", {"schema": 1, "snapshot": identifier})
+        atomic_write(store.directory / config.DISTMAN_EPOCH_FILE, identifier + "\n")
+        journal["phase"] = "committed"
+        store.write(f"operations/{identifier}.json", journal)
+    except BaseException:
+        try:
+            recover_publication(deploy_root)
+        except BaseException as recovery_error:
+            raise RecoveryRequired(
+                f"Publication interrupted; recovery is required at {deploy_root}: {recovery_error}"
+            ) from recovery_error
         raise
+    store.remove("pending.json")

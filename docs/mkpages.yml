@@ -8,7 +8,7 @@ navigation:
   - label: Getting Started
     href: /getting-started/
   - label: CLI
-    href: /cli-reference/
+    href: /usage/
   - label: Config
     href: /distribution-config/
   - label: Pipelines

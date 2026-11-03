@@ -537,16 +537,19 @@ def test_custom_shared_bin_record_paths(
     ).decode().rstrip("=")
 
 
+@pytest.mark.parametrize("host_architecture", ["x86_64", "arm64"])
 def test_runtime_commands_stay_with_binary_revisions(
-    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, host_architecture: str
 ) -> None:
     """Runtime bins and libraries share one package boundary and preserve other runtimes.
 
     :param installation: Isolated deployment root and offline wheel directory.
     :param monkeypatch: Fixture overriding the runtime bin suffix.
+    :param host_architecture: Simulated host default; fixture wheels remain Windows x86-64.
     :return: None.
     """
     root, wheels = installation
+    monkeypatch.setattr("distman.install.targets.host_arch", lambda: host_architecture)
     monkeypatch.setenv(
         "DISTMAN_RUNTIME_BIN_PATH",
         "${DISTMAN_TARGET_PATH}/{platform}/{arch}/python{python_version}/commands",
@@ -554,7 +557,12 @@ def test_runtime_commands_stay_with_binary_revisions(
     for version in ("3.11", "3.12"):
         tag = "cp" + version.replace(".", "")
         command_wheel(wheels, tag=f"{tag}-{tag}-win_amd64")
-        assert invoke(wheels, "sample", "--platform", "windows", "--python", version) == 0
+        assert (
+            invoke(
+                wheels, "sample", "--platform", "windows", "--arch", "x86_64", "--python", version
+            )
+            == 0
+        )
     boundary = root / "tools/sample/1.0"
     for version in ("3.11", "3.12"):
         runtime = boundary / "windows/x86_64" / f"python{version}"
@@ -570,20 +578,23 @@ def test_runtime_commands_stay_with_binary_revisions(
         assert (runtime / "lib/python" / script_path).read_bytes().startswith(b"MZ")
 
 
+@pytest.mark.parametrize("host_architecture", ["x86_64", "arm64"])
 def test_custom_runtime_bin_retains_other_package_libraries(
-    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, host_architecture: str
 ) -> None:
     """A common runtime bin validates companion libraries outside the requested package.
 
     :param installation: Isolated deployment root and offline wheel directory.
     :param monkeypatch: Fixture selecting a common scripts root.
+    :param host_architecture: Simulated host default; fixture wheels remain Windows x86-64.
     :return: None.
     """
     root, wheels = installation
+    monkeypatch.setattr("distman.install.targets.host_arch", lambda: host_architecture)
     monkeypatch.setenv("DISTMAN_RUNTIME_BIN_PATH", "{TOOLS_ROOT}/commands")
     command_wheel(wheels, tag="cp311-cp311-win_amd64")
     command_wheel(wheels, name="other", command="other-cli", tag="cp311-cp311-win_amd64")
-    options = ("--platform", "windows", "--python", "3.11")
+    options = ("--platform", "windows", "--arch", "x86_64", "--python", "3.11")
     assert invoke(wheels, "sample", *options) == 0
     sample_root = root / "tools/sample/1.0"
     original = os.readlink(sample_root)
@@ -842,7 +853,12 @@ def test_project_preview_matches_dist_output(
     config = project / "dist.json"
     config.write_text(config.read_text() + "\n")
     direct = subprocess.run(
-        [sys.executable, "-c", "from distman.dist import main; raise SystemExit(main())", "-df"],
+        [
+            sys.executable,
+            "-c",
+            "from distman.dist.command import main; raise SystemExit(main())",
+            "-df",
+        ],
         cwd=project,
         env=project_environment({}),
         capture_output=True,

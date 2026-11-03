@@ -52,7 +52,7 @@ ALLOWED_KEYS = {"func", "script", "options", "env"}
 
 
 if TYPE_CHECKING:
-    from distman.dist import Target
+    from distman.dist.distribution import Target
 
 
 class ValidationError(Exception):

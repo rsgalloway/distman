@@ -523,7 +523,8 @@ def cache(
             _skip_versions_dir(dirs)
             # Coordination state belongs to the source, never to its cached replica.
             if Path(root) == src_root / config.DISTMAN_META_DIR:
-                dirs[:] = [name for name in dirs if name != "locks"]
+                dirs[:] = [name for name in dirs if name not in ("locks", "operations")]
+                files[:] = [name for name in files if name != "pending.json"]
             dirs[:] = [
                 name
                 for name in dirs

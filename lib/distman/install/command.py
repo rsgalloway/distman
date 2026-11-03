@@ -61,7 +61,8 @@ from distman.install.projects import (
 from distman.install.targets import Target, expand_targets
 from distman.install.wheels import acquire, build_project, stage, staged_path
 from distman.inventory import inventory
-from distman.locking import deployment_lock, locks
+from distman.locking import locks
+from distman.operations import operation
 from distman.policy import Policy
 
 
@@ -368,7 +369,7 @@ def install(args: argparse.Namespace) -> int:
     if project:
         print(f"Local project: {project.path}")
         print(f"Effective deployment root: {policy.deploy_root}")
-    with deployment_lock(policy.deploy_root, args.dryrun):
+    with operation(policy.deploy_root, read_only=args.dryrun):
         with tempfile.TemporaryDirectory(prefix="distman-install-") as work:
             temporary = Path(work)
             groups, project_records = (

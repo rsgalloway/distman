@@ -54,7 +54,8 @@ from distman.install.models import Changes, InstalledArtifact, InstallState
 from distman.install.ownership import MANIFEST, check_script_pairs, read_state, target_requirements
 from distman.install.targets import Target
 from distman.inventory import sha256
-from distman.locking import deployment_lock, locks
+from distman.locking import locks
+from distman.operations import operation
 from distman.policy import Policy
 
 
@@ -339,7 +340,7 @@ def uninstall(args: argparse.Namespace) -> int:
     selectors = requests(args.packages)
     policy = Policy()
     print(f"Effective deployment root: {policy.deploy_root}")
-    with deployment_lock(policy.deploy_root, args.dryrun):
+    with operation(policy.deploy_root, read_only=args.dryrun):
         groups = {root: {} for root in policy.managed_roots()}
         include_companions(groups)
         roots = sorted(groups)

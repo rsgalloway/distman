@@ -363,7 +363,7 @@ Activation is atomic per root, not across roots. Local `dist.json` publication i
 separate: a later target failure can leave installed dependencies in place.
 Windows deployment requires symlink permission.
 
-See the [CLI reference](cli-reference.md) and [architecture guide](planning/architecture.md)
+See the [usage guide](usage.md) and [architecture guide](planning/architecture.md)
 for command and implementation details.
 
 ### Concurrent writers
@@ -390,6 +390,22 @@ also checked temporarily; these still fail immediately when occupied. Older dist
 commands do not honor the shared lock, so upgrade all writers for full coordination.
 
 Never delete a lock without checking that its owner has stopped. A killed process
-can leave a stale lock; automatic crash recovery is not implemented. Local concurrent
+can leave a stale lock; stale-lock removal is never automatic. Local concurrent
 process tests pass, but multi-host NFS/SMB behavior remains to be validated. Multiple
 library/bin links still switch individually, and manual edits do not honor locks.
+
+### Interrupted publication
+
+Install/uninstall publication records previous links before activation and attempts
+restoration on failure or Ctrl-C. If restoration cannot finish, further writes are
+blocked until recovery:
+
+```bash
+distman recover --root /path/to/deployment --dryrun
+distman recover --root /path/to/deployment --yes
+```
+
+Recovery refuses unexpected links and missing previous revisions. A dead writer may
+leave a lock: confirm its owner has stopped before removing that specific stale lock.
+Legacy dist publication is not yet journaled. These recovery records cover interrupted
+installation, not whole-deployment rollback or manual-edit restoration.

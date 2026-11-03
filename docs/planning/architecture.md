@@ -77,8 +77,8 @@ a new cross-command transaction; this boundary is documented rather than hidden.
 The maintainer-provided rhps-ingest implementation uses one `cli.py` containing
 `build_parser`, `_add_*_options`, and command dispatch while importing operations
 from dedicated modules. Distman now follows that arrangement for `dist`, `cache`,
-and `install`. Optional installer imports remain lazy; `dist` and `distcache`
-retain their existing console entry points and parser APIs. Installer business
+and `install`. Optional installer imports remain lazy; `dist` retains its console
+entry point, while caching is exposed through `distman cache`. Installer business
 logic stays outside the CLI.
 
 ## Installer target and launcher ownership
@@ -353,3 +353,22 @@ migration, operation journals/recovery, and common atomic publication for legacy
 dist. Epoch update failures and legacy copy/link failure handling remain part of the
 publication refactor. This slice serializes cooperating writers; it does not make
 multi-target publication crash-atomic or certify network filesystem durability.
+
+
+## Orchestration and recovery foundation
+
+The distribution package now separates `dist/command.py` (CLI-independent command
+coordination and standalone entry point) from `dist/distribution.py` (existing domain
+operations). Internal callers and executable entry points use the new modules;
+there is no Python import compatibility facade. `operations.operation` owns the root
+writer lock and checks pending recovery state before command execution. Domain
+methods no longer acquire the deployment-root lock themselves. Temporary per-target
+locks remain until the coordinated metadata migration.
+
+The directory publisher used by install/uninstall now persists incremental snapshots
+and pre-publication journals, flushes prepared contents and metadata, and inspects
+actual links during rollback. `recover` previews or performs explicit restoration.
+Legacy dist publication still needs migration; its command layer is coordinated but
+its payload changes are not yet journaled. See the
+[deployment state contract](deployment-state.md) for record semantics, recovery phases,
+snapshot coverage, performance constraints, audit separation, and remaining work.

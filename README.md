@@ -94,7 +94,7 @@ The namespaced `distman dist` command provides the same distribution
 interface. Cache a shared deployment locally with:
 
 ```bash
-distcache
+distman cache
 ```
 
 ## Documentation
@@ -103,7 +103,7 @@ Full documentation is available in the [docs](docs/) folder:
 
 - [Getting Started](docs/getting-started.md)
 - [Distribution Configuration](docs/distribution-config.md)
-- [CLI Reference](docs/cli-reference.md)
+- [Usage](docs/usage.md)
 - [Transform Pipelines](docs/transform-pipelines.md)
 - [Local Caching](docs/caching.md)
 

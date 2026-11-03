@@ -67,8 +67,7 @@ Issues = "https://github.com/rsgalloway/distman/issues"
 
 [project.scripts]
 distman = "distman.cli:main"
-dist = "distman.dist:main"
-distcache = "distman.cache:main"
+dist = "distman.dist.command:main"
 
 [tool.setuptools]
 zip-safe = false
@@ -81,10 +80,12 @@ where = ["lib"]
 profile = "black"
 line_length = 100
 skip_gitignore = true
+skip = [".git", "__pycache__"]
 
 [tool.black]
 line-length = 100
 target-version = ["py38"]
+exclude = '/(\.git|\.venv[^/]*|venv[^/]*|build|__pycache__)/|^/dist/'
 
 [tool.setuptools.package-data]
 "distman" = ["resources/*.env"]

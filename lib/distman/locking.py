@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Dict, Iterable, Iterator, Optional
 
 from distman import config
+from distman.metadata import durable_directory
 
 
 class LockError(OSError):
@@ -122,7 +123,7 @@ def deployment_lock(
     if borrowed:
         yield
         return
-    lock.parent.mkdir(parents=True, exist_ok=True)
+    durable_directory(lock.parent)
     deadline = time.monotonic() + seconds
     announced = False
     while True:
@@ -182,7 +183,7 @@ def locks(destinations: Iterable[Path], dryrun: bool = False) -> Iterator[None]:
     try:
         if not dryrun:
             for destination in sorted(destinations):
-                destination.parent.mkdir(parents=True, exist_ok=True)
+                durable_directory(destination.parent)
                 lock = destination.with_name(f".{destination.name}.install-lock")
                 try:
                     lock.mkdir()

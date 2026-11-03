@@ -101,7 +101,7 @@ distman dist --dryrun
 
 - [Getting Started](getting-started.md): first deployment and version layout
 - [Distribution Configuration](distribution-config.md): `dist.json`, paths, targets, and configuration deployment patterns
-- [CLI Reference](cli-reference.md): distribution, installation, and cache commands
+- [Usage](usage.md): distribution, installation, and cache commands
 - [Installing Python Distributions](install.md): package installation, paths, and runtime activation
 - [Transform Pipelines](transform-pipelines.md): preprocessing files before deployment
 - [Local Caching](caching.md): keeping a local mirror of active versions

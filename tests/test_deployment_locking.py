@@ -41,7 +41,7 @@ from typing import Dict
 import pytest
 
 from distman import config
-from distman.dist import Distributor
+from distman.dist.distribution import Distributor
 from distman.inventory import inventory
 from distman.locking import LockError, deployment_lock, lock_environment
 
@@ -244,7 +244,7 @@ def test_directory_pipeline_and_failure_cleanup(
         workspaces.append(Path(kwargs["build_dir"]))
         return run_pipeline(**kwargs)
 
-    monkeypatch.setattr("distman.dist.run_pipeline", observe)
+    monkeypatch.setattr("distman.dist.distribution.run_pipeline", observe)
     assert distributor.dist(yes=True)
     active = target.resolve()
     assert "NEW" in (target / "module.py").read_text()
@@ -276,8 +276,15 @@ def test_dist_mutators_respect_shared_lock(
     lock.mkdir(parents=True)
     (lock / "owner.json").write_text(json.dumps({"user": "another-writer"}))
     monkeypatch.setenv("DISTMAN_LOCK_TIMEOUT", "0")
-    with pytest.raises(LockError, match="another-writer"):
-        getattr(distributor, operation)()
+    from distman.dist.command import parse_args, run
+
+    options = {
+        "dist": [],
+        "reset_file_version": ["--reset"],
+        "change_file_version": ["--number", "1"],
+        "delete_target": ["--delete"],
+    }
+    assert run(parse_args([str(tmp_path), *options[operation]])) == 1
     assert lock.exists()
 
 
@@ -307,9 +314,11 @@ def test_cache_does_not_copy_writer_locks(tmp_path: Path) -> None:
     source, destination = tmp_path / "source", tmp_path / "cache"
     with deployment_lock(source):
         (source / "payload").write_text("data")
+        (source / ".distman/pending.json").write_text("source-only recovery state")
         (source / ".payload.install-lock").mkdir()
         cache(source, destination, workers=1)
         assert (source / ".distman/locks/write/owner.json").exists()
     assert (destination / "payload").read_text() == "data"
     assert not (destination / ".distman/locks").exists()
+    assert not (destination / ".distman/pending.json").exists()
     assert not (destination / ".payload.install-lock").exists()

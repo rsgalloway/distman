@@ -7,7 +7,7 @@ Available guides:
 
 - [Getting Started](getting-started.md)
 - [Distribution Configuration](distribution-config.md)
-- [CLI Reference](cli-reference.md)
+- [Usage](usage.md)
 - [Installing Python Distributions](install.md)
 - [Installation and Activation Examples](examples.md)
 - [Package Catalog](packages.md)

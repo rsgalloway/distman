@@ -39,7 +39,6 @@ Usage:
 
 Convenience shims can map:
     dist      -> distman dist
-    distcache -> distman cache
 """
 
 import argparse
@@ -48,7 +47,8 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from distman import cache, config, dist
+from distman import cache, config
+from distman.dist import command as dist
 from distman.logger import setup_logging
 
 
@@ -102,6 +102,10 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[build_command_parser("uninstall", prog="distman uninstall")],
         add_help=False,
     )
+    recovery = sub.add_parser("recover", help="Recover an interrupted journaled publication")
+    recovery.add_argument("--root", required=True, help="deployment root to inspect or recover")
+    recovery.add_argument("-d", "--dryrun", action="store_true", help="preview recovery only")
+    recovery.add_argument("-y", "--yes", action="store_true", help="confirm recovery")
     return parser
 
 
@@ -372,6 +376,9 @@ def _run_uninstall(args: argparse.Namespace) -> int:
         from distman.install.uninstall import uninstall
 
         return uninstall(args)
+    except KeyboardInterrupt:
+        print("Operation canceled", file=sys.stderr)
+        return 130
     except ImportError as exc:
         print(f"uninstall requires optional dependencies: pip install 'distman[install]' ({exc})")
         return 1
@@ -399,6 +406,9 @@ def _run_install(args: argparse.Namespace) -> int:
         from distman.install.command import install
 
         return install(args)
+    except KeyboardInterrupt:
+        print("Operation canceled", file=sys.stderr)
+        return 130
     except ImportError as exc:
         print(f"install requires optional dependencies: pip install 'distman[install]' ({exc})")
         return 1
@@ -426,6 +436,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.command == "cache":
         return cache.run(args)
+
+    if args.command == "recover":
+        from distman.recovery import recover
+
+        return recover(args)
 
     if args.command == "uninstall":
         return _run_uninstall(args)

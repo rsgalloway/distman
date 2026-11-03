@@ -42,15 +42,14 @@ from unittest.mock import patch
 import pytest
 
 from distman import config, util
-from distman.dist import (
+from distman.dist.command import parse_args, run
+from distman.dist.distribution import (
     Distributor,
     apply_destination_template,
     confirm,
     get_source_and_dest,
     get_version_dest,
     match_source_pattern,
-    parse_args,
-    run,
     should_skip_target,
     update_symlink,
     validate_destination_template,
@@ -96,10 +95,12 @@ def mock_dist_dict_with_pipeline():
 @pytest.fixture
 def mock_distributor(mocker, monkeypatch, temp_dir, mock_dist_dict):
     """Fixture to mock the Distributor class and its methods."""
-    mocker.patch("distman.dist.Distributor.read_git_info", return_value=True)
-    mocker.patch("distman.dist.Distributor.is_git_behind", return_value=False)
-    mocker.patch("distman.dist.Distributor.git_changed_files", return_value=[])
-    mocker.patch("distman.dist.Distributor.get_targets", return_value=mock_dist_dict["targets"])
+    mocker.patch("distman.dist.distribution.Distributor.read_git_info", return_value=True)
+    mocker.patch("distman.dist.distribution.Distributor.is_git_behind", return_value=False)
+    mocker.patch("distman.dist.distribution.Distributor.git_changed_files", return_value=[])
+    mocker.patch(
+        "distman.dist.distribution.Distributor.get_targets", return_value=mock_dist_dict["targets"]
+    )
     mocker.patch("distman.util.get_file_versions", return_value=[])
     mocker.patch("distman.util.link_object", return_value=True)
     mocker.patch("distman.util.remove_object", return_value=True)
@@ -408,9 +409,9 @@ def test_dist_with_source_override_matches_config(mocker, temp_dir):
         }
     }
 
-    mocker.patch("distman.dist.Distributor.read_git_info", return_value=True)
-    mocker.patch("distman.dist.Distributor.is_git_behind", return_value=False)
-    mocker.patch("distman.dist.Distributor.git_changed_files", return_value=[])
+    mocker.patch("distman.dist.distribution.Distributor.read_git_info", return_value=True)
+    mocker.patch("distman.dist.distribution.Distributor.is_git_behind", return_value=False)
+    mocker.patch("distman.dist.distribution.Distributor.git_changed_files", return_value=[])
     mocker.patch("distman.util.get_file_versions", return_value=[])
     mocker.patch("distman.util.yesNo", return_value=True)
 
@@ -577,8 +578,8 @@ def test_dist_with_dest_requires_source_or_target(mocker, temp_dir):
         }
     }
 
-    mocker.patch("distman.dist.Distributor.read_git_info", return_value=True)
-    mocker.patch("distman.dist.Distributor.git_changed_files", return_value=[])
+    mocker.patch("distman.dist.distribution.Distributor.read_git_info", return_value=True)
+    mocker.patch("distman.dist.distribution.Distributor.git_changed_files", return_value=[])
 
     result = dist.dist(dest=os.path.join(temp_dir, "deploy", "distman"), dryrun=True)
     assert result is False
@@ -594,9 +595,9 @@ def test_dist_with_source_and_dest_without_dist_file(mocker, temp_dir):
     dist.directory = temp_dir
     dist.root = None
 
-    mocker.patch("distman.dist.Distributor.read_git_info", return_value=True)
-    mocker.patch("distman.dist.Distributor.is_git_behind", return_value=False)
-    mocker.patch("distman.dist.Distributor.git_changed_files", return_value=[])
+    mocker.patch("distman.dist.distribution.Distributor.read_git_info", return_value=True)
+    mocker.patch("distman.dist.distribution.Distributor.is_git_behind", return_value=False)
+    mocker.patch("distman.dist.distribution.Distributor.git_changed_files", return_value=[])
     mocker.patch("distman.util.get_file_versions", return_value=[])
     mocker.patch("distman.util.yesNo", return_value=True)
 
@@ -626,9 +627,9 @@ def test_dist_with_invalid_direct_dest_returns_false(mocker, temp_dir):
     dist.directory = temp_dir
     dist.root = None
 
-    mocker.patch("distman.dist.Distributor.read_git_info", return_value=True)
-    mocker.patch("distman.dist.Distributor.is_git_behind", return_value=False)
-    mocker.patch("distman.dist.Distributor.git_changed_files", return_value=[])
+    mocker.patch("distman.dist.distribution.Distributor.read_git_info", return_value=True)
+    mocker.patch("distman.dist.distribution.Distributor.is_git_behind", return_value=False)
+    mocker.patch("distman.dist.distribution.Distributor.git_changed_files", return_value=[])
 
     result = dist.dist(source="artifact.txt", dest="{MISSING_ROOT}/artifact.txt")
     assert result is False
@@ -728,7 +729,11 @@ def test_dist_does_not_emit_popen_del_invalid_handle(tmp_path):
     # be sure we don't accidentally have that var set in CI
     env.pop("THIS_VAR_DOES_NOT_EXIST", None)
 
-    cmd = [sys.executable, "-c", "from distman.dist import main; raise SystemExit(main(['-d']))"]
+    cmd = [
+        sys.executable,
+        "-c",
+        "from distman.dist.command import main; raise SystemExit(main(['-d']))",
+    ]
 
     p = subprocess.run(
         cmd,

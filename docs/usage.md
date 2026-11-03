@@ -1,23 +1,19 @@
-# CLI Reference
+# Usage
 
 ## Commands
 
-The convenience commands are the primary user-facing interfaces:
-
-```bash
-dist [OPTIONS] [LOCATION]
-distcache [OPTIONS]
-```
-
-The `distman` suite command provides equivalent namespaced interfaces:
+Use the `distman` suite for these operations:
 
 ```bash
 distman dist [OPTIONS] [LOCATION]
 distman cache [OPTIONS]
 distman install [OPTIONS] [REQUIREMENTS...]
 distman uninstall [OPTIONS] PACKAGES...
+distman recover --root PATH [--dryrun] [--yes]
 distman --version
 ```
+
+The `dist` command is a shorthand for `distman dist`.
 
 ## Distribution
 
@@ -79,10 +75,8 @@ matching `%1`, `%2`, etc. placeholders.
 ## Cache Management
 
 ```bash
-distcache [OPTIONS]
+distman cache [OPTIONS]
 ```
-
-`distman cache [OPTIONS]` is equivalent.
 
 | Option | Meaning |
 |---|---|
@@ -99,11 +93,11 @@ distcache [OPTIONS]
 Examples:
 
 ```bash
-distcache --dryrun
-distcache --ttl 0
-distcache --diff
-distcache --prune --dryrun
-distcache --src /studio/apps/prod --dst /var/tmp/apps
+distman cache --dryrun
+distman cache --ttl 0
+distman cache --diff
+distman cache --prune --dryrun
+distman cache --src /studio/apps/prod --dst /var/tmp/apps
 ```
 
 ## Python installation
@@ -131,3 +125,16 @@ exact version pins and runtime filters narrow that selection. Options are `--pla
 Force permits broken retained dependencies; ownership and integrity checks still apply. See
 [Removing packages](install.md#removing-packages) for ownership, dependency checks,
 activation limits, and rollback history.
+
+## recover
+
+Recover interrupted journaled install/uninstall publication:
+
+```bash
+distman recover --root PATH [--dryrun] [--yes]
+```
+
+The root is explicit. Preview is read-only; recovery requires the writer lock and
+confirmation unless `--yes` is supplied. Unexpected links or missing prior revisions
+block restoration. This is not a general snapshot rollback command. A canceled
+command returns 130; failed or declined recovery returns 1.

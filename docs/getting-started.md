@@ -11,11 +11,10 @@ to a destination. For one-off deployments, `dist` can also take an explicit
 pip install -U distman
 ```
 
-This installs three commands:
+This installs two commands:
 
-- `distman`: suite command with `dist` and `cache` subcommands
+- `distman`: suite command for distribution, caching, installation, removal, and recovery
 - `dist`: direct distribution and version-management command
-- `distcache`: direct cache-management command
 
 ## Create a Distribution File
 

@@ -158,7 +158,7 @@ def distribute_project(
     command = [
         sys.executable,
         "-c",
-        "from distman.dist import main; raise SystemExit(main())",
+        "from distman.dist.command import main; raise SystemExit(main())",
         ".",
         "--yes",
     ]
@@ -194,7 +194,7 @@ def _distribution_paths(directory: str) -> List[str]:
     :return: Absolute destination strings produced by existing dist target resolution.
     :raises InstallError: If the configuration cannot be read or has no valid targets.
     """
-    from distman.dist import Distributor
+    from distman.dist.distribution import Distributor
 
     distributor = Distributor()
     try:

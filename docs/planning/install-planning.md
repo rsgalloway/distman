@@ -271,6 +271,15 @@ independent deployment environments, paired library/bin restoration, interrupted
 recovery, and transfer to a different root. Preserve backups independently of the
 active deployment; a single metadata file must not become the only recovery source.
 
+## Snapshots and recovery direction
+
+Use the [deployment state contract](deployment-state.md) for incremental timestamped
+snapshots, pre-publication journals, optional audit manifests, and failure recovery.
+The installer directory publisher has the journaled foundation; legacy dist and
+historical metadata migration remain outstanding. Normal operations record changed
+targets without scanning the whole deployment. Whole-root rollback, portable export,
+and optional hashio audits build on this model but are not implemented commands.
+
 ## Unified deployment metadata (proposed)
 
 Consolidate legacy target metadata, installer ownership, and the cache generation
