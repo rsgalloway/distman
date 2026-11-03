@@ -39,6 +39,7 @@ atomic; multiple targets have exception rollback, not global atomic visibility.
 import hashlib
 import os
 import shutil
+import stat
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -124,8 +125,17 @@ def flush_payload(directory: Path) -> None:
         for name in files:
             path = Path(root) / name
             if not path.is_symlink():
-                with path.open("rb") as stream:
-                    os.fsync(stream.fileno())
+                # Windows requires a writable descriptor for fsync. Only these
+                # private copies may have permissions relaxed, never active files.
+                mode = stat.S_IMODE(path.stat().st_mode)
+                try:
+                    if not mode & stat.S_IWUSR:
+                        path.chmod(mode | stat.S_IWUSR)
+                    with path.open("r+b") as stream:
+                        os.fsync(stream.fileno())
+                finally:
+                    if not mode & stat.S_IWUSR:
+                        path.chmod(mode)
         sync_directory(Path(root))
 
 

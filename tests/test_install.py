@@ -300,11 +300,23 @@ def test_standalone_fallback(
     assert policy.deploy_root == tmp_path / ".local/distman/prod"
 
 
-def test_missing_wheel_and_unmanaged_destination(installation: Tuple[Path, Path]) -> None:
-    """Abort missing runtime selection and refuse unmanaged active directories."""
+@pytest.mark.parametrize("host_architecture", ["x86_64", "arm64"])
+def test_missing_wheel_and_unmanaged_destination(
+    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, host_architecture: str
+) -> None:
+    """Abort missing runtime selection and refuse unmanaged active directories.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :param monkeypatch: Fixture overriding the host architecture.
+    :param host_architecture: Simulated host default for explicit target selection.
+    :return: None.
+    """
+    monkeypatch.setattr("distman.install.targets.host_arch", lambda: host_architecture)
     root, wheels = installation
     wheel(wheels, tag="cp311-cp311-win_amd64")
-    assert invoke(wheels, "sample", "--platform", "linux", "--python", "3.11") == 1
+    assert (
+        invoke(wheels, "sample", "--platform", "linux", "--arch", "x86_64", "--python", "3.11") == 1
+    )
     assert list(root.iterdir()) == [root / ".distman"]
     assert not (root / ".distman/locks/write").exists()
     wheel(wheels)
@@ -1236,16 +1248,27 @@ def remove(*args: str) -> int:
     return cli.main(["uninstall", "--yes", *args])
 
 
-def test_uninstall_shared_package_history_and_idempotency(installation: Tuple[Path, Path]) -> None:
+@pytest.mark.parametrize("host_architecture", ["x86_64", "arm64"])
+def test_uninstall_shared_package_history_and_idempotency(
+    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, host_architecture: str
+) -> None:
     """Remove only selected ownership while preserving history and unrelated commands.
 
     :param installation: Isolated deployment root and offline wheelhouse.
+    :param monkeypatch: Fixture overriding the host architecture.
+    :param host_architecture: Simulated host default for explicit target selection.
     :return: None.
     """
+    monkeypatch.setattr("distman.install.targets.host_arch", lambda: host_architecture)
     root, wheels = installation
     command_wheel(wheels)
     command_wheel(wheels, name="other", command="other-cli")
-    assert invoke(wheels, "sample", "other", "--platform", "all", "--python", "3.11") == 0
+    assert (
+        invoke(
+            wheels, "sample", "other", "--platform", "all", "--arch", "x86_64", "--python", "3.11"
+        )
+        == 0
+    )
     library, scripts = root / "tools/lib/python", root / "tools/bin"
     history = library.resolve(), scripts.resolve()
     assert remove("sample", "--dryrun") == 0
@@ -1268,15 +1291,24 @@ def test_uninstall_shared_package_history_and_idempotency(installation: Tuple[Pa
     assert library.is_symlink() and scripts.is_symlink()
 
 
-def test_uninstall_runtime_selection_and_record(installation: Tuple[Path, Path]) -> None:
+@pytest.mark.parametrize("host_architecture", ["x86_64", "arm64"])
+def test_uninstall_runtime_selection_and_record(
+    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, host_architecture: str
+) -> None:
     """Keep POSIX launchers for retained platforms and update external RECORD paths.
 
     :param installation: Isolated deployment root and offline wheelhouse.
+    :param monkeypatch: Fixture overriding the host architecture.
+    :param host_architecture: Simulated host default for explicit target selection.
     :return: None.
     """
+    monkeypatch.setattr("distman.install.targets.host_arch", lambda: host_architecture)
     root, wheels = installation
     command_wheel(wheels)
-    assert invoke(wheels, "sample", "--platform", "all", "--python", "3.11,3.12") == 0
+    assert (
+        invoke(wheels, "sample", "--platform", "all", "--arch", "x86_64", "--python", "3.11,3.12")
+        == 0
+    )
     library, scripts = root / "tools/lib/python", root / "tools/bin"
     assert remove("sample", "--platform", "linux") == 0
     assert (scripts / "sample-cli").exists()  # macOS still needs it
@@ -1291,24 +1323,31 @@ def test_uninstall_runtime_selection_and_record(installation: Tuple[Path, Path])
     assert not any(row[0].endswith("sample-cli.exe") for row in rows)
     assert any(row[0].endswith("sample-cli") for row in rows)
     assert read_state(scripts)["artifacts"]["sample"]["targets"] == record["targets"]
-    assert invoke(wheels, "sample", "--platform", "windows", "--python", "3.11") == 0
+    assert (
+        invoke(wheels, "sample", "--platform", "windows", "--arch", "x86_64", "--python", "3.11")
+        == 0
+    )
     assert (scripts / "sample-cli.exe").exists()
 
 
+@pytest.mark.parametrize("host_architecture", ["x86_64", "arm64"])
 def test_uninstall_binary_versions_and_reverse_dependencies(
-    installation: Tuple[Path, Path]
+    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, host_architecture: str
 ) -> None:
     """Check consumers in separate runtime roots and preserve unselected versions.
 
     :param installation: Isolated deployment root and offline wheelhouse.
+    :param monkeypatch: Fixture overriding the host architecture.
+    :param host_architecture: Simulated host default for explicit target selection.
     :return: None.
     """
+    monkeypatch.setattr("distman.install.targets.host_arch", lambda: host_architecture)
     root, wheels = installation
     tag = "cp311-cp311-manylinux_2_17_x86_64"
     wheel(wheels, "native", tag=tag)
     wheel(wheels, "app", tag=tag, requires=["native==1.0"])
     wheel(wheels, "native", version="2.0", tag=tag)
-    args = ("--platform", "linux", "--python", "3.11")
+    args = ("--platform", "linux", "--arch", "x86_64", "--python", "3.11")
     assert invoke(wheels, "app", *args) == 0
     assert invoke(wheels, "native==2.0", *args) == 0
     original = (root / "tools/native/1.0").resolve()
@@ -1418,16 +1457,27 @@ def test_uninstall_rejects_ambiguous_selectors(
     assert not root.exists()
 
 
-def test_uninstall_binary_runtime_preserves_other_variants(installation: Tuple[Path, Path]) -> None:
+@pytest.mark.parametrize("host_architecture", ["x86_64", "arm64"])
+def test_uninstall_binary_runtime_preserves_other_variants(
+    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, host_architecture: str
+) -> None:
     """Remove one runtime's library and commands without removing another runtime.
 
     :param installation: Isolated deployment root and offline wheelhouse.
+    :param monkeypatch: Fixture overriding the host architecture.
+    :param host_architecture: Simulated host default for explicit target selection.
     :return: None.
     """
+    monkeypatch.setattr("distman.install.targets.host_arch", lambda: host_architecture)
     root, wheels = installation
     for python in ("311", "312"):
         command_wheel(wheels, tag=f"cp{python}-cp{python}-win_amd64")
-    assert invoke(wheels, "sample", "--platform", "windows", "--python", "3.11,3.12") == 0
+    assert (
+        invoke(
+            wheels, "sample", "--platform", "windows", "--arch", "x86_64", "--python", "3.11,3.12"
+        )
+        == 0
+    )
     boundary = root / "tools/sample/1.0"
     assert remove("sample", "--platform", "windows", "--python", "3.11") == 0
     assert not (boundary / "windows/x86_64/python3.11").exists()
@@ -1479,19 +1529,27 @@ def test_uninstall_honors_writer_locks(installation: Tuple[Path, Path]) -> None:
     assert lock.is_dir()
 
 
+@pytest.mark.parametrize("host_architecture", ["x86_64", "arm64"])
 def test_uninstall_partial_shared_target_protects_dependents(
-    installation: Tuple[Path, Path]
+    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, host_architecture: str
 ) -> None:
     """Do not withdraw required target support even when shared files remain elsewhere.
 
     :param installation: Isolated deployment root and offline wheelhouse.
+    :param monkeypatch: Fixture overriding the host architecture.
+    :param host_architecture: Simulated host default for explicit target selection.
     :return: None.
     """
+    monkeypatch.setattr("distman.install.targets.host_arch", lambda: host_architecture)
     root, wheels = installation
     command_wheel(wheels)
     wheel(wheels, "app", requires=["sample"])
-    assert invoke(wheels, "sample", "--platform", "all", "--python", "3.11") == 0
-    assert invoke(wheels, "app", "--platform", "windows", "--python", "3.11") == 0
+    assert (
+        invoke(wheels, "sample", "--platform", "all", "--arch", "x86_64", "--python", "3.11") == 0
+    )
+    assert (
+        invoke(wheels, "app", "--platform", "windows", "--arch", "x86_64", "--python", "3.11") == 0
+    )
     library = root / "tools/lib/python"
     before = library.resolve()
     assert remove("sample", "--platform", "windows") == 1

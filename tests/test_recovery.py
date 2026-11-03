@@ -34,6 +34,7 @@
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -379,3 +380,49 @@ def test_first_publication_interrupt_restores_absence(
     assert Store(root).current() is None
     assert Store(root).pending() is None
     assert (root / "versions/target.0/payload").read_text() == "new"
+
+
+@pytest.mark.parametrize("fail_flush", [False, True])
+def test_payload_flush_uses_writable_handles_and_preserves_modes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fail_flush: bool
+) -> None:
+    """Flush read-only payloads using Windows-compatible handles without altering bytes.
+
+    :param tmp_path: Private staging directory.
+    :param monkeypatch: Fixture enforcing writable descriptors during synchronization.
+    :param fail_flush: Whether to inject an I/O failure during synchronization.
+    :return: None.
+    """
+    payload = tmp_path / "payload"
+    payload.write_bytes(b"original bytes\r\n")
+    payload.chmod(stat.S_IREAD)
+    original_mode = stat.S_IMODE(payload.stat().st_mode)
+    fsync = os.fsync
+    flushed = []
+
+    def require_writable(descriptor: int) -> None:
+        """Emulate Windows' writable handle requirement, optionally failing the flush.
+
+        :param descriptor: Open payload or directory descriptor.
+        :return: None.
+        :raises OSError: If the handle is read-only or failure was requested.
+        """
+        if stat.S_ISREG(os.fstat(descriptor).st_mode):
+            os.write(descriptor, b"")
+            flushed.append(descriptor)
+            if fail_flush:
+                raise OSError("injected flush failure")
+        fsync(descriptor)
+
+    monkeypatch.setattr(deployment.os, "fsync", require_writable)
+    try:
+        if fail_flush:
+            with pytest.raises(OSError, match="injected flush failure"):
+                deployment.flush_payload(tmp_path)
+        else:
+            deployment.flush_payload(tmp_path)
+        assert len(flushed) == 1
+        assert payload.read_bytes() == b"original bytes\r\n"
+        assert stat.S_IMODE(payload.stat().st_mode) == original_mode
+    finally:
+        payload.chmod(original_mode | stat.S_IWUSR)
