@@ -214,6 +214,7 @@ class Store:
                 or ".." in Path(destination).parts
                 or destination in destinations
                 or (before is not None and (not isinstance(before, str) or not before))
+                or not isinstance(change.get("allow_absent", False), bool)
                 or not isinstance(after, str)
                 or not after
             ):

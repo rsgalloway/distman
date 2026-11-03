@@ -38,7 +38,12 @@ history silently.
 A future whole-root rollback should create a new history entry selecting an older
 snapshot. It is distinct from recovering an interrupted publication. Multiple link
 switches are not globally atomic to readers; atomic application-wide visibility
-would require another activation layout.
+would require another activation layout. POSIX replaces each link atomically.
+Windows directory links require unlinking the old link before renaming the new
+one, so readers can briefly observe a missing path. Windows journals mark this
+possible intermediate absence before activation; recovery restores the previous
+revision after interruption in that gap. Missing paths remain conflicts for
+journals without that marker and for committed operations.
 
 The package-file proposal in issue #13 can reuse this selection model for named,
 frozen sets of revisions, including prepared but inactive versions. Portable export

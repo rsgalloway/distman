@@ -1410,7 +1410,8 @@ def test_uninstall_failure_restores_links(
     monkeypatch.setattr(deployment, "replace_link", fail_once)
     assert remove("sample") == 1
     assert (library.resolve(), scripts.resolve()) == original
-    assert (scripts / "sample-cli").exists()
+    launcher = "sample-cli.exe" if os.name == "nt" else "sample-cli"
+    assert (scripts / launcher).exists()
 
 
 def test_uninstall_scoped_roots_confirmation_and_integrity(
@@ -1437,7 +1438,8 @@ def test_uninstall_scoped_roots_confirmation_and_integrity(
     monkeypatch.setenv("DEPLOY_ROOT", str(root))
     (root / "tools/lib/python/sample.py").write_text("changed")
     assert remove("sample") == 1
-    assert (root / "tools/bin/sample-cli").exists()
+    launcher = "sample-cli.exe" if os.name == "nt" else "sample-cli"
+    assert (root / "tools/bin" / launcher).exists()
 
 
 @pytest.mark.parametrize(

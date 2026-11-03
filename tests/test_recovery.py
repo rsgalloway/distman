@@ -38,7 +38,7 @@ import stat
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import pytest
 
@@ -155,10 +155,14 @@ def test_failed_restoration_blocks_writers_and_refuses_conflicts(
     assert all((destination / "payload").read_text() == "original" for _, destination in changes)
 
 
-def test_process_death_is_recoverable_from_persisted_state(tmp_path: Path) -> None:
+@pytest.mark.parametrize("during_gap", [False, True])
+def test_process_death_is_recoverable_from_persisted_state(
+    tmp_path: Path, during_gap: bool
+) -> None:
     """A fresh process can restore publication without the dead process's memory.
 
     :param tmp_path: Isolated staging/deployment workspace.
+    :param during_gap: Kill the process during Windows' unlink/rename interval.
     :return: None.
     """
     root, changes = initial_deployment(tmp_path)
@@ -170,10 +174,19 @@ from distman import deployment
 from distman.operations import operation
 root = Path(sys.argv[1])
 replace = deployment.replace_link
-def crash(destination, target):
-    replace(destination, target)
-    os._exit(73)
-deployment.replace_link = crash
+if sys.argv[4] == 'gap':
+    deployment.platform.system = lambda: 'Windows'
+    rename = os.rename
+    def crash_rename(source, destination):
+        if destination == root / 'library':
+            os._exit(73)
+        rename(source, destination)
+    deployment.os.rename = crash_rename
+else:
+    def crash(destination, target):
+        replace(destination, target)
+        os._exit(73)
+    deployment.replace_link = crash
 with operation(root):
     deployment.publish_directories([(Path(sys.argv[2]), root / 'library'),
                                    (Path(sys.argv[3]), root / 'scripts')], root)
@@ -182,12 +195,31 @@ with operation(root):
     environment.pop("DISTMAN_PARENT_LOCK", None)
     environment["PYTHONPATH"] = os.pathsep.join(str(Path(p).resolve()) for p in sys.path if p)
     result = subprocess.run(
-        [sys.executable, "-c", code, str(root), str(changes[0][0]), str(changes[1][0])],
+        [
+            sys.executable,
+            "-c",
+            code,
+            str(root),
+            str(changes[0][0]),
+            str(changes[1][0]),
+            "gap" if during_gap else "switched",
+        ],
         env=environment,
     )
     assert result.returncode == 73
     assert Store(root).pending() is not None
-    assert (changes[0][1] / "payload").read_text() == "updated"
+    if during_gap:
+        assert not os.path.lexists(changes[0][1])
+        store = Store(root)
+        journal = store.pending()
+        journal["changes"][0].pop("allow_absent")
+        store.write(f"operations/{journal['id']}.json", journal)
+        with pytest.raises(RecoveryRequired, match="conflict"):
+            deployment.recover_publication(root, dryrun=True)
+        journal["changes"][0]["allow_absent"] = True
+        store.write(f"operations/{journal['id']}.json", journal)
+    else:
+        assert (changes[0][1] / "payload").read_text() == "updated"
     assert (changes[1][1] / "payload").read_text() == "original"
     # The process is known to have exited; stale-lock removal is deliberately explicit.
     shutil.rmtree(root / ".distman/locks/write")
@@ -426,3 +458,88 @@ def test_payload_flush_uses_writable_handles_and_preserves_modes(
         assert stat.S_IMODE(payload.stat().st_mode) == original_mode
     finally:
         payload.chmod(original_mode | stat.S_IWUSR)
+
+
+@pytest.mark.parametrize("failure", [None, OSError, KeyboardInterrupt])
+def test_windows_directory_link_swap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: Optional[type]
+) -> None:
+    """Publish directory links under Windows rename rules and restore interrupted swaps.
+
+    :param tmp_path: Isolated deployment workspace.
+    :param monkeypatch: Fixture emulating Windows directory replacement semantics.
+    :param failure: Optional exception injected during the first unlink/rename gap.
+    :return: None.
+    """
+    root, changes = initial_deployment(tmp_path)
+    previous = Store(root).current()
+    replace, rename = os.replace, os.rename
+    interrupted = False
+
+    def reject_directory_replace(source: Path, destination: Path) -> None:
+        """Reject replacing directory links as Windows does.
+
+        :param source: Prepared link or metadata file.
+        :param destination: Destination to replace.
+        :return: None.
+        :raises PermissionError: If replacing an existing directory link.
+        """
+        if Path(destination).is_symlink() and Path(destination).is_dir():
+            raise PermissionError("Windows refuses directory link replacement")
+        replace(source, destination)
+
+    def rename_link(source: Path, destination: Path) -> None:
+        """Require absent destinations and optionally interrupt the swap.
+
+        :param source: Prepared revision or temporary link.
+        :param destination: Intended destination.
+        :return: None.
+        :raises BaseException: Requested interruption or existing destination.
+        """
+        nonlocal interrupted
+        if destination in [target for _, target in changes]:
+            assert not os.path.lexists(destination)
+            if failure is not None and not interrupted:
+                interrupted = True
+                raise failure("interrupted link swap")
+        rename(source, destination)
+
+    monkeypatch.setattr(deployment.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(deployment.os, "replace", reject_directory_replace)
+    monkeypatch.setattr(deployment.os, "rename", rename_link)
+    with operation(root):
+        if failure is None:
+            deployment.publish_directories(changes, root)
+        else:
+            with pytest.raises(failure, match="interrupted link swap"):
+                deployment.publish_directories(changes, root)
+    assert Store(root).pending() is None
+    assert (Store(root).current() == previous) == (failure is not None)
+    expected = "original" if failure is not None else "updated"
+    assert all((target / "payload").read_text() == expected for _, target in changes)
+
+
+def test_windows_link_swap_preserves_unmanaged_directories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Handle dangling link transitions without removing unmanaged directories.
+
+    :param tmp_path: Isolated directory holding targets and links.
+    :param monkeypatch: Fixture selecting the Windows link replacement path.
+    :return: None.
+    """
+    monkeypatch.setattr(deployment.platform, "system", lambda: "Windows")
+    revision = tmp_path / "revision"
+    revision.mkdir()
+    link = tmp_path / "active"
+    deployment.replace_link(link, revision)
+    deployment.replace_link(link, "missing")
+    assert link.is_symlink() and not link.exists()
+    deployment.replace_link(link, revision)
+    assert link.resolve() == revision
+    unmanaged = tmp_path / "unmanaged"
+    unmanaged.mkdir()
+    (unmanaged / "keep").write_text("unowned")
+    with pytest.raises(OSError):
+        deployment.replace_link(unmanaged, revision)
+    assert (unmanaged / "keep").read_text() == "unowned"

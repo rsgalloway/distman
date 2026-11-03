@@ -359,8 +359,11 @@ can leave commands and libraries inconsistent. Subsequent installs check their
 paired receipts. Runtime libraries and bins under DISTMAN_TARGET_PATH roll back
 through that single package boundary.
 
-Activation is atomic per root, not across roots. Local `dist.json` publication is
-separate: a later target failure can leave installed dependencies in place.
+POSIX activation replaces each managed link atomically, not all links together.
+Windows directory links require an unlink/rename swap with a brief visibility gap;
+the publication journal allows recovery if that swap is interrupted. Local
+`dist.json` publication is separate: a later target failure can leave installed
+dependencies in place.
 Windows deployment requires symlink permission.
 
 See the [usage guide](usage.md) and [architecture guide](planning/architecture.md)

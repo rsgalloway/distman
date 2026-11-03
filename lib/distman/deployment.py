@@ -33,11 +33,13 @@
 
 Uses the same sibling ``versions`` layout as Distributor. Callers serialize
 writers and validate ownership before publishing. Each link replacement is
-atomic; multiple targets have exception rollback, not global atomic visibility.
+atomic on POSIX; Windows directory links have a recoverable unlink/rename gap.
+Multiple targets have exception rollback, not global atomic visibility.
 """
 
 import hashlib
 import os
+import platform
 import shutil
 import stat
 import uuid
@@ -71,7 +73,10 @@ def get_version_dest(dest: str, version_num: int, short_head: Optional[str]) -> 
 
 
 def replace_link(destination: Union[str, Path], target: Union[str, Path]) -> None:
-    """Replace an active symlink without first unlinking the old revision.
+    """Replace an active symlink using the platform's supported rename semantics.
+
+    Windows cannot rename over directory links. Its unlink/rename gap requires
+    callers to journal the previous link before calling this function.
 
     :param destination: Active symlink path to replace; its parent must already exist.
     :param target: Link target, relative to the destination parent or absolute.
@@ -82,7 +87,14 @@ def replace_link(destination: Union[str, Path], target: Union[str, Path]) -> Non
     temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.link")
     try:
         os.symlink(target, temporary, target_is_directory=(destination.parent / target).is_dir())
-        os.replace(temporary, destination)
+        if platform.system() == "Windows" and (temporary.is_dir() or destination.is_dir()):
+            if destination.is_symlink():
+                destination.unlink()
+            # rename refuses an existing destination on Windows, including an
+            # unmanaged object that appeared during the gap.
+            os.rename(temporary, destination)
+        else:
+            os.replace(temporary, destination)
         sync_directory(destination.parent)
     finally:
         if temporary.is_symlink():
@@ -188,7 +200,12 @@ def recover_publication(deploy_root: Path, dryrun: bool = False) -> List[str]:
         actual = observed_link(destination)
         before, after = change["before"], change["after"]
         expected = after if committed else before
-        if actual not in (before, after) or (committed and actual != after):
+        missing_during_swap = (
+            record["phase"] == "prepared" and change.get("allow_absent", False) and actual is None
+        )
+        if (actual not in (before, after) and not missing_during_swap) or (
+            committed and actual != after
+        ):
             raise RecoveryRequired(f"Recovery conflict at {destination}: unexpected active link")
         if expected is not None and not (destination.parent / expected).exists():
             raise RecoveryRequired(f"Recovery revision is missing: {destination.parent / expected}")
@@ -204,7 +221,12 @@ def recover_publication(deploy_root: Path, dryrun: bool = False) -> List[str]:
             actual = observed_link(destination)
             if actual == before:
                 continue
-            if actual != change["after"]:
+            missing_during_swap = (
+                record["phase"] == "prepared"
+                and change.get("allow_absent", False)
+                and actual is None
+            )
+            if actual != change["after"] and not missing_during_swap:
                 raise RecoveryRequired(f"Recovery conflict at {destination}")
             if before is None:
                 destination.unlink()
@@ -266,7 +288,14 @@ def publish_directories(changes: Iterable[Tuple[Path, Path]], deploy_root: Path)
             raise RecoveryRequired(f"Previous revision is missing: {destination}")
         revision = prepare_revision(source, destination)
         link = os.path.relpath(revision, destination.parent)
-        prepared.append({"destination": str(destination), "before": previous, "after": link})
+        prepared.append(
+            {
+                "destination": str(destination),
+                "before": previous,
+                "after": link,
+                "allow_absent": platform.system() == "Windows",
+            }
+        )
         try:
             target_path = destination.relative_to(store.root).as_posix()
             payload_path = revision.relative_to(store.root).as_posix()
