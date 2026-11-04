@@ -8,9 +8,10 @@ and remaining architectural constraints.
 | Module | Responsibility and coupling | Bounded change |
 |---|---|---|
 | `cli.py` | Suite parsing originally imported separate command parsers | Centralized options, parser construction, and dispatch following rhps-ingest |
-| `dist.py` | CLI, Git checks, targets, pipelines, version selection, publication | Moved parser definitions to `cli.py`; preserved parser wrappers, `Distributor`, `run`, `main`, and helper imports |
+| `dist/command.py`, `dist/distribution.py` | Command orchestration and existing Git-aware distribution operations | Replaced `dist.py`; updated internal callers and entry points without an import facade |
 | `source.py` | `Source` loads `dist.json`; `GitRepo` adds repository inspection | Preserved both classes and Git checks |
-| `deployment.py` | New source-neutral revision publication; shares revision naming with `dist` | Typed and documented its staged-directory API |
+| `deployment.py` | Git-independent revision publication for install/uninstall | Stages payloads, journals link changes, and restores interrupted publication |
+| `operations.py`, `metadata.py`, `recovery.py` | Writer coordination, durable state storage, and explicit recovery | Root lock and pending-operation checks surround command execution |
 | `config.py` | Legacy constants evaluated from the environment at import time | Preserved defaults for existing callers |
 | `install/policy.py` | Optional envstack/pathbase policy mixed into command namespace | Moved to `policy.py`; retained an import compatibility shim |
 | `resources/install.env` | Packaged fallback policy, formerly install/defaults.env | Configuration moved out of command implementation |
@@ -30,15 +31,20 @@ pipeline configuration. No external Python API consumers are currently known.
 Existing Python class/function imports are not a compatibility requirement: rename
 or remove them and update repository callers, tests, and entry points together.
 Do not add facades, aliases, or re-exports solely to preserve the old module layout.
-The current-state table above describes existing shims, not a requirement to retain
-them. Revisit a specific import only if an actual external consumer is identified.
+The remaining installer-policy shim is transitional, not an API guarantee.
+Revisit a specific import only if an actual external consumer is identified.
+
+The standalone `distcache` executable and its bin shims were intentionally removed;
+use `distman cache`. The `dist` executable, `distman dist`, existing configuration,
+and documented transform callable paths remain supported. These command and
+internal-import decisions narrow the original compatibility goal explicitly.
 
 ## Remaining coupling
 
 `Distributor` inherits `GitRepo` and loads Git metadata even for ad hoc sources.
 `Source` is a configuration reader rather than a generic acquisition provider.
-`dist.py` retains Git safety checks, transformation, and legacy publication; argument
-parser definitions now live in `cli.py`.
+`dist/distribution.py` retains Git safety checks, transformation, and legacy
+publication; argument parser definitions now live in `cli.py`.
 `util.copy_file` normalizes text, which is inappropriate for wheel payload hashes.
 `config.py` and `logger.py` capture environment settings at import time. Pathbase
 0.2 can initialize envstack at import time, changing environment and Python paths;
@@ -61,7 +67,7 @@ It does not acquire packages. Configuration resources belong to the package's
 `distman.env` remains the studio-facing configuration example.
 
 `install/projects.py` inspects only the supplied directory. It delegates builds
-and dependency resolution to pip and configured custom targets to `dist.run`.
+and dependency resolution to pip and configured custom targets to `dist/command.py`.
 A combined project's built wheel supplies dependency metadata but is excluded
 from third-party publication when `dist.json` owns the project deployment.
 
@@ -94,9 +100,11 @@ receipt. Staging regenerates variants for requested and previously recorded
 platforms from the selected wheel, including complete wheel RECORD entries.
 Normalized Windows ZIP timestamps keep comparisons deterministic. Library/scripts
 pair validation and publication rollback remain in the ownership/deployment layers.
-This supports cross-generation on Linux; native Windows execution is a separate
-validation requirement. See the [installation roadmap](install-planning.md) for
-remaining validation checks and unimplemented features.
+This supports cross-generation on Linux. Native Windows CI executes generated
+console launchers for wheel and local-project installs; GUI launchers and broader
+argument/interpreter discovery cases remain separate validation work. See the
+[installation roadmap](install-planning.md) for remaining validation checks and
+unimplemented features.
 
 ## Refactoring direction (proposed)
 
@@ -319,8 +327,8 @@ publication was interrupted.
 
 Start with extraction and characterization, not a directory rename or a database
 migration. Recipe catalogs, dashboard, environment creation, source-build fallback,
-and upgrade policy changes are outside these slices. The existing upgrade proposal
-remains separate pending a deliberate scope decision.
+and upgrade policy changes are outside these slices. Installed-state-aware upgrades
+remain follow-up work outside the initial wheel-installer delivery boundary.
 
 
 ## First infrastructure slice: implementation progress
@@ -349,9 +357,9 @@ install/install/dist commands preserving both package records.
 
 Still outstanding: cache-destination mutation coordination, explicit ownership for
 custom roots shared across different policies, network-share validation, metadata
-migration, operation journals/recovery, and common atomic publication for legacy
-dist. Epoch update failures and legacy copy/link failure handling remain part of the
-publication refactor. This slice serializes cooperating writers; it does not make
+migration and journaled publication for legacy dist. Install/uninstall journals
+and recovery are implemented as described below. Epoch update failures and legacy
+copy/link failure handling remain part of the publication refactor. This slice serializes cooperating writers; it does not make
 multi-target publication crash-atomic or certify network filesystem durability.
 
 

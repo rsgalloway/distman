@@ -151,7 +151,8 @@ def distribute_project(
     :param project: Local project whose dist.json targets should be processed.
     :param args: Install options supplying force and verbosity for the legacy command.
     :param environment: Resolved policy values to overlay on the child process environment.
-    :param dryrun: If True, invoke the legacy command in preview mode.
+    :param dryrun: If True, invoke the legacy command in preview mode. Successful
+        internal previews are quiet unless the user requested a dry run.
     :return: Exit status returned by the existing dist command.
     :raises OSError: If the child process cannot be started.
     """
@@ -171,7 +172,19 @@ def distribute_project(
 
     child_environment = project_environment(environment)
     child_environment.update(lock_environment(Path(environment["DEPLOY_ROOT"])))
-    return subprocess.run(command, env=child_environment, cwd=project.path).returncode
+    preflight = dryrun and not args.dryrun
+    result = subprocess.run(
+        command,
+        env=child_environment,
+        cwd=project.path,
+        stdout=subprocess.PIPE if preflight else None,
+        stderr=subprocess.STDOUT if preflight else None,
+        text=True,
+    )
+    if preflight and result.returncode and result.stdout:
+        print("Project validation failed (dry-run diagnostics):", flush=True)
+        print(result.stdout, end="", flush=True)
+    return result.returncode
 
 
 def project_environment(environment: Mapping[str, str]) -> Dict[str, str]:

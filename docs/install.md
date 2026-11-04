@@ -46,6 +46,19 @@ Dry runs still resolve, download, and stage packages. Local builds run on a
 temporary source copy, excluding Git metadata, common virtualenv directories,
 and broken symlinks. Backends requiring Git metadata may not support preview.
 
+## Version selection and compatibility
+
+An unpinned `distman install PACKAGE` resolves against the configured package
+sources and can install a newer version, including changes to dependencies. It
+does not yet prefer satisfactory versions already present in the deployment.
+Use explicit pins or a pinned requirements file when versions must remain fixed.
+`-U` / `--upgrade` and installed-state-aware resolution are planned together.
+
+The standalone `distcache` command and its bin shims have been removed; use
+`distman cache`. The `dist` command remains available. Internal Python imports may
+change; executable commands, configuration, and documented transform callables
+are the supported integration points.
+
 ## Runtime selection
 
 By default, packages target the running CPython interpreter. Select other runtimes

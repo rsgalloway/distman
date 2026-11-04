@@ -12,12 +12,13 @@ policy rather than inferring packages from arbitrary envstack variables.
 | Explicit upgrades | Planned | `-U` is not implemented |
 | Package removal | Implemented | Receipt-owned revisions, version/runtime selection, dependency checks, and retained history |
 | Local packaging, requirements-only, dist-only, and combined projects | Implemented | Exact-directory discovery; dist.json owns custom publication; project tests |
-| Bounded architecture refactor | Implemented | Central CLI, shared policy, staged publication, compatibility wrappers; [architecture audit](architecture.md) |
+| Bounded architecture refactor | Implemented | Central CLI, shared policy, separate dist command/domain modules, journaled package publication; [architecture audit](architecture.md) |
 | Configurable shared/runtime libraries and bins | Implemented | Five DISTMAN path templates, packaged fallback, active overrides, custom-layout tests |
 | Complete wheel contents and ownership | Implemented | Metadata, resources, scripts, RECORD, namespaces, collision and integrity checks |
 | Shared cross-platform generated entrypoints | Implemented | POSIX `tool` plus Windows `tool.exe`; combined/sequential installs, upgrades, removal, and idempotency tests |
 | Retained dependency validation | Implemented | Configured runtime-root discovery, recorded target scopes, transitive shared dependencies, conflict rejection |
-| Dry run and revision publication | Implemented with limits | No deployment writes on preview; rollback on caught activation failures; no global cross-root transaction |
+| Dry run and revision publication | Implemented with limits | No deployment writes on preview; exception rollback and persisted recovery for package publication; no global cross-root transaction |
+| Deployment list/status and metadata consolidation | Follow-up | No list/status commands; embedded receipts and legacy dist metadata still need migration |
 | envstack activation | Examples implemented | Default, flat, and NumPy layouts; no automatic environment generation |
 | `--env` environment installation / creation | Not implemented | Reserved flag rejects use; CLI meaning and isolation contract remain unresolved |
 | Recipe selection, versioned environment files, catalog fetching | Proposed | No `--recipe` implementation or validated catalog releases |
@@ -37,22 +38,33 @@ isort, and flake8.
 Live Linux checks include Pygments shared installation and NumPy 1.24.4 runtime
 bin placement with `f2py` activation on Python 3.8. Windows and all-platform cowsay
 previews succeeded against the existing Linux deployment.
-Fixture tests cover both launcher forms and their metadata; native Windows command
-execution is still unverified. These direct-install checks are not catalog certification.
+Fixture tests cover both launcher forms and their metadata. The passing native
+Windows CI tests execute console launchers for wheel and local-project installs,
+checking output and successful exit. GUI execution and broader interpreter lookup,
+argument, and path-with-spaces scenarios remain unverified. These direct-install
+checks are not catalog certification.
 
-Remaining validation and tooling work:
+Validation evidence and remaining tooling work:
 
-- [ ] Build a wheel, install `distman[install]` into a clean environment, and run
-  outside the checkout using released dependencies rather than sibling envstack
-  source. Verify packaged policy and console entrypoints.
-- [ ] Verify the configured CI matrix: Linux Python 3.8–3.14, macOS and Windows
-  Python 3.11. Local Linux results do not establish native platform support.
-- [ ] Exercise actual Windows console/GUI launchers, interpreter lookup, arguments,
-  paths with spaces, and exit codes. Cross-generation tests cannot prove execution.
+- [x] Build a wheel and install `distman[install]` into a clean Python 3.8 environment
+  outside the checkout, using released envstack 1.0.5 and pathbase 0.2.0. Verify
+  imports come from site-packages, the packaged install.env is present, pip check
+  passes, and dist/distman entry points load without checkout paths.
+- [x] From that wheel installation, preview and install Pygments 2.19.2 using the
+  packaged fallback policy and an isolated DEPLOY_ROOT. Verify imports, distribution
+  metadata, and pygmentize execution; reinstall with zero new revisions; uninstall
+  and verify the library and command are removed. The preview creates no deployment
+  root. No studio deployment or sibling source checkout participates.
+- [x] Maintainer confirmed the configured CI matrix passes: Linux Python 3.8–3.14,
+  macOS and Windows Python 3.11.
+- [x] Execute generated Windows console launchers in native CI, verifying output
+  and successful exit for wheel and local-project installs.
+- [ ] Extend native Windows checks to GUI launchers, interpreter lookup, arguments,
+  paths with spaces, and nonzero exit codes.
 - [ ] Add a Black/isort/flake8 CI gate; the current workflow runs pytest only.
 - [ ] Confirm live NumPy reinstall idempotency; fixture idempotency is already covered.
-- [ ] Decide whether named environments belong in the installer milestone or
-  a separate milestone. The delivery boundary is not yet settled.
+
+Named environments remain follow-up work, outside the wheel-installer delivery boundary.
 
 Recipe/catalog/archive work below remains proposed follow-up work. No new
 manifest format, package solver, or hosted registry is required for the wheel installer.
@@ -346,23 +358,42 @@ those changes. Show last successful index refresh and content verification times
 coverage, and stale/unreachable states rather than promising instantaneous status.
 These are future design considerations, not reasons to migrate storage now.
 
-## Proposed release scope
+## Delivery boundary and follow-ups
 
-Make package installation the focus of 0.9: the wheel installer, explicit install
-versus upgrade behavior, shared/runtime launcher support, documentation, and the
-remaining validation gates. Associate the package-installation work with that
-milestone. This is a release recommendation, not a record of tracker changes.
+The original [package installation issue](https://github.com/rsgalloway/distman/issues/91)
+is covered by pip-backed requirements and local-project acquisition, compatible
+wheel selection, configurable shared/runtime paths, preserved metadata and
+ownership, dry runs, idempotency, documented module boundaries, and regression
+tests. Existing dist.json publication remains available. Package uninstall,
+cooperating-writer locks, and journaled package recovery extend that scope.
 
-Review existing milestone items for concrete dependencies before moving them.
+Two compatibility changes are intentional: use `distman cache` instead of the
+removed `distcache` executable, and update internal Python imports for the new
+module layout. No external Python API consumers are known. The `dist` executable,
+configuration formats, and documented transform callable paths remain supported.
+
+The following work needs separate tracking and is not claimed as implemented:
+
+- Installed-state-aware resolution and explicit `-U` upgrades. Ordinary unpinned
+  installs can currently upgrade; document that behavior until both change together.
+- Deployment `list` and `status`, including unknown or corrupt metadata diagnostics.
+- Consolidating receipts and legacy dist info under `.distman/`, with limited legacy
+  reads and no new legacy writes after migration. Existing writers still use the
+  old records alongside the new journal/snapshot foundation.
+- Migrating legacy dist publication to journaled recovery, full-root rollback,
+  metadata reconstruction, and optional audits. `recover` handles interrupted
+  package publication; it is not a general backup or repair command.
+- Host source-build fallback for named packages, recipe/catalog acquisition,
+  named environments, and automatic activation-file generation.
+- Broader Windows launcher checks, network-share validation, and lint enforcement
+  in CI. Passing local or native CI tests do not certify network filesystem durability.
+
+These follow-ups preserve the broader roadmap without making it a prerequisite
+for the initial wheel installer. Exact later release assignments remain open.
 General distribution operations, target hashing, diff, configuration includes,
-post-deployment steps, and file-sequence support can move to a later milestone
-unless they fix a demonstrated installer or regression requirement. Existing internal
-ownership hashes do not establish completion of a general target-hashing feature.
-
-Package uninstall is implemented. Proposed subsequent work is host source-build fallback, followed
-by named-environment creation and recipe/catalog integration. These features can be
-tracked separately; full environment lifecycle management is not required to ship
-the wheel installer. Exact later release assignments remain open.
+post-deployment steps, and file-sequence support remain independent unless they
+fix a demonstrated installer or regression requirement. Internal ownership hashes
+do not establish completion of a general target-hashing feature.
 
 ## Independent installation operations
 
@@ -516,8 +547,8 @@ launchers coexist in the shared bin. Sequential target additions preserve the
 existing variants; upgrades regenerate all recorded variants and remove obsolete
 commands. Windows launcher ZIP timestamps are normalized for idempotency. This does
 not translate arbitrary wheel-provided scripts between platforms; conflicting
-script payloads still need separate paths. Native Windows execution remains a
-validation item.
+script payloads still need separate paths. Native Windows console execution is covered by CI; GUI execution and broader
+launcher scenarios remain validation items.
 
 Runtime environment files add the resolved import directory to PYTHONPATH and the
 resolved scripts directory to PATH. For shared pure packages, a common environment
@@ -540,16 +571,17 @@ validated and published together with rollback on caught activation failures.
 Their receipts link the artifacts and detect mismatched library/bin versions.
 Manual rollback must select matching revisions of both roots. Runtime scripts
 inside DISTMAN_TARGET_PATH share the package revision directly. Cross-root
-activation is not globally atomic or durable across process termination.
+activation is not globally atomic. Interrupted package publication is recoverable
+from persisted journals; legacy dist publication is not yet journaled.
 Existing unmanaged bin directories and changing previously recorded layout mappings
 are rejected. General migration and coexistence with legacy bin shims remain future
 work. TOOLS_ROOT itself is not one managed boundary because binary package roots
 also live beneath it.
 
-## Named environments and conflict recovery (scope decision pending)
+## Named environments and conflict recovery (follow-up)
 
 Shared/runtime bin deployment is complete. The next feature proposal is an explicit
-isolated-install and activation workflow; its delivery milestone is unresolved. Candidate interfaces are `distman install --env NAME` and
+isolated-install and activation workflow; it is follow-up work outside the initial wheel installer. Candidate interfaces are `distman install --env NAME` and
 an environment-creation command; settle the CLI before implementation. The existing
 reserved --env flag is not yet functional and must not silently change meanings.
 

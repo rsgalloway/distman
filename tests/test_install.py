@@ -870,15 +870,29 @@ def test_requirements_only_project(
     assert (root / "tools/lib/python/sample").exists()
 
 
-def test_dist_only_project(installation: Tuple[Path, Path], tmp_path: Path) -> None:
-    """Custom-only projects reuse dist targets without creating third-party roots."""
+def test_dist_only_project(
+    installation: Tuple[Path, Path], tmp_path: Path, capfd: pytest.CaptureFixture
+) -> None:
+    """Dist-only installs distinguish explicit previews from internal validation.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :param tmp_path: Directory containing the custom project.
+    :param capfd: Capture of parent and child process output.
+    :return: None.
+    """
     root, wheels = installation
     project = tmp_path / "custom-project"
     project.mkdir()
     configure_dist(project)
     assert invoke(wheels, str(project), "--dryrun") == 0
     assert not root.exists()
+    preview = capfd.readouterr()
+    assert "NOTICE: Dry run" in preview.out + preview.err
     assert invoke(wheels, str(project)) == 0
+    installed = capfd.readouterr()
+    output = installed.out + installed.err
+    assert "NOTICE: Dry run" not in output
+    assert output.count("Updated: custom =d>") == 1
     assert (root / "lib/custom/main.py").read_text() == "VALUE = 42\n"
     assert not (root / "tools").exists()
 
@@ -1089,9 +1103,15 @@ def test_combined_project_rejects_overlapping_destinations(
 
 
 def test_invalid_custom_targets_block_dependency_publication(
-    installation: Tuple[Path, Path], tmp_path: Path
+    installation: Tuple[Path, Path], tmp_path: Path, capfd: pytest.CaptureFixture
 ) -> None:
-    """Legacy target preflight must pass before any resolved dependency is published."""
+    """Failed validation retains diagnostics and prevents dependency publication.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :param tmp_path: Directory containing the invalid custom project.
+    :param capfd: Capture of parent and child process output.
+    :return: None.
+    """
     root, wheels = installation
     wheel(wheels)
     project = tmp_path / "project"
@@ -1111,6 +1131,11 @@ def test_invalid_custom_targets_block_dependency_publication(
     )
     assert invoke(wheels, str(project)) == 1
     assert not (root / "tools/lib/python").exists()
+    captured = capfd.readouterr()
+    output = captured.out + captured.err
+    assert "Project validation failed (dry-run diagnostics):" in output
+    assert "does-not-exist" in output
+    assert "Local dist.json preflight failed; no packages were published" in output
 
 
 @pytest.mark.parametrize("custom", [False, True])
