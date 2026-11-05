@@ -1761,3 +1761,97 @@ def test_parallel_installs_and_dist_share_writer_lock(
     assert {record["name"] for record in state["artifacts"].values()} == {"first", "second"}
     assert (root / "bin/tool").read_text() == "distributed\n"
     assert not (root / ".distman/locks/write").exists()
+
+
+@pytest.mark.parametrize("dryrun", [False, True])
+@pytest.mark.parametrize("multiple_versions", [False, True])
+def test_shared_upgrade_checks_retained_binary_consumer(
+    installation: Tuple[Path, Path],
+    dryrun: bool,
+    multiple_versions: bool,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Reject shared upgrades that break a consumer in an independent runtime root.
+
+    :param installation: Isolated deployment and offline wheels.
+    :param dryrun: Whether to preview the proposed upgrade.
+    :param multiple_versions: Retain a second app version with a looser requirement.
+    :param capsys: Captured dependency diagnostics.
+    :return: None.
+    """
+    root, wheels = installation
+    wheel(wheels, "dep")
+    wheel(wheels, "app", tag="cp311-cp311-manylinux_2_17_x86_64", requires=["dep<2"])
+    options = ("--platform", "linux", "--arch", "x86_64", "--python", "3.11")
+    assert invoke(wheels, "app", *options) == 0
+    if multiple_versions:
+        wheel(wheels, "app", "2.0", tag="cp311-cp311-manylinux_2_17_x86_64", requires=["dep>=1"])
+        assert invoke(wheels, "app==2", *options) == 0
+    library = root / "tools/lib/python"
+    previous = library.resolve()
+    wheel(wheels, "dep", "2.0")
+    assert invoke(wheels, "dep==2", *options, *(["--dryrun"] if dryrun else [])) == 1
+    assert "app requires dep<2" in capsys.readouterr().out
+    assert library.resolve() == previous
+    assert read_state(library)["artifacts"]["dep"]["version"] == "1.0"
+
+
+def test_upgrade_replaces_directory_with_file(installation: Tuple[Path, Path]) -> None:
+    """Remove obsolete directories before copying a file into their old location.
+
+    :param installation: Isolated deployment and offline wheels.
+    :return: None.
+    """
+    root, wheels = installation
+    wheel(wheels, files={"item/old.txt": b"old"})
+    assert invoke(wheels, "sample==1") == 0
+    wheel(wheels, version="2.0", files={"item": b"new"})
+    assert invoke(wheels, "sample==2") == 0
+    library = root / "tools/lib/python"
+    assert (library / "item").read_bytes() == b"new"
+    assert read_state(library)["artifacts"]["sample"]["version"] == "2.0"
+    assert remove("sample") == 0
+
+
+def test_partial_runtime_rollback_rejects_mismatched_pairs(
+    installation: Tuple[Path, Path], capsys: pytest.CaptureFixture
+) -> None:
+    """Reject equal-wheel-hash pairs whose recorded runtime selections differ.
+
+    :param installation: Isolated deployment and offline wheels.
+    :param capsys: Captured inconsistency diagnostics.
+    :return: None.
+    """
+    root, wheels = installation
+    command_wheel(wheels)
+    options = ("--platform", "all", "--arch", "x86_64", "--python", "3.11")
+    assert invoke(wheels, "sample", *options) == 0
+    library, scripts = root / "tools/lib/python", root / "tools/bin"
+    previous = os.readlink(library)
+    assert remove("sample", "--platform", "windows") == 0
+    deployment.replace_link(library, previous)
+    current_scripts = scripts.resolve()
+    wheel(wheels, "other")
+    assert invoke(wheels, "other", *options) == 1
+    assert "Library and scripts revisions disagree" in capsys.readouterr().out
+    assert remove("sample") == 1
+    assert scripts.resolve() == current_scripts
+
+
+def test_native_requires_python_retains_patch_version(installation: Tuple[Path, Path]) -> None:
+    """Use the running patch level for acquisition, wheel checks, and shared metadata.
+
+    :param installation: Isolated deployment and offline wheels.
+    :return: None.
+    """
+    from distman.install.ownership import marker_environment
+
+    root, wheels = installation
+    full_version = ".".join(map(str, sys.version_info[:3]))
+    target = expand_targets()[0]
+    assert target.compatibility_python == full_version
+    assert target.python == f"{sys.version_info.major}.{sys.version_info.minor}"
+    assert marker_environment(target)["python_full_version"] == full_version
+    wheel(wheels, python=f">={full_version}")
+    assert invoke(wheels, "sample") == 0
+    assert (root / "tools/lib/python/sample").exists()

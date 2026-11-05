@@ -105,6 +105,10 @@ def compose(destination: Path, staged: Path, additions: Sequence[Addition]) -> I
         if previous:
             for name in previous["files"]:
                 (staged / name).unlink()
+    # Prune directories left by obsolete files, but never touch unowned content.
+    for path in sorted(staged.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+        if path.is_dir() and not any(path.iterdir()):
+            path.rmdir()
     owners = {name: key for key, record in records.items() for name in record["files"]}
     for key, payload, provenance, prefix in additions:
         if (payload / MANIFEST).exists():
@@ -114,7 +118,7 @@ def compose(destination: Path, staged: Path, additions: Sequence[Addition]) -> I
         for name, checksum in files.items():
             relative = (prefix / name).as_posix()
             path = staged / relative
-            if relative == MANIFEST or relative in owners or path.is_file():
+            if relative == MANIFEST or relative in owners or path.exists():
                 raise InstallError(f"File ownership conflict at {destination / relative}")
             try:
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -124,10 +128,6 @@ def compose(destination: Path, staged: Path, additions: Sequence[Addition]) -> I
             owners[relative] = key
             mapped[relative] = checksum
         records[key] = InstalledArtifact(**provenance, files=mapped)
-    # Prune directories left by obsolete files, but never touch unowned content.
-    for path in sorted(staged.rglob("*"), key=lambda p: len(p.parts), reverse=True):
-        if path.is_dir() and not any(path.iterdir()):
-            path.rmdir()
     (staged / MANIFEST).write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
     return state
 
@@ -152,9 +152,9 @@ def marker_environment(target: Target) -> Dict[str, str]:
     environment = default_environment()
     environment.update(
         python_version=target.python,
-        python_full_version=target.python + ".0",
+        python_full_version=target.compatibility_python,
         implementation_name="cpython",
-        implementation_version=target.python + ".0",
+        implementation_version=target.compatibility_python,
         platform_python_implementation="CPython",
         platform_machine="AMD64" if target.platform == "windows" else target.arch,
         sys_platform={"linux": "linux", "windows": "win32", "darwin": "darwin"}[target.platform],
@@ -233,7 +233,12 @@ def check_script_pairs(records: Iterable[InstalledArtifact]) -> None:
     for identity, components in pairs.items():
         library = components.get("library")
         scripts = components.get("scripts")
-        if not library or not scripts or library["sha256"] != scripts["sha256"]:
+        if (
+            not library
+            or not scripts
+            or library["sha256"] != scripts["sha256"]
+            or set(library["targets"]) != set(scripts["targets"])
+        ):
             raise InstallError(
                 f"Library and scripts revisions disagree for {identity[0]}; "
                 "restore matching revisions or reinstall the affected package"
@@ -253,12 +258,17 @@ def check_dependencies(records: Iterable[InstalledArtifact], target: Target) -> 
     :raises InstallError: If a dependency is missing/incompatible or a required OS marker is
         unknown.
     """
+    records = list(records)
     selected = target_records(records, target)
-    for record in selected.values():
+    for record in records:
+        if record.get("component") == "scripts" or not (
+            target.label in record["targets"] or (record["pure"] and record["name"] in selected)
+        ):
+            continue
         if record["pure"]:
             tags = parse_wheel_filename(record["wheel"])[3]
             if not tags & target.tags or not SpecifierSet(record["requires_python"]).contains(
-                target.python + ".0", prereleases=True
+                target.compatibility_python, prereleases=True
             ):
                 raise InstallError(f"Shared {record['name']} is incompatible with {target.label}")
         for requirement in target_requirements(record, target):

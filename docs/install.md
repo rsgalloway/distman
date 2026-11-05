@@ -61,7 +61,9 @@ are the supported integration points.
 
 ## Runtime selection
 
-By default, packages target the running CPython interpreter. Select other runtimes
+By default, packages target the running CPython interpreter, including its patch
+version for compatibility checks. Runtime paths still use major.minor. Explicit
+major.minor selections use patch zero as their compatibility baseline. Select other runtimes
 without installing their interpreters:
 
 ```bash

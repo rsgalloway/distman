@@ -322,3 +322,34 @@ def test_cache_does_not_copy_writer_locks(tmp_path: Path) -> None:
     assert not (destination / ".distman/locks").exists()
     assert not (destination / ".distman/pending.json").exists()
     assert not (destination / ".payload.install-lock").exists()
+
+
+@pytest.mark.parametrize(
+    "mutation", [["--delete"], ["--reset"], ["--number", "1"], ["--commit", "abcdef0"]]
+)
+def test_show_rejects_mutation_options(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: list
+) -> None:
+    """Conflicting show requests cannot reach mutation handlers without a writer lock.
+
+    :param tmp_path: Isolated deployment root.
+    :param monkeypatch: Fixture selecting policy and guarding the operation handler.
+    :param mutation: Mutation option combined with show.
+    :return: None.
+    """
+    from distman.dist import command
+
+    monkeypatch.setattr(config, "DEPLOY_ROOT", str(tmp_path / "deploy"))
+
+    def unexpected(args: object) -> int:
+        """Fail if invalid options reach a command handler.
+
+        :param args: Parsed command options.
+        :return: Never returns.
+        :raises AssertionError: Always, because validation must reject the request.
+        """
+        raise AssertionError("invalid request reached mutation handler")
+
+    monkeypatch.setattr(command, "_run", unexpected)
+    assert command.main(["--show", *mutation]) == 2
+    assert not (tmp_path / "deploy").exists()

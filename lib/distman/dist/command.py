@@ -165,6 +165,9 @@ def run(args: argparse.Namespace) -> int:
     :param args: Parsed distribution options and policy selection.
     :return: Zero on success, 130 on cancellation, or one on failure.
     """
+    if args.show and (args.delete or args.number or args.commit or args.reset):
+        log.error("--show cannot be combined with --delete, --number, --commit, or --reset")
+        return 2
     try:
         with operation(Path(config.DEPLOY_ROOT), read_only=args.dryrun or args.show):
             return _run(args)

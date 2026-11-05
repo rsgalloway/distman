@@ -136,7 +136,7 @@ def inspect_wheel(path: Path, target: Target) -> Artifact:
     ):
         raise InstallError(f"Wheel metadata does not match filename: {path.name}")
     if not tags & target.tags or not SpecifierSet(message.get("Requires-Python", "")).contains(
-        target.python + ".0", prereleases=True
+        target.compatibility_python, prereleases=True
     ):
         raise InstallError(f"Incompatible wheel for {target.label}: {path.name}")
     return Artifact(path, name, str(version), tags, message)
@@ -191,7 +191,7 @@ def acquire(
         "--target",
         str(directory.parent / "resolve"),
     ]
-    command += ["--python-version", target.python, "--implementation", "cp"]
+    command += ["--python-version", target.compatibility_python, "--implementation", "cp"]
     for abi in (target.abi, "abi3", "none"):
         command += ["--abi", abi]
     for platform_tag in target.platforms:
@@ -227,7 +227,7 @@ def acquire(
         # Download the exact artifacts from pip's resolution report, avoiding a
         # second solve that could choose a different release/index artifact.
         fetch = ["download", "--no-deps", "--only-binary=:all:", "--dest", str(directory)]
-        fetch += ["--python-version", target.python, "--implementation", "cp"]
+        fetch += ["--python-version", target.compatibility_python, "--implementation", "cp"]
         for abi in (target.abi, "abi3", "none"):
             fetch += ["--abi", abi]
         for platform_tag in target.platforms:

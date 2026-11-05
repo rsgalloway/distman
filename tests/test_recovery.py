@@ -543,3 +543,44 @@ def test_windows_link_swap_preserves_unmanaged_directories(
     with pytest.raises(OSError):
         deployment.replace_link(unmanaged, revision)
     assert (unmanaged / "keep").read_text() == "unowned"
+
+
+def test_publication_and_recovery_epochs_are_cache_timestamps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Publication and rollback retain the decimal timestamp contract used by cache.
+
+    :param tmp_path: Isolated deployment workspace.
+    :param monkeypatch: Fixture injecting activation failure.
+    :return: None.
+    """
+    from distman import cache, util
+
+    root, changes = initial_deployment(tmp_path)
+    before = util.read_epoch_file(str(root))
+    assert before.isdecimal()
+    cache.print_staleness(before, before, threshold=0)
+    replace = deployment.replace_link
+    interrupted = False
+
+    def fail_once(destination: Path, target: str) -> None:
+        """Interrupt after activation to exercise restoration's epoch write.
+
+        :param destination: Active link.
+        :param target: Prepared revision.
+        :return: None.
+        :raises OSError: Once, after the first activation.
+        """
+        nonlocal interrupted
+        replace(destination, target)
+        if not interrupted:
+            interrupted = True
+            raise OSError("epoch rollback test")
+
+    monkeypatch.setattr(deployment, "replace_link", fail_once)
+    with pytest.raises(OSError, match="epoch rollback test"):
+        with operation(root):
+            deployment.publish_directories(changes, root)
+    after = util.read_epoch_file(str(root))
+    assert after.isdecimal() and int(after) >= int(before)
+    cache.print_staleness(after, before, threshold=0)

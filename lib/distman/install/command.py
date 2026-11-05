@@ -37,6 +37,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name, parse_wheel_filename
 
 from distman import util
@@ -206,6 +207,7 @@ def collect(
                     previous[2]["targets"] = sorted(set(previous[2]["targets"] + [target.label]))
                     continue
                 groups[boundary][owner] = (owner, contents, selection, Path("."))
+    include_reverse_consumers(groups, policy)
     include_dependencies(groups, policy, targets)
     destinations = sorted(groups)
     for i, destination in enumerate(destinations):
@@ -213,6 +215,38 @@ def collect(
             if destination in other.parents or other in destination.parents:
                 raise InstallError(f"Overlapping deployment targets: {destination} and {other}")
     return groups, project_records
+
+
+def include_reverse_consumers(groups: Groups, policy: Policy) -> None:
+    """Include retained consumers of shared replacements before dependency checks.
+
+    The caller holds the deployment writer lock. Discover only configured managed
+    roots; companions and forward dependencies are added by include_dependencies.
+
+    :param groups: Planned additions, extended with read-only consumer boundaries.
+    :param policy: Selected deployment policy for managed-root discovery.
+    :return: None; affected consumer roots are added without publication payloads.
+    :raises InstallError: If discovered ownership metadata or payloads are invalid.
+    """
+    shared = {
+        addition[2]["name"]
+        for additions in groups.values()
+        for addition in additions.values()
+        if addition[2]["pure"] and addition[2].get("component") != "scripts"
+    }
+    if not shared:
+        return
+    for root in policy.managed_roots():
+        if root in groups:
+            continue
+        state = read_state(root)
+        if any(
+            canonicalize_name(Requirement(requirement).name) in shared
+            for record in state["artifacts"].values()
+            if record.get("component") != "scripts"
+            for requirement in record["requires_dist"]
+        ):
+            groups[root] = {}
 
 
 def include_companions(groups: Groups, states: Optional[Dict[Path, InstallState]] = None) -> None:

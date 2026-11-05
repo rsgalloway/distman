@@ -42,6 +42,7 @@ import os
 import platform
 import shutil
 import stat
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -239,7 +240,7 @@ def recover_publication(deploy_root: Path, dryrun: bool = False) -> List[str]:
             store.remove("current.json")
         else:
             store.write("current.json", {"schema": 1, "snapshot": previous})
-        atomic_write(store.directory / config.DISTMAN_EPOCH_FILE, uuid.uuid4().hex + "\n")
+        atomic_write(store.directory / config.DISTMAN_EPOCH_FILE, f"{time.time_ns()}\n")
         record["phase"] = "restored"
         store.write(f"operations/{record['id']}.json", record)
     store.remove("pending.json")
@@ -346,7 +347,7 @@ def publish_directories(changes: Iterable[Tuple[Path, Path]], deploy_root: Path)
                 raise RecoveryRequired(f"Destination changed before activation: {destination}")
             replace_link(destination, change["after"])
         store.write("current.json", {"schema": 1, "snapshot": identifier})
-        atomic_write(store.directory / config.DISTMAN_EPOCH_FILE, identifier + "\n")
+        atomic_write(store.directory / config.DISTMAN_EPOCH_FILE, f"{time.time_ns()}\n")
         journal["phase"] = "committed"
         store.write(f"operations/{identifier}.json", journal)
     except BaseException:

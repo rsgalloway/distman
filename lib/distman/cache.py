@@ -436,7 +436,14 @@ def print_staleness(src_epoch: int, dst_epoch: int, threshold: int = config.CACH
         print("missing destination epoch file")
         return
 
-    age_ns = int(src_epoch) - int(dst_epoch)
+    try:
+        age_ns = int(src_epoch) - int(dst_epoch)
+    except (TypeError, ValueError):
+        # Earlier installer journals used opaque UUIDs as cache change tokens.
+        # Equality still determines freshness, but these tokens have no age.
+        state = "fresh" if src_epoch == dst_epoch else "stale"
+        print(f"cache is {state} (epoch age unavailable)")
+        return
     age_sec = age_ns / 1e9
 
     # print staleness status (with last update time if stale, epoch is in ns)

@@ -58,6 +58,17 @@ class Target:
     native: bool = False
 
     @property
+    def compatibility_python(self) -> str:
+        """Return the full version used for pip and Requires-Python evaluation.
+
+        Native targets retain the running interpreter's patch level. Explicit
+        major.minor targets conservatively use patch zero without changing paths.
+
+        :return: Full CPython compatibility version.
+        """
+        return platform.python_version() if self.native else self.python + ".0"
+
+    @property
     def label(self) -> str:
         """Return a stable runtime identity used in deployment receipts.
 
