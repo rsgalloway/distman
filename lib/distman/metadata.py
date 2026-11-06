@@ -34,6 +34,7 @@
 import json
 import os
 import re
+import stat
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -83,8 +84,13 @@ def atomic_write(path: Path, content: str) -> None:
     :raises OSError: If writing, replacing, or flushing fails.
     """
     durable_directory(path.parent)
+    try:
+        mode = stat.S_IMODE(path.stat().st_mode)
+    except FileNotFoundError:
+        mode = stat.S_IMODE(path.parent.stat().st_mode) & 0o666
     descriptor, temporary = tempfile.mkstemp(prefix=".record-", dir=str(path.parent))
     try:
+        os.chmod(temporary, mode)
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
             stream.write(content)
             stream.flush()

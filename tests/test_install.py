@@ -370,6 +370,35 @@ def test_unmanaged_shared_destination(
     assert not (root / "tools/sample").exists()
 
 
+def test_rejects_target_beneath_existing_managed_boundary(
+    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Reject a new target nested beneath an unrelated managed symlink.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :param monkeypatch: Fixture configuring the unsafe nested binary layout.
+    :param capsys: Captured overlap diagnostic.
+    :return: None.
+    """
+    root, wheels = installation
+    wheel(wheels, "shared")
+    assert invoke(wheels, "shared") == 0
+    shared = root / "tools/lib/python"
+    revision = shared.resolve()
+    nested = "{TOOLS_ROOT}/lib/python/native/{package}/{version}"
+    runtime = nested + "/{platform}/{arch}/python{python_version}"
+    monkeypatch.setenv("DISTMAN_TARGET_PATH", nested)
+    monkeypatch.setenv("DISTMAN_RUNTIME_LIB_PATH", runtime + "/lib/python")
+    monkeypatch.setenv("DISTMAN_RUNTIME_BIN_PATH", runtime + "/bin")
+    wheel(wheels, "native", tag="cp311-cp311-manylinux_2_17_x86_64")
+    capsys.readouterr()
+    target = ("--platform", "linux", "--arch", "x86_64", "--python", "3.11")
+    assert invoke(wheels, "native", *target) == 1
+    assert "overlaps existing managed boundary" in capsys.readouterr().out
+    assert shared.resolve() == revision
+    assert not (shared / "native").exists()
+
+
 def test_abi3_and_requires_python(tmp_path: Path) -> None:
     """Recognize stable ABI wheels and reject incompatible Python constraints."""
     artifact = wheel(tmp_path, tag="cp38-abi3-win_amd64", python=">=3.8")
@@ -1200,6 +1229,45 @@ def test_unrelated_install_retains_runtime_dependencies(
     assert (root / "tools/lib/python/unrelated").is_dir()
 
 
+def test_dependency_discovery_preserves_retained_python_patch(
+    installation: Tuple[Path, Path]
+) -> None:
+    """Use recorded patch versions when evaluating retained dependency markers.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :return: None.
+    """
+    root, wheels = installation
+    tag = "cp311-cp311-manylinux_2_17_x86_64"
+    target = ("--platform", "linux", "--arch", "x86_64", "--python", "3.11")
+    wheel(wheels, "binarydep", tag=tag)
+    assert invoke(wheels, "binarydep", *target) == 0
+    dependency = root / "tools/binarydep/1.0"
+    dependency_revision = dependency.resolve()
+
+    wheel(wheels, "shared")
+    wheel(
+        wheels,
+        "app",
+        tag=tag,
+        requires=["shared", 'binarydep; python_full_version >= "3.11.5"'],
+    )
+    assert invoke(wheels, "app", *target) == 0
+    app = root / "tools/app/1.0"
+    manifest = app / ".distman-install.json"
+    state = json.loads(manifest.read_text())
+    record = next(record for record in state["artifacts"].values() if record["name"] == "app")
+    record["compatibility"]["linux-x86_64-cp311"] = "3.11.9"
+    manifest.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
+
+    wheel(wheels, "shared", version="2.0")
+    foreign = ("--platform", "linux", "--arch", "x86_64", "--python", "3.12")
+    assert invoke(wheels, "shared==2.0", *foreign) == 0
+    assert dependency.resolve() == dependency_revision
+    shared = read_state(root / "tools/lib/python")["artifacts"]["shared"]
+    assert shared["version"] == "2.0"
+
+
 @pytest.mark.parametrize("failure", ["missing", "incompatible", "ambiguous"])
 def test_retained_runtime_dependency_failures_do_not_publish(
     installation: Tuple[Path, Path], failure: str, capsys: pytest.CaptureFixture
@@ -1682,6 +1750,32 @@ def test_uninstall_scopes_pure_dependencies_to_runtime_paths(
     assert runtime_311.resolve() == before
     assert (runtime_311 / "dependency").exists()
     assert (runtime_312 / "dependency").exists()
+
+
+def test_uninstall_uses_retained_patch_for_dependency_markers(
+    installation: Tuple[Path, Path]
+) -> None:
+    """Keep a dependency required by a retained record at its saved patch level.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :return: None.
+    """
+    root, wheels = installation
+    target = ("--platform", "linux", "--arch", "x86_64", "--python", "3.11")
+    wheel(wheels, "dependency")
+    assert invoke(wheels, "dependency", *target) == 0
+    wheel(wheels, "app", requires=['dependency; python_full_version >= "3.11.5"'])
+    assert invoke(wheels, "app", *target) == 0
+    library = root / "tools/lib/python"
+    manifest = library / ".distman-install.json"
+    state = json.loads(manifest.read_text())
+    state["artifacts"]["app"]["compatibility"]["linux-x86_64-cp311"] = "3.11.9"
+    manifest.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
+    revision = library.resolve()
+
+    assert remove("dependency", "--python", "3.11") == 1
+    assert library.resolve() == revision
+    assert (library / "dependency").exists()
 
 
 @pytest.mark.parametrize("dryrun", [False, True])

@@ -220,6 +220,16 @@ def collect(
         for other in destinations[i + 1 :]:
             if destination in other.parents or other in destination.parents:
                 raise InstallError(f"Overlapping deployment targets: {destination} and {other}")
+    managed = policy.managed_roots()
+    for destination in destinations:
+        for existing in managed:
+            if destination != existing and (
+                destination in existing.parents or existing in destination.parents
+            ):
+                raise InstallError(
+                    f"Deployment target {destination} overlaps existing managed boundary: "
+                    f"{existing}"
+                )
     return groups, project_records
 
 
@@ -313,7 +323,15 @@ def include_dependencies(groups: Groups, policy: Policy, targets: Sequence[Targe
         for record in records:
             for label in record["targets"]:
                 system, arch, python = label.split("-")
-                runtimes.setdefault(label, Target(system, arch, python[2] + "." + python[3:]))
+                runtimes.setdefault(
+                    label,
+                    Target(
+                        system,
+                        arch,
+                        python[2] + "." + python[3:],
+                        python_full=record["compatibility"][label],
+                    ),
+                )
         discovered = set()
         for target in runtimes.values():
             selected = target_records(records, target)

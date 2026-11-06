@@ -67,6 +67,28 @@ def initial_deployment(tmp_path: Path) -> Tuple[Path, List[Tuple[Path, Path]]]:
     return root, changes
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission modes")
+def test_metadata_writes_preserve_shared_record_permissions(tmp_path: Path) -> None:
+    """Inherit shared access for new records and retain it on replacement.
+
+    :param tmp_path: Isolated deployment root.
+    :return: None.
+    """
+    root = tmp_path / "deployment"
+    metadata = root / ".distman"
+    metadata.mkdir(parents=True)
+    metadata.chmod(0o770)
+    store = Store(root)
+    current = metadata / "current.json"
+
+    store.write("current.json", {"schema": 1, "snapshot": "first"})
+    assert stat.S_IMODE(current.stat().st_mode) == 0o660
+    current.chmod(0o640)
+    store.write("current.json", {"schema": 1, "snapshot": "second"})
+    assert stat.S_IMODE(current.stat().st_mode) == 0o640
+    assert not list(metadata.glob(".record-*"))
+
+
 @pytest.mark.parametrize("failure", [OSError, KeyboardInterrupt])
 def test_failure_after_link_switch_restores_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: type

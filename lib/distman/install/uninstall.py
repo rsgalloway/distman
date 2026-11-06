@@ -226,7 +226,6 @@ def validate_removal(
     labels = {label for record in after for label in record["targets"]}
     for label in sorted(labels):
         system, arch, python = label.split("-")
-        target = Target(system, arch, python[2] + "." + python[3:])
         pending = [r for r in after if r.get("component") != "scripts" and label in r["targets"]]
         visited = set()
         while pending:
@@ -234,6 +233,12 @@ def validate_removal(
             if id(record) in visited:
                 continue
             visited.add(id(record))
+            target = Target(
+                system,
+                arch,
+                python[2] + "." + python[3:],
+                python_full=record["compatibility"][label],
+            )
             for requirement in target_requirements(record, target):
                 name = canonicalize_name(requirement.name)
                 old = [
