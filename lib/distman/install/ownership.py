@@ -50,6 +50,19 @@ from distman.inventory import inventory
 MANIFEST = ".distman-install.json"
 
 
+def legacy_python(label: str) -> str:
+    """Recover a conservative full Python version from an old runtime label.
+
+    :param label: Runtime label ending in a compact CPython tag such as ``cp311``.
+    :return: Full Python compatibility version using patch level zero.
+    :raises ValueError: If the label does not contain a valid CPython tag.
+    """
+    _, marker, compact = label.rpartition("-cp")
+    if not marker or len(compact) < 2 or not compact.isdigit():
+        raise ValueError(f"invalid runtime label: {label}")
+    return f"{compact[0]}.{compact[1:]}.0"
+
+
 def read_state(destination: Path) -> InstallState:
     """Read an owned revision and reject unsafe paths, corruption, or foreign files.
 
@@ -68,6 +81,11 @@ def read_state(destination: Path) -> InstallState:
             raise ValueError("unsupported schema")
         expected = {}
         for record in state["artifacts"].values():
+            compatibility = record.setdefault(
+                "compatibility", {label: legacy_python(label) for label in record["targets"]}
+            )
+            if set(compatibility) != set(record["targets"]):
+                raise ValueError("runtime compatibility metadata does not match targets")
             for name, checksum in record["files"].items():
                 path = PurePosixPath(name)
                 if path.is_absolute() or ".." in path.parts or "\\" in name or ":" in name:
@@ -180,8 +198,7 @@ def target_records(
     available = {
         record["name"]: record
         for record in records
-        if record.get("component") != "scripts"
-        and (record["pure"] or target.label in record["targets"])
+        if record.get("component") != "scripts" and target.label in record["targets"]
     }
     selected = {
         name: record for name, record in available.items() if target.label in record["targets"]
@@ -238,6 +255,7 @@ def check_script_pairs(records: Iterable[InstalledArtifact]) -> None:
             or not scripts
             or library["sha256"] != scripts["sha256"]
             or set(library["targets"]) != set(scripts["targets"])
+            or library["compatibility"] != scripts["compatibility"]
         ):
             raise InstallError(
                 f"Library and scripts revisions disagree for {identity[0]}; "
@@ -261,16 +279,13 @@ def check_dependencies(records: Iterable[InstalledArtifact], target: Target) -> 
     records = list(records)
     selected = target_records(records, target)
     for record in records:
-        if record.get("component") == "scripts" or not (
-            target.label in record["targets"] or (record["pure"] and record["name"] in selected)
-        ):
+        if record.get("component") == "scripts" or target.label not in record["targets"]:
             continue
-        if record["pure"]:
-            tags = parse_wheel_filename(record["wheel"])[3]
-            if not tags & target.tags or not SpecifierSet(record["requires_python"]).contains(
-                target.compatibility_python, prereleases=True
-            ):
-                raise InstallError(f"Shared {record['name']} is incompatible with {target.label}")
+        tags = parse_wheel_filename(record["wheel"])[3]
+        if not tags & target.tags or not SpecifierSet(record["requires_python"]).contains(
+            target.compatibility_python, prereleases=True
+        ):
+            raise InstallError(f"{record['name']} is incompatible with {target.label}")
         for requirement in target_requirements(record, target):
             dependency = selected.get(canonicalize_name(requirement.name))
             if dependency is None or not requirement.specifier.contains(

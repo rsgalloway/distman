@@ -177,6 +177,11 @@ def removal_states(
             remaining = set(record["targets"]) - removed
             if remaining:
                 proposed[root]["artifacts"][key]["targets"] = sorted(remaining)
+                proposed[root]["artifacts"][key]["compatibility"] = {
+                    label: version
+                    for label, version in record["compatibility"].items()
+                    if label in remaining
+                }
                 if record["pure"] and record.get("component") != "scripts":
                     launchers.update(generated_removals(root, record, remaining))
             else:
@@ -236,7 +241,7 @@ def validate_removal(
                     for r in before
                     if r["name"] == name
                     and r.get("component") != "scripts"
-                    and (r["pure"] or label in r["targets"])
+                    and label in r["targets"]
                     and requirement.specifier.contains(r["version"], prereleases=True)
                 ]
                 retained = [
@@ -244,7 +249,7 @@ def validate_removal(
                     for r in after
                     if r["name"] == name
                     and r.get("component") != "scripts"
-                    and (r["pure"] or label in r["targets"])
+                    and label in r["targets"]
                     and (r["name"], r["version"], label) not in withdrawn
                     and requirement.specifier.contains(r["version"], prereleases=True)
                 ]

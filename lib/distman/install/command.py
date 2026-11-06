@@ -103,6 +103,7 @@ def collect(
                 **artifact.provenance,
                 pure=artifact.pure,
                 targets=[target.label],
+                compatibility={target.label: target.compatibility_python},
                 acquisition="pip resolution report",
                 library_boundary="",
                 library_path="",
@@ -158,6 +159,10 @@ def collect(
                 old = existing[destination]["artifacts"].get(key)
                 if old:
                     provenance["targets"] = sorted(set(provenance["targets"] + old["targets"]))
+                    provenance["compatibility"] = {
+                        **old["compatibility"],
+                        **provenance["compatibility"],
+                    }
                     launcher_platforms.update(label.split("-")[0] for label in old["targets"])
                 for requested in targets:
                     if (
@@ -205,6 +210,7 @@ def collect(
                             "Use narrower runtime selection or separate configured paths."
                         )
                     previous[2]["targets"] = sorted(set(previous[2]["targets"] + [target.label]))
+                    previous[2]["compatibility"].update(selection["compatibility"])
                     continue
                 groups[boundary][owner] = (owner, contents, selection, Path("."))
     include_reverse_consumers(groups, policy)
@@ -328,7 +334,7 @@ def include_dependencies(groups: Groups, policy: Policy, targets: Sequence[Targe
                         if (
                             record["name"] == name
                             and record.get("component") != "scripts"
-                            and (record["pure"] or target.label in record["targets"])
+                            and target.label in record["targets"]
                             and all(
                                 req.specifier.contains(record["version"], prereleases=True)
                                 for req in constraints
@@ -374,6 +380,10 @@ def plan(groups: Groups, temporary: Path, force: bool) -> Tuple[Changes, List[In
                         f"a separate deployment root: {destination}"
                     )
                 provenance["targets"] = sorted(set(old["targets"] + provenance["targets"]))
+                provenance["compatibility"] = {
+                    **old["compatibility"],
+                    **provenance["compatibility"],
+                }
             before = old["version"] if old else "absent"
             print(f"{key}: {before} -> {provenance['version']} at {destination}")
         staged = temporary / f"revision-{number}"
@@ -435,7 +445,13 @@ def install(args: argparse.Namespace) -> int:
                     for label in record["targets"]:
                         system, arch, python = label.split("-")
                         check_targets.setdefault(
-                            label, Target(system, arch, python[2] + "." + python[3:])
+                            label,
+                            Target(
+                                system,
+                                arch,
+                                python[2] + "." + python[3:],
+                                python_full=record["compatibility"][label],
+                            ),
                         )
                 for target in check_targets.values():
                     check_dependencies(records, target)

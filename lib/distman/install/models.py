@@ -65,6 +65,7 @@ class Selection(Provenance):
 
     :ivar pure: Whether the wheel has only platform/ABI-independent tags.
     :ivar targets: Runtime labels sharing this selection.
+    :ivar compatibility: Full Python compatibility version for each runtime label.
     :ivar acquisition: Description of the packaging-tool resolution source.
     :ivar library_boundary: Managed revision root containing the library payload.
     :ivar library_path: Final import directory for this artifact.
@@ -75,6 +76,7 @@ class Selection(Provenance):
 
     pure: bool
     targets: List[str]
+    compatibility: Dict[str, str]
     acquisition: str
     library_boundary: str
     library_path: str

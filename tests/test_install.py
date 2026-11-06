@@ -449,6 +449,35 @@ def test_pure_upgrade_preserves_prior_runtime_compatibility(
     assert os.readlink(target) == before
 
 
+def test_binary_flat_root_rejects_incompatible_runtime_replacement(
+    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Reject a binary wheel that would replace bytes retained for another runtime.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :param monkeypatch: Fixture configuring a deliberately shared binary boundary.
+    :param capsys: Captured compatibility diagnostics.
+    :return: None.
+    """
+    root, wheels = installation
+    monkeypatch.setenv("DISTMAN_TARGET_PATH", "{TOOLS_ROOT}/flat")
+    monkeypatch.setenv("DISTMAN_RUNTIME_LIB_PATH", "{TOOLS_ROOT}/flat/lib/python")
+    monkeypatch.setenv("DISTMAN_RUNTIME_BIN_PATH", "{TOOLS_ROOT}/flat/bin")
+    wheel(wheels, tag="cp311-cp311-manylinux_2_17_x86_64")
+    wheel(wheels, tag="cp312-cp312-manylinux_2_17_x86_64")
+    common = ("--platform", "linux", "--arch", "x86_64")
+    assert invoke(wheels, "sample", *common, "--python", "3.11") == 0
+    boundary = root / "tools/flat"
+    before = boundary.resolve()
+    capsys.readouterr()
+    assert invoke(wheels, "sample", *common, "--python", "3.12") == 1
+    assert "sample is incompatible with linux-x86_64-cp311" in capsys.readouterr().out
+    assert boundary.resolve() == before
+    assert read_state(boundary)["artifacts"]["sample@lib/python"]["targets"] == [
+        "linux-x86_64-cp311"
+    ]
+
+
 def test_cross_target_marker_omission_fails_closed(installation: Tuple[Path, Path]) -> None:
     """Detect foreign-platform dependencies omitted by host marker resolution."""
     root, wheels = installation
@@ -1628,6 +1657,33 @@ def test_uninstall_partial_shared_target_protects_dependents(
     assert remove("sample", "--platform", "linux") == 0
 
 
+def test_uninstall_scopes_pure_dependencies_to_runtime_paths(
+    installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Do not use a pure dependency from another runtime root as a replacement.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :param monkeypatch: Fixture configuring runtime-specific shared roots.
+    :return: None.
+    """
+    root, wheels = installation
+    monkeypatch.setenv(
+        "DISTMAN_SHARED_LIB_PATH", "{TOOLS_ROOT}/shared/python{python_version}/lib/python"
+    )
+    monkeypatch.setenv("DISTMAN_SHARED_BIN_PATH", "{TOOLS_ROOT}/shared/python{python_version}/bin")
+    wheel(wheels, "dependency")
+    wheel(wheels, "app", requires=["dependency"])
+    assert invoke(wheels, "app", "--python", "3.11") == 0
+    assert invoke(wheels, "dependency", "--python", "3.12") == 0
+    runtime_311 = root / "tools/shared/python3.11/lib/python"
+    runtime_312 = root / "tools/shared/python3.12/lib/python"
+    before = runtime_311.resolve()
+    assert remove("dependency", "--python", "3.11") == 1
+    assert runtime_311.resolve() == before
+    assert (runtime_311 / "dependency").exists()
+    assert (runtime_312 / "dependency").exists()
+
+
 @pytest.mark.parametrize("dryrun", [False, True])
 def test_uninstall_dependency_diagnostic_explains_unchanged_deployment(
     installation: Tuple[Path, Path], capsys: pytest.CaptureFixture, dryrun: bool
@@ -1854,4 +1910,20 @@ def test_native_requires_python_retains_patch_version(installation: Tuple[Path, 
     assert marker_environment(target)["python_full_version"] == full_version
     wheel(wheels, python=f">={full_version}")
     assert invoke(wheels, "sample") == 0
-    assert (root / "tools/lib/python/sample").exists()
+    library = root / "tools/lib/python"
+    assert (library / "sample").exists()
+    record = read_state(library)["artifacts"]["sample"]
+    assert record["compatibility"] == {target.label: full_version}
+
+    wheel(wheels, "other")
+    foreign = "3.12" if target.python != "3.12" else "3.11"
+    assert invoke(wheels, "other", "--python", foreign) == 0
+    retained = read_state(library)["artifacts"]["sample"]
+    assert retained["compatibility"][target.label] == full_version
+
+    manifest = library / ".distman-install.json"
+    legacy = json.loads(manifest.read_text())
+    legacy["artifacts"]["sample"].pop("compatibility")
+    manifest.write_text(json.dumps(legacy))
+    recovered = read_state(library)["artifacts"]["sample"]
+    assert recovered["compatibility"] == {target.label: target.python + ".0"}

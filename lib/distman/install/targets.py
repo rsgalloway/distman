@@ -50,12 +50,14 @@ class Target:
     :param arch: Normalized architecture used in installation paths.
     :param python: CPython version expressed as major.minor.
     :param native: If True, use the running interpreter's native compatibility tags.
+    :param python_full: Optional full version retained from installation metadata.
     """
 
     platform: str
     arch: str
     python: str
     native: bool = False
+    python_full: Optional[str] = None
 
     @property
     def compatibility_python(self) -> str:
@@ -66,6 +68,8 @@ class Target:
 
         :return: Full CPython compatibility version.
         """
+        if self.python_full:
+            return self.python_full
         return platform.python_version() if self.native else self.python + ".0"
 
     @property
