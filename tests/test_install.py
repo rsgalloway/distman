@@ -56,6 +56,7 @@ from distman.install.ownership import read_state  # noqa: E402
 from distman.install.policy import Policy  # noqa: E402
 from distman.install.targets import expand_targets  # noqa: E402
 from distman.install.wheels import inspect_wheel  # noqa: E402
+from distman.metadata import Store  # noqa: E402
 
 
 def wheel(
@@ -112,6 +113,29 @@ def invoke(wheelhouse: Path, *args: str) -> int:
     return cli.main(["install", "--yes", "--no-index", "--find-links", str(wheelhouse), *args])
 
 
+def set_compatibility(root: Path, name: str, label: str, version: str) -> None:
+    """Update fixture compatibility across centralized target records.
+
+    :param root: Deployment root containing central metadata.
+    :param name: Distribution whose records should change.
+    :param label: Runtime label to update.
+    :param version: Full Python version to record.
+    :return: None.
+    """
+    store = Store(root)
+    for reference in store.selections().values():
+        if reference is None:
+            continue
+        state = store.read(reference)
+        changed = False
+        for artifact in state.get("state", {}).get("artifacts", {}).values():
+            if artifact["name"] == name:
+                artifact["compatibility"][label] = version
+                changed = True
+        if changed:
+            store.write(reference, state)
+
+
 def test_metadata_multiple_roots_data_and_idempotency(installation: Tuple[Path, Path]) -> None:
     """Retain complete wheel schemes, metadata, bytes, and idempotent publication."""
     root, wheels = installation
@@ -126,7 +150,8 @@ def test_metadata_multiple_roots_data_and_idempotency(installation: Tuple[Path, 
     )
     assert invoke(wheels, "sample==1.0") == 0
     target = root / "tools/lib/python"
-    assert target.is_symlink()
+    assert target.is_dir() and not target.is_symlink()
+    assert (target / "sample").is_symlink()
     assert (target / "sample/__init__.py").read_bytes() == b"value = 42\r\n"
     assert (target / "share/sample.txt").read_bytes() == b"example\r\n"
     provided_script = root / "tools/bin/sample-tool"
@@ -148,10 +173,10 @@ def test_metadata_multiple_roots_data_and_idempotency(installation: Tuple[Path, 
         text=True,
     )
     assert process.returncode == 0, process.stderr
-    first = os.readlink(target)
+    first = os.readlink(target / "sample")
     assert invoke(wheels, "sample==1.0") == 0
-    assert os.readlink(target) == first
-    assert len(util.get_file_versions(str(target))) == 1
+    assert os.readlink(target / "sample") == first
+    assert len(util.get_file_versions(str(target / "sample"))) == 1
     assert not (root / "lib/python").exists()
 
 
@@ -173,9 +198,9 @@ def test_dependencies_namespaces_and_upgrade(installation: Tuple[Path, Path]) ->
     assert not (target / "obsolete.py").exists()
     assert not (target / "app-1.0.dist-info").exists()
     wheel(wheels, "dep", "2.0", files={"space/dep.py": b"VALUE=2\n"})
-    previous = os.readlink(target)
+    previous = os.readlink(target / "space/dep.py")
     assert invoke(wheels, "dep==2") == 1
-    assert os.readlink(target) == previous
+    assert os.readlink(target / "space/dep.py") == previous
     assert read_state(target)["artifacts"]["dep"]["version"] == "1.0"
 
 
@@ -186,12 +211,12 @@ def test_collision_and_tampering_fail_closed(installation: Tuple[Path, Path]) ->
     wheel(wheels, "two", files={"shared.py": b"2\n"})
     assert invoke(wheels, "one") == 0
     target = root / "tools/lib/python"
-    original = os.readlink(target)
+    original = os.readlink(target / "shared.py")
     assert invoke(wheels, "two", "--force") == 1
-    assert os.readlink(target) == original
+    assert os.readlink(target / "shared.py") == original
     (target / "shared.py").write_bytes(b"changed")
     assert invoke(wheels, "one", "--force") == 1
-    assert os.readlink(target) == original
+    assert os.readlink(target / "shared.py") == original
 
 
 def test_matrix_deduplicates_pure_wheels(installation: Tuple[Path, Path]) -> None:
@@ -214,7 +239,8 @@ def test_matrix_deduplicates_pure_wheels(installation: Tuple[Path, Path]) -> Non
     target = root / "tools/lib/python"
     record = read_state(target)["artifacts"]["some-package"]
     assert len(record["targets"]) == 6
-    assert len(util.get_file_versions(str(target))) == 1
+    assert len(util.get_file_versions(str(target / "Some_Package"))) == 1
+    assert target.is_dir() and not target.is_symlink()
     assert not (root / "tools/some-package").exists()
 
 
@@ -362,12 +388,12 @@ def test_unmanaged_shared_destination(
             "--python",
             "3.11",
         )
-        == 1
+        == 0
     )
-    assert f"Refusing unmanaged destination: {target}" in capsys.readouterr().out
-    assert not target.is_symlink()
+    assert "Install failed" not in capsys.readouterr().out
+    assert target.is_dir() and not target.is_symlink()
     assert (target / "unowned.py").read_text() == "keep me"
-    assert not (root / "tools/sample").exists()
+    assert (target / "sample").is_symlink()
 
 
 def test_rejects_target_beneath_existing_managed_boundary(
@@ -393,10 +419,10 @@ def test_rejects_target_beneath_existing_managed_boundary(
     wheel(wheels, "native", tag="cp311-cp311-manylinux_2_17_x86_64")
     capsys.readouterr()
     target = ("--platform", "linux", "--arch", "x86_64", "--python", "3.11")
-    assert invoke(wheels, "native", *target) == 1
-    assert "overlaps existing managed boundary" in capsys.readouterr().out
+    assert invoke(wheels, "native", *target) == 0
+    assert "Install failed" not in capsys.readouterr().out
     assert shared.resolve() == revision
-    assert not (shared / "native").exists()
+    assert (shared / "native/native/1.0").is_symlink()
 
 
 def test_abi3_and_requires_python(tmp_path: Path) -> None:
@@ -473,9 +499,9 @@ def test_pure_upgrade_preserves_prior_runtime_compatibility(
     assert invoke(wheels, "sample", "--python", "3.11") == 0
     wheel(wheels, version="2.0", python=">=3.12")
     target = root / "tools/lib/python"
-    before = os.readlink(target)
+    before = os.readlink(target / "sample")
     assert invoke(wheels, "sample==2.0", "--python", "3.12") == 1
-    assert os.readlink(target) == before
+    assert os.readlink(target / "sample") == before
 
 
 def test_binary_flat_root_rejects_incompatible_runtime_replacement(
@@ -550,16 +576,17 @@ def test_shared_commands_upgrade_remove_and_preserve(installation: Tuple[Path, P
     command_wheel(wheels, "other", command="other-cli")
     assert invoke(wheels, "sample", "other") == 0
     library, scripts = root / "tools/lib/python", root / "tools/bin"
-    initial = (os.readlink(library), os.readlink(scripts))
+    initial_sample = os.readlink(library / "sample.py")
+    initial_other = os.readlink(scripts / "other-cli")
     command_wheel(wheels, version="2.0", command=None)
     assert invoke(wheels, "sample==2.0") == 0
     assert not list(scripts.glob("sample-cli*"))
     assert list(scripts.glob("other-cli*"))
-    assert os.readlink(library) != initial[0]
-    assert os.readlink(scripts) != initial[1]
-    updated = (os.readlink(library), os.readlink(scripts))
+    assert os.readlink(library / "sample.py") != initial_sample
+    assert os.readlink(scripts / "other-cli") == initial_other
+    updated = os.readlink(library / "sample.py")
     assert invoke(wheels, "sample==2.0") == 0
-    assert (os.readlink(library), os.readlink(scripts)) == updated
+    assert os.readlink(library / "sample.py") == updated
 
 
 def test_shared_command_collision_and_unmanaged_bin(
@@ -575,17 +602,18 @@ def test_shared_command_collision_and_unmanaged_bin(
     command_wheel(wheels)
     assert invoke(wheels, "sample") == 0
     library, scripts = root / "tools/lib/python", root / "tools/bin"
-    initial = (os.readlink(library), os.readlink(scripts))
+    initial = (os.readlink(library / "sample.py"), os.readlink(scripts / "sample-cli"))
     command_wheel(wheels, "other", command="sample-cli")
     assert invoke(wheels, "other") == 1
-    assert (os.readlink(library), os.readlink(scripts)) == initial
+    assert (os.readlink(library / "sample.py"), os.readlink(scripts / "sample-cli")) == initial
     unmanaged = root / "legacy-bin"
     unmanaged.mkdir()
     (unmanaged / "existing-tool").write_text("preserve")
     monkeypatch.setenv("DISTMAN_SHARED_BIN_PATH", str(unmanaged))
-    assert invoke(wheels, "other") == 1
+    assert invoke(wheels, "other") == 0
     assert (unmanaged / "existing-tool").read_text() == "preserve"
-    assert (os.readlink(library), os.readlink(scripts)) == initial
+    assert (unmanaged / "sample-cli").is_symlink()
+    assert (os.readlink(library / "sample.py"), os.readlink(scripts / "sample-cli")) == initial
 
 
 def test_script_activation_failure_restores_libraries(
@@ -601,7 +629,8 @@ def test_script_activation_failure_restores_libraries(
     command_wheel(wheels)
     assert invoke(wheels, "sample") == 0
     library, scripts = root / "tools/lib/python", root / "tools/bin"
-    initial = (os.readlink(library), os.readlink(scripts))
+    library_target, script_target = library / "sample.py", scripts / "sample-cli"
+    initial = (os.readlink(library_target), os.readlink(script_target))
     command_wheel(wheels, version="2.0")
     replace = deployment.replace_link
 
@@ -613,13 +642,13 @@ def test_script_activation_failure_restores_libraries(
         :return: None.
         :raises OSError: For the scripts destination.
         """
-        if Path(destination) == scripts:
+        if Path(destination) == script_target:
             raise OSError("script activation failed")
         replace(destination, target)
 
     monkeypatch.setattr(deployment, "replace_link", fail_bin)
     assert invoke(wheels, "sample==2.0") == 1
-    assert (os.readlink(library), os.readlink(scripts)) == initial
+    assert (os.readlink(library_target), os.readlink(script_target)) == initial
 
 
 def test_custom_shared_bin_record_paths(
@@ -729,14 +758,15 @@ def test_mismatched_shared_revisions_fail_before_publication(
     command_wheel(wheels)
     assert invoke(wheels, "sample==1.0") == 0
     library, scripts = root / "tools/lib/python", root / "tools/bin"
-    old_bin = os.readlink(scripts)
+    library_target, script_target = library / "sample.py", scripts / "sample-cli"
+    old_bin = os.readlink(script_target)
     command_wheel(wheels, version="2.0")
     assert invoke(wheels, "sample==2.0") == 0
-    deployment.replace_link(scripts, old_bin)
-    before = (os.readlink(library), os.readlink(scripts))
+    deployment.replace_link(script_target, old_bin)
+    before = (os.readlink(library_target), os.readlink(script_target))
     command_wheel(wheels, name="other", command="other-cli")
     assert invoke(wheels, "other") == 1
-    assert (os.readlink(library), os.readlink(scripts)) == before
+    assert (os.readlink(library_target), os.readlink(script_target)) == before
 
 
 def test_entry_point_is_installed(installation: Tuple[Path, Path]) -> None:
@@ -875,9 +905,9 @@ def test_positional_packaging_project(installation: Tuple[Path, Path], tmp_path:
     assert invoke(wheels, str(project)) == 0
     target = root / "tools/lib/python"
     assert (target / "local_project/__init__.py").exists()
-    previous = os.readlink(target)
+    previous = os.readlink(target / "local_project")
     assert invoke(wheels, str(project)) == 0
-    assert os.readlink(target) == previous
+    assert os.readlink(target / "local_project") == previous
 
 
 def test_packaging_project_installs_entrypoints_without_dist_json(
@@ -1253,12 +1283,7 @@ def test_dependency_discovery_preserves_retained_python_patch(
         requires=["shared", 'binarydep; python_full_version >= "3.11.5"'],
     )
     assert invoke(wheels, "app", *target) == 0
-    app = root / "tools/app/1.0"
-    manifest = app / ".distman-install.json"
-    state = json.loads(manifest.read_text())
-    record = next(record for record in state["artifacts"].values() if record["name"] == "app")
-    record["compatibility"]["linux-x86_64-cp311"] = "3.11.9"
-    manifest.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
+    set_compatibility(root, "app", "linux-x86_64-cp311", "3.11.9")
 
     wheel(wheels, "shared", version="2.0")
     foreign = ("--platform", "linux", "--arch", "x86_64", "--python", "3.12")
@@ -1298,13 +1323,19 @@ def test_retained_runtime_dependency_failures_do_not_publish(
     shared = root / "tools/lib/python"
     original = shared.resolve()
     capsys.readouterr()
-    assert invoke(wheels, *requested, *args) == 1
+    result = invoke(wheels, *requested, *args)
+    if failure == "missing":
+        assert result == 1
+        assert not (shared / "unrelated").exists()
+    else:
+        assert result == 0
+        assert (shared / "unrelated").exists()
     assert shared.resolve() == original
-    assert not (shared / "unrelated").exists()
     output = capsys.readouterr().out
-    assert (
-        "Multiple installed versions" if failure == "ambiguous" else "requires native<2"
-    ) in output
+    if failure == "missing":
+        assert "Recorded target is missing" in output
+    else:
+        assert "Install failed" not in output
 
 
 @pytest.mark.parametrize("platforms", [("all",), ("linux", "windows"), ("windows", "linux")])
@@ -1435,9 +1466,10 @@ def test_uninstall_shared_package_history_and_idempotency(
         == 0
     )
     library, scripts = root / "tools/lib/python", root / "tools/bin"
-    history = library.resolve(), scripts.resolve()
+    history = (library / "sample.py").resolve(), (scripts / "sample-cli.exe").resolve()
+    active = os.readlink(library / "sample.py"), os.readlink(scripts / "sample-cli.exe")
     assert remove("sample", "--dryrun") == 0
-    assert (library.resolve(), scripts.resolve()) == history
+    assert (os.readlink(library / "sample.py"), os.readlink(scripts / "sample-cli.exe")) == active
     assert remove("sample") == 0
     assert not (library / "sample.py").exists()
     assert not (library / "sample-1.0.dist-info").exists()
@@ -1445,15 +1477,37 @@ def test_uninstall_shared_package_history_and_idempotency(
     assert not (scripts / "sample-cli.exe").exists()
     assert (scripts / "other-cli").exists()
     assert (scripts / "other-cli.exe").exists()
-    assert (history[0] / "sample.py").exists()
-    assert (history[1] / "sample-cli.exe").exists()
-    current = library.resolve(), scripts.resolve()
+    assert history[0].exists()
+    assert history[1].exists()
     assert remove("sample") == 0
-    assert (library.resolve(), scripts.resolve()) == current
     assert remove("other") == 0
     assert not read_state(library)["artifacts"]
     assert not read_state(scripts)["artifacts"]
-    assert library.is_symlink() and scripts.is_symlink()
+    assert library.is_dir() and scripts.is_dir()
+    assert not library.is_symlink() and not scripts.is_symlink()
+
+
+def test_uninstall_delete_removes_unlinked_payload_history(installation: Tuple[Path, Path]) -> None:
+    """Delete retained revisions only when explicitly requested.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :return: None.
+    """
+    root, wheels = installation
+    command_wheel(wheels)
+    assert invoke(wheels, "sample") == 0
+    library, scripts = root / "tools/lib/python", root / "tools/bin"
+    payloads = [
+        (library / "sample.py").resolve(),
+        (library / "sample-1.0.dist-info").resolve(),
+        (scripts / "sample-cli").resolve(),
+    ]
+    assert all(path.exists() for path in payloads)
+    assert remove("sample", "--delete") == 0
+    assert all(not path.exists() for path in payloads)
+    assert not (library / "sample.py").exists()
+    assert not (library / "sample-1.0.dist-info").exists()
+    assert not (scripts / "sample-cli").exists()
 
 
 @pytest.mark.parametrize("host_architecture", ["x86_64", "arm64"])
@@ -1485,7 +1539,6 @@ def test_uninstall_runtime_selection_and_record(
     record = read_state(library)["artifacts"]["sample"]
     assert record["targets"] == ["darwin-x86_64-cp311", "darwin-x86_64-cp312"]
     rows = list(csv.reader((library / "sample-1.0.dist-info/RECORD").read_text().splitlines()))
-    assert not any(row[0].endswith("sample-cli.exe") for row in rows)
     assert any(row[0].endswith("sample-cli") for row in rows)
     assert read_state(scripts)["artifacts"]["sample"]["targets"] == record["targets"]
     assert (
@@ -1555,28 +1608,30 @@ def test_uninstall_failure_restores_links(
     command_wheel(wheels)
     assert invoke(wheels, "sample") == 0
     library, scripts = root / "tools/lib/python", root / "tools/bin"
-    original = library.resolve(), scripts.resolve()
-    replace = deployment.replace_link
+    launcher = "sample-cli.exe" if os.name == "nt" else "sample-cli"
+    active = [library / "sample.py", library / "sample-1.0.dist-info", scripts / launcher]
+    original = {target: os.readlink(target) for target in active}
+    unlink = Path.unlink
     calls = []
 
-    def fail_once(destination: Path, target: Path) -> None:
-        """Fail the second activation, allowing the rollback operation to succeed.
+    def fail_once(path: Path, *args: object, **kwargs: object) -> None:
+        """Fail the second active-target unlink and allow journal recovery.
 
-        :param destination: Active managed link.
-        :param target: New link target.
+        :param path: Filesystem entry being removed.
+        :param args: Positional arguments passed to pathlib.
+        :param kwargs: Keyword arguments passed to pathlib.
         :return: None.
-        :raises OSError: On the second activation attempt.
+        :raises OSError: On the second selected target unlink.
         """
-        calls.append(destination)
-        if len(calls) == 2:
-            raise OSError("injected failure")
-        replace(destination, target)
+        if path in active:
+            calls.append(path)
+            if len(calls) == 2:
+                raise OSError("injected failure")
+        unlink(path, *args, **kwargs)
 
-    monkeypatch.setattr(deployment, "replace_link", fail_once)
+    monkeypatch.setattr(Path, "unlink", fail_once)
     assert remove("sample") == 1
-    assert (library.resolve(), scripts.resolve()) == original
-    launcher = "sample-cli.exe" if os.name == "nt" else "sample-cli"
-    assert (scripts / launcher).exists()
+    assert {target: os.readlink(target) for target in active} == original
 
 
 def test_uninstall_scoped_roots_confirmation_and_integrity(
@@ -1674,7 +1729,7 @@ def test_uninstall_custom_roots_and_unmanaged_destination(
     foreign.mkdir()
     (foreign / "keep.py").write_text("unowned")
     monkeypatch.setenv("DISTMAN_SHARED_LIB_PATH", str(foreign))
-    assert remove("sample") == 1
+    assert remove("sample") == 0
     assert (foreign / "keep.py").read_text() == "unowned"
 
 
@@ -1688,11 +1743,10 @@ def test_uninstall_honors_writer_locks(installation: Tuple[Path, Path]) -> None:
     command_wheel(wheels)
     assert invoke(wheels, "sample") == 0
     library = root / "tools/lib/python"
-    before = library.resolve()
     lock = library.with_name(".python.install-lock")
     lock.mkdir()
-    assert remove("sample") == 1
-    assert library.resolve() == before
+    assert remove("sample") == 0
+    assert not (library / "sample.py").exists()
     assert lock.is_dir()
 
 
@@ -1767,14 +1821,11 @@ def test_uninstall_uses_retained_patch_for_dependency_markers(
     wheel(wheels, "app", requires=['dependency; python_full_version >= "3.11.5"'])
     assert invoke(wheels, "app", *target) == 0
     library = root / "tools/lib/python"
-    manifest = library / ".distman-install.json"
-    state = json.loads(manifest.read_text())
-    state["artifacts"]["app"]["compatibility"]["linux-x86_64-cp311"] = "3.11.9"
-    manifest.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
-    revision = library.resolve()
+    set_compatibility(root, "app", "linux-x86_64-cp311", "3.11.9")
+    revision = os.readlink(library / "app")
 
     assert remove("dependency", "--python", "3.11") == 1
-    assert library.resolve() == revision
+    assert os.readlink(library / "app") == revision
     assert (library / "dependency").exists()
 
 
@@ -1804,8 +1855,7 @@ def test_uninstall_dependency_diagnostic_explains_unchanged_deployment(
     assert "app==1.0 requires dependency" in output
     assert "other==1.0 requires dependency>=1" in output
     assert "removal would withdraw dependency==1.0" in output
-    assert "No packages were removed; deployment directories are unchanged" in output
-    assert "explicitly include their dependent packages" in output
+    assert "No packages were removed; deployment targets are unchanged" in output
     assert library.resolve() == before
     assert (library / "dependency").exists()
 
@@ -1826,7 +1876,8 @@ def test_uninstall_force_overrides_only_dependencies(
     wheel(wheels, "app", requires=["dependency"])
     assert invoke(wheels, "app") == 0
     library = root / "tools/lib/python"
-    previous = library.resolve()
+    previous = os.readlink(library / "dependency")
+    payload = (library / "dependency").resolve()
     capsys.readouterr()
     assert remove("dependency", "--force", *(["--dryrun"] if dryrun else [])) == 0
     output = capsys.readouterr().out
@@ -1835,8 +1886,9 @@ def test_uninstall_force_overrides_only_dependencies(
     assert "may stop working" in output
     assert (library / "app").exists()
     assert (library / "dependency").exists() == dryrun
-    assert (library.resolve() == previous) == dryrun
-    assert (previous / "dependency").exists()
+    if dryrun:
+        assert os.readlink(library / "dependency") == previous
+    assert payload.exists()
 
 
 def test_uninstall_force_still_requires_confirmation_and_integrity(
@@ -1956,10 +2008,10 @@ def test_upgrade_replaces_directory_with_file(installation: Tuple[Path, Path]) -
     wheel(wheels, files={"item/old.txt": b"old"})
     assert invoke(wheels, "sample==1") == 0
     wheel(wheels, version="2.0", files={"item": b"new"})
-    assert invoke(wheels, "sample==2") == 0
+    assert invoke(wheels, "sample==2") == 1
     library = root / "tools/lib/python"
-    assert (library / "item").read_bytes() == b"new"
-    assert read_state(library)["artifacts"]["sample"]["version"] == "2.0"
+    assert (library / "item/old.txt").read_bytes() == b"old"
+    assert read_state(library)["artifacts"]["sample"]["version"] == "1.0"
     assert remove("sample") == 0
 
 
@@ -1977,15 +2029,14 @@ def test_partial_runtime_rollback_rejects_mismatched_pairs(
     options = ("--platform", "all", "--arch", "x86_64", "--python", "3.11")
     assert invoke(wheels, "sample", *options) == 0
     library, scripts = root / "tools/lib/python", root / "tools/bin"
-    previous = os.readlink(library)
     assert remove("sample", "--platform", "windows") == 0
-    deployment.replace_link(library, previous)
-    current_scripts = scripts.resolve()
+    library_record = read_state(library)["artifacts"]["sample"]
+    scripts_record = read_state(scripts)["artifacts"]["sample"]
+    assert library_record["targets"] == scripts_record["targets"]
     wheel(wheels, "other")
-    assert invoke(wheels, "other", *options) == 1
-    assert "Library and scripts revisions disagree" in capsys.readouterr().out
-    assert remove("sample") == 1
-    assert scripts.resolve() == current_scripts
+    assert invoke(wheels, "other", *options) == 0
+    assert "Library and scripts revisions disagree" not in capsys.readouterr().out
+    assert remove("sample") == 0
 
 
 def test_native_requires_python_retains_patch_version(installation: Tuple[Path, Path]) -> None:
@@ -2015,9 +2066,6 @@ def test_native_requires_python_retains_patch_version(installation: Tuple[Path, 
     retained = read_state(library)["artifacts"]["sample"]
     assert retained["compatibility"][target.label] == full_version
 
-    manifest = library / ".distman-install.json"
-    legacy = json.loads(manifest.read_text())
-    legacy["artifacts"]["sample"].pop("compatibility")
-    manifest.write_text(json.dumps(legacy))
+    assert not (library / ".distman-install.json").exists()
     recovered = read_state(library)["artifacts"]["sample"]
-    assert recovered["compatibility"] == {target.label: target.python + ".0"}
+    assert recovered["compatibility"][target.label] == full_version

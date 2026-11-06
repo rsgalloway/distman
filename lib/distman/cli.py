@@ -357,6 +357,11 @@ def _add_uninstall_options(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("-y", "--yes", action="store_true", help="confirm removal")
     parser.add_argument(
+        "--delete",
+        action="store_true",
+        help="also delete retained payload revisions for unlinked targets",
+    )
+    parser.add_argument(
         "-f",
         "--force",
         action="store_true",

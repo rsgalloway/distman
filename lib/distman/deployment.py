@@ -29,7 +29,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
-"""Git-independent, byte-preserving publication of prepared directories.
+"""Git-independent, byte-preserving publication of prepared targets.
 
 Uses the same sibling ``versions`` layout as Distributor. Callers serialize
 writers and validate ownership before publishing. Each link replacement is
@@ -44,11 +44,13 @@ import shutil
 import stat
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 from distman import config, util
+from distman.inventory import inventory, sha256
 from distman.metadata import (
     RecoveryRequired,
     Store,
@@ -56,6 +58,22 @@ from distman.metadata import (
     durable_directory,
     sync_directory,
 )
+
+
+@dataclass(frozen=True)
+class TargetPublication:
+    """One independently versioned deployment target change.
+
+    :param destination: Active target link to create, replace, or remove.
+    :param source: Prepared file or directory to publish; None keeps the current payload.
+    :param state: Optional centralized ownership/provenance data for this target revision.
+    :param delete: If True, unlink the active target without deleting retained revisions.
+    """
+
+    destination: Path
+    source: Optional[Path] = None
+    state: Optional[Dict[str, Any]] = None
+    delete: bool = False
 
 
 def get_version_dest(dest: str, version_num: int, short_head: Optional[str]) -> str:
@@ -103,9 +121,9 @@ def replace_link(destination: Union[str, Path], target: Union[str, Path]) -> Non
 
 
 def prepare_revision(source: Path, destination: Path) -> Path:
-    """Copy all bytes and modes before exposing a complete numbered revision.
+    """Copy one file or directory before exposing a complete numbered revision.
 
-    :param source: Complete staged directory to copy without normalizing its contents.
+    :param source: Complete staged file or directory to copy without normalization.
     :param destination: Active destination used to select the next sibling revision.
     :return: Path of the completed, inactive revision.
     :raises OSError: If the staged content cannot be copied or renamed.
@@ -117,13 +135,20 @@ def prepare_revision(source: Path, destination: Path) -> Path:
     durable_directory(revision.parent)
     temporary = revision.with_name(f".{revision.name}.{uuid.uuid4().hex}.staging")
     try:
-        shutil.copytree(source, temporary, symlinks=True)
-        flush_payload(temporary)
+        if source.is_dir():
+            shutil.copytree(source, temporary, symlinks=True)
+            flush_payload(temporary)
+        else:
+            shutil.copy2(source, temporary)
+            with temporary.open("rb") as stream:
+                os.fsync(stream.fileno())
         os.rename(temporary, revision)
         sync_directory(revision.parent)
     finally:
-        if temporary.exists():
+        if temporary.is_dir():
             shutil.rmtree(temporary)
+        elif temporary.exists():
+            temporary.unlink()
     return revision
 
 
@@ -247,23 +272,59 @@ def recover_publication(deploy_root: Path, dryrun: bool = False) -> List[str]:
     return actions
 
 
-def publish_directories(changes: Iterable[Tuple[Path, Path]], deploy_root: Path) -> None:
-    """Publish prepared directories with a durable journal and incremental snapshot.
+def _record_path(path: Path, root: Path) -> str:
+    """Return a stable root-relative path where possible.
 
-    Callers hold the deployment writer lock. Retained revisions provide rollback
-    bytes; only selected link changes are journaled, without scanning the deployment.
+    :param path: Absolute deployment path to encode.
+    :param root: Deployment root used for relative records.
+    :return: POSIX relative path or the absolute path when outside the root.
+    """
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return str(path)
 
-    :param changes: Staged-source/destination pairs to publish.
+
+def _payload_inventory(path: Path) -> Dict[str, Any]:
+    """Inventory one immutable target payload.
+
+    :param path: Revision file or directory.
+    :return: File digests and modes keyed relative to the target.
+    """
+    if path.is_dir():
+        return inventory(path)
+    return {".": {"sha256": sha256(path), "mode": stat.S_IMODE(path.stat().st_mode)}}
+
+
+def publish_targets(publications: Iterable[TargetPublication], deploy_root: Path) -> None:
+    """Publish or unlink independent targets with one durable journal.
+
+    Shared directories are containers only. Each publication versions the named file
+    or directory beside that container, matching the long-standing ``dist`` model.
+
+    :param publications: Prepared target changes and centralized ownership state.
     :param deploy_root: Deployment boundary owning publication records.
     :return: None.
-    :raises RecoveryRequired: If earlier work is pending or rollback cannot complete safely.
+    :raises RecoveryRequired: If earlier work is pending or active state changed.
     :raises OSError: If preparation, activation, or durable metadata writes fail.
+    :raises ValueError: If target paths overlap or a publication is inconsistent.
     """
     store = Store(deploy_root)
     store.ensure_clean()
-    changes = [(Path(source), Path(destination).absolute()) for source, destination in changes]
-    destinations = [destination for _, destination in changes]
-    for i, destination in enumerate(destinations):
+    values = [
+        TargetPublication(
+            Path(value.destination).absolute(),
+            Path(value.source) if value.source is not None else None,
+            value.state,
+            value.delete,
+        )
+        for value in publications
+    ]
+    destinations = [value.destination for value in values]
+    for i, value in enumerate(values):
+        destination = value.destination
+        if value.delete and value.source is not None:
+            raise ValueError(f"Deleted target cannot have a source: {destination}")
         if (
             ".." in destination.parts
             or destination == store.root
@@ -277,18 +338,30 @@ def publish_directories(changes: Iterable[Tuple[Path, Path]], deploy_root: Path)
             for other in destinations[i + 1 :]
         ):
             raise ValueError(f"Overlapping publication destinations: {destination}")
-    if not changes:
+    if not values:
         return
     identifier = uuid.uuid4().hex
     previous_snapshot = store.current()
     prepared = []
-    selections = {}
-    for source, destination in changes:
+    selections: Dict[str, Optional[str]] = {}
+    for value in values:
+        destination = value.destination
         previous = observed_link(destination)
         if previous is not None and not (destination.parent / previous).exists():
             raise RecoveryRequired(f"Previous revision is missing: {destination}")
-        revision = prepare_revision(source, destination)
-        link = os.path.relpath(revision, destination.parent)
+        if value.delete:
+            if previous is None:
+                continue
+            revision = None
+            link = None
+        elif value.source is None:
+            if previous is None:
+                raise RecoveryRequired(f"Cannot update absent target metadata: {destination}")
+            revision = destination.parent / previous
+            link = previous
+        else:
+            revision = prepare_revision(value.source, destination)
+            link = os.path.relpath(revision, destination.parent)
         prepared.append(
             {
                 "destination": str(destination),
@@ -297,11 +370,11 @@ def publish_directories(changes: Iterable[Tuple[Path, Path]], deploy_root: Path)
                 "allow_absent": platform.system() == "Windows",
             }
         )
-        try:
-            target_path = destination.relative_to(store.root).as_posix()
-            payload_path = revision.relative_to(store.root).as_posix()
-        except ValueError:
-            target_path, payload_path = str(destination), str(revision)
+        target_path = _record_path(destination, store.root)
+        if revision is None:
+            selections[target_path] = None
+            continue
+        payload_path = _record_path(revision, store.root)
         target_id = hashlib.sha256(target_path.encode()).hexdigest()
         revision_record = f"targets/{target_id}/revisions/{identifier}.json"
         store.write(
@@ -310,16 +383,15 @@ def publish_directories(changes: Iterable[Tuple[Path, Path]], deploy_root: Path)
                 "schema": 1,
                 "destination": target_path,
                 "payload": payload_path,
-                "kind": "directory",
+                "kind": "directory" if revision.is_dir() else "file",
                 "id": identifier,
-                "ownership": (
-                    "embedded-receipt"
-                    if (revision / ".distman-install.json").is_file()
-                    else "unknown"
-                ),
+                "inventory": _payload_inventory(revision),
+                "state": value.state or {},
             },
         )
         selections[target_path] = revision_record
+    if not prepared:
+        return
     snapshot = {
         "schema": 1,
         "id": identifier,
@@ -345,7 +417,11 @@ def publish_directories(changes: Iterable[Tuple[Path, Path]], deploy_root: Path)
             destination = Path(change["destination"])
             if observed_link(destination) != change["before"]:
                 raise RecoveryRequired(f"Destination changed before activation: {destination}")
-            replace_link(destination, change["after"])
+            if change["after"] is None:
+                destination.unlink()
+                sync_directory(destination.parent)
+            elif change["after"] != change["before"]:
+                replace_link(destination, change["after"])
         store.write("current.json", {"schema": 1, "snapshot": identifier})
         atomic_write(store.directory / config.DISTMAN_EPOCH_FILE, f"{time.time_ns()}\n")
         journal["phase"] = "committed"
@@ -355,7 +431,24 @@ def publish_directories(changes: Iterable[Tuple[Path, Path]], deploy_root: Path)
             recover_publication(deploy_root)
         except BaseException as recovery_error:
             raise RecoveryRequired(
-                f"Publication interrupted; recovery is required at {deploy_root}: {recovery_error}"
+                f"Publication interrupted; recovery is required at {deploy_root}: "
+                f"{recovery_error}"
             ) from recovery_error
         raise
     store.remove("pending.json")
+
+
+def publish_directories(changes: Iterable[Tuple[Path, Path]], deploy_root: Path) -> None:
+    """Publish directory pairs through the generic per-target journal.
+
+    :param changes: Staged-source/destination directory pairs.
+    :param deploy_root: Deployment boundary owning publication records.
+    :return: None.
+    """
+    publish_targets(
+        (
+            TargetPublication(destination=destination, source=source)
+            for source, destination in changes
+        ),
+        deploy_root,
+    )

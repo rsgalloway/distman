@@ -29,32 +29,27 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
-"""Remove receipt-owned packages through reversible deployment revisions."""
+"""Remove centrally recorded package targets from a deployment."""
 
 import argparse
-import configparser
 import copy
-import csv
-import json
-import os
 import re
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Dict, Iterable, List, Set
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
-from distman import util
-from distman.deployment import publish_directories
+from distman import config, util
+from distman.deployment import TargetPublication, publish_targets
 from distman.install import InstallError
-from distman.install.command import include_companions
-from distman.install.models import Changes, InstalledArtifact, InstallState
-from distman.install.ownership import MANIFEST, check_script_pairs, read_state, target_requirements
+from distman.install.command import _active_targets
+from distman.install.models import InstalledArtifact
+from distman.install.ownership import check_script_pairs, target_requirements
 from distman.install.targets import Target
-from distman.inventory import sha256
-from distman.locking import locks
+from distman.metadata import Store, sync_directory
 from distman.operations import operation
 from distman.policy import Policy
 
@@ -86,14 +81,15 @@ def runtime_labels(args: argparse.Namespace, records: Iterable[InstalledArtifact
     """Select installed runtime labels without defaulting to the host runtime.
 
     :param args: Optional platform, architecture, and Python filters.
-    :param records: Installed receipts supplying the runtime inventory.
+    :param records: Installed records supplying the runtime inventory.
     :return: Installed labels matching every supplied filter.
     :raises InstallError: If a runtime filter is invalid.
     """
     platforms = None
     if args.platform and args.platform != "all":
         platforms = {
-            {"osx": "darwin", "win64": "windows"}.get(p, p) for p in args.platform.split(",")
+            {"osx": "darwin", "win64": "windows"}.get(value, value)
+            for value in args.platform.split(",")
         }
         if not platforms <= {"linux", "windows", "darwin"}:
             raise InstallError(f"Unsupported platform: {args.platform}")
@@ -101,7 +97,7 @@ def runtime_labels(args: argparse.Namespace, records: Iterable[InstalledArtifact
     if arch and arch not in ("x86_64", "arm64"):
         raise InstallError(f"Unsupported architecture: {arch}")
     versions = set(args.python.split(",")) if args.python else None
-    if versions and any(not re.fullmatch(r"3\.(?:[8-9]|[1-9][0-9])", v) for v in versions):
+    if versions and any(not re.fullmatch(r"3\.(?:[8-9]|[1-9][0-9])", value) for value in versions):
         raise InstallError("Expected CPython major.minor >= 3.8")
     selected = set()
     for record in records:
@@ -117,97 +113,16 @@ def runtime_labels(args: argparse.Namespace, records: Iterable[InstalledArtifact
     return selected
 
 
-def generated_removals(root: Path, record: InstalledArtifact, remaining: Set[str]) -> Set[Path]:
-    """Locate generated launchers no longer needed by a partially retained package.
-
-    :param root: Managed library boundary containing entrypoint metadata.
-    :param record: Original shared-library receipt.
-    :param remaining: Runtime labels retained after removal.
-    :return: Absolute generated launcher paths no retained platform requires.
-    :raises InstallError: If a legacy receipt cannot identify its scripts boundary safely.
-    """
-    metadata = [name for name in record["files"] if name.endswith(".dist-info/entry_points.txt")]
-    if not metadata:
-        return set()
-    if not record.get("scripts_path"):
-        raise InstallError(f"Reinstall {record['name']} before partial runtime removal")
-    platforms = {label.split("-")[0] for label in remaining}
-    paths = set()
-    for name in metadata:
-        parser = configparser.ConfigParser(interpolation=None)
-        parser.optionxform = str
-        parser.read(root / name)
-        for section in ("console_scripts", "gui_scripts"):
-            if not parser.has_section(section):
-                continue
-            for command in parser[section]:
-                if Path(command).name != command or "\\" in command:
-                    raise InstallError(f"Invalid installed entrypoint name: {command}")
-                if "windows" not in platforms:
-                    paths.add(Path(record["scripts_path"]) / (command + ".exe"))
-                if not platforms & {"linux", "darwin"}:
-                    paths.add(Path(record["scripts_path"]) / command)
-    return paths
-
-
-def removal_states(
-    states: Dict[Path, InstallState], selectors: List[Requirement], labels: Set[str]
-) -> Dict[Path, InstallState]:
-    """Plan package and runtime removal without editing active deployment files.
-
-    :param states: Verified current ownership receipts.
-    :param selectors: Package names and optional exact versions.
-    :param labels: Runtime labels selected for removal.
-    :return: Proposed receipts, preserving unrelated distributions and file ownership.
-    :raises InstallError: If partial removal cannot identify legacy launcher ownership.
-    """
-    proposed = copy.deepcopy(states)
-    launchers = set()
-    for root, state in states.items():
-        for key, record in state["artifacts"].items():
-            if not any(
-                canonicalize_name(req.name) == record["name"]
-                and req.specifier.contains(record["version"], prereleases=True)
-                for req in selectors
-            ):
-                continue
-            removed = set(record["targets"]) & labels
-            if not removed:
-                continue
-            remaining = set(record["targets"]) - removed
-            if remaining:
-                proposed[root]["artifacts"][key]["targets"] = sorted(remaining)
-                proposed[root]["artifacts"][key]["compatibility"] = {
-                    label: version
-                    for label, version in record["compatibility"].items()
-                    if label in remaining
-                }
-                if record["pure"] and record.get("component") != "scripts":
-                    launchers.update(generated_removals(root, record, remaining))
-            else:
-                del proposed[root]["artifacts"][key]
-            print(
-                f"Planned removal: {record['name']}=={record['version']} "
-                f"[{', '.join(sorted(removed))}] at {root}"
-            )
-    for root, state in proposed.items():
-        for record in state["artifacts"].values():
-            for name in list(record["files"]):
-                if root / name in launchers:
-                    del record["files"][name]
-    return proposed
-
-
 def validate_removal(
     before: List[InstalledArtifact], after: List[InstalledArtifact], force: bool = False
 ) -> None:
     """Reject newly broken dependencies of retained package/runtime installations.
 
-    :param before: Original library and scripts receipts from configured roots.
-    :param after: Proposed retained receipts.
+    :param before: Original package records.
+    :param after: Proposed retained package records.
     :param force: Allow newly broken dependencies after reporting every blocker.
     :return: None.
-    :raises InstallError: If paired receipts disagree or unforced removal breaks dependencies.
+    :raises InstallError: If unforced removal breaks retained dependencies.
     """
     check_script_pairs(before)
     check_script_pairs(after)
@@ -226,13 +141,18 @@ def validate_removal(
     labels = {label for record in after for label in record["targets"]}
     for label in sorted(labels):
         system, arch, python = label.split("-")
-        pending = [r for r in after if r.get("component") != "scripts" and label in r["targets"]]
+        pending = [
+            record
+            for record in after
+            if record.get("component") != "scripts" and label in record["targets"]
+        ]
         visited = set()
         while pending:
             record = pending.pop()
-            if id(record) in visited:
+            identity = id(record)
+            if identity in visited:
                 continue
-            visited.add(id(record))
+            visited.add(identity)
             target = Target(
                 system,
                 arch,
@@ -242,30 +162,32 @@ def validate_removal(
             for requirement in target_requirements(record, target):
                 name = canonicalize_name(requirement.name)
                 old = [
-                    r
-                    for r in before
-                    if r["name"] == name
-                    and r.get("component") != "scripts"
-                    and label in r["targets"]
-                    and requirement.specifier.contains(r["version"], prereleases=True)
+                    candidate
+                    for candidate in before
+                    if candidate["name"] == name
+                    and candidate.get("component") != "scripts"
+                    and label in candidate["targets"]
+                    and requirement.specifier.contains(candidate["version"], prereleases=True)
                 ]
                 retained = [
-                    r
-                    for r in after
-                    if r["name"] == name
-                    and r.get("component") != "scripts"
-                    and label in r["targets"]
-                    and (r["name"], r["version"], label) not in withdrawn
-                    and requirement.specifier.contains(r["version"], prereleases=True)
+                    candidate
+                    for candidate in after
+                    if candidate["name"] == name
+                    and candidate.get("component") != "scripts"
+                    and label in candidate["targets"]
+                    and (candidate["name"], candidate["version"], label) not in withdrawn
+                    and requirement.specifier.contains(candidate["version"], prereleases=True)
                 ]
                 if old and not retained:
-                    affected = ", ".join(sorted({f"{r['name']}=={r['version']}" for r in old}))
+                    removed = ", ".join(
+                        sorted(
+                            {f"{candidate['name']}=={candidate['version']}" for candidate in old}
+                        )
+                    )
                     blockers.add(
                         f"  {record['name']}=={record['version']} requires {requirement} "
-                        f"for {label}; removal would withdraw {affected}"
+                        f"for {label}; removal would withdraw {removed}"
                     )
-                # Several binary versions can coexist. Follow every retained
-                # candidate so none of their transitive requirements is hidden.
                 pending.extend(retained)
     if blockers and force:
         print(
@@ -277,107 +199,172 @@ def validate_removal(
         raise InstallError(
             "Removal would break packages that remain installed:\n"
             + "\n".join(sorted(blockers))
-            + "\nNo packages were removed; deployment directories are unchanged."
-            + "\nKeep the required packages, or explicitly include their dependent packages "
-            "in the uninstall request if you intend to remove those too. "
-            "Use --force to allow removal despite these dependency requirements."
+            + "\nNo packages were removed; deployment targets are unchanged."
+            + "\nUse --force to allow removal despite these dependency requirements."
         )
 
 
-def stage_removal(
-    before: Dict[Path, InstallState], after: Dict[Path, InstallState], temporary: Path
-) -> Changes:
-    """Compose removal snapshots and update RECORD entries for retained packages.
+def _selection_updates(
+    artifacts: Dict[str, InstalledArtifact],
+    selectors: List[Requirement],
+    labels: Set[str],
+) -> Dict[str, Optional[InstalledArtifact]]:
+    """Build ownership updates for matching package/runtime selections.
 
-    :param before: Verified original states.
-    :param after: Proposed ownership states, updated with rewritten RECORD digests.
-    :param temporary: Workspace for complete staged revisions.
-    :return: Changed staged-directory/destination pairs, including empty managed roots.
-    :raises OSError: If snapshot creation or metadata updates fail.
+    :param artifacts: Active artifacts indexed by centralized owner identifier.
+    :param selectors: Package names and optional exact versions.
+    :param labels: Runtime labels selected for removal.
+    :return: Selected owners mapped to retained records or None for complete removal.
     """
-    deleted = set()
-    for root, state in before.items():
-        owned = {name for record in after[root]["artifacts"].values() for name in record["files"]}
-        deleted.update(
-            root / name
-            for record in state["artifacts"].values()
-            for name in record["files"]
-            if name not in owned
-        )
-    changes = []
-    for number, (root, state) in enumerate(after.items()):
-        if state == before[root]:
+    updates = {}
+    for owner, record in artifacts.items():
+        if not any(
+            canonicalize_name(selector.name) == record["name"]
+            and selector.specifier.contains(record["version"], prereleases=True)
+            for selector in selectors
+        ):
             continue
-        staged = temporary / f"revision-{number}"
-        shutil.copytree(root, staged, ignore=shutil.ignore_patterns("__pycache__"))
-        for path in deleted:
-            if root in path.parents and (staged / path.relative_to(root)).is_file():
-                (staged / path.relative_to(root)).unlink()
-        for record in state["artifacts"].values():
-            for name in record["files"]:
-                if not name.endswith(".dist-info/RECORD"):
-                    continue
-                path = staged / name
-                with path.open(newline="") as stream:
-                    rows = list(csv.reader(stream))
-                base = (root / name).parent.parent
-                retained = [
-                    row for row in rows if Path(os.path.normpath(base / row[0])) not in deleted
+        removed = set(record["targets"]) & labels
+        if not removed:
+            continue
+        remaining = set(record["targets"]) - removed
+        if remaining:
+            retained = copy.deepcopy(record)
+            retained["targets"] = sorted(remaining)
+            retained["compatibility"] = {
+                label: version
+                for label, version in record["compatibility"].items()
+                if label in remaining
+            }
+            if record.get("component") == "scripts":
+                platforms = {label.split("-")[0] for label in remaining}
+                retained["managed_targets"] = [
+                    target
+                    for target in record.get("managed_targets", [])
+                    if not (
+                        (target.endswith(".exe") and "windows" not in platforms)
+                        or (not target.endswith(".exe") and not platforms & {"linux", "darwin"})
+                    )
                 ]
-                if retained != rows:
-                    with path.open("w", newline="") as stream:
-                        csv.writer(stream, lineterminator="\n").writerows(retained)
-                    record["files"][name] = {
-                        "sha256": sha256(path),
-                        "mode": path.stat().st_mode & 0o777,
-                    }
-        for path in sorted(staged.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+            updates[owner] = retained
+        else:
+            updates[owner] = None
+        print(
+            f"Planned removal: {record['name']}=={record['version']} "
+            f"[{', '.join(sorted(removed))}]"
+        )
+    return updates
+
+
+def _plan_targets(
+    targets: dict,
+    updates: Dict[str, Optional[InstalledArtifact]],
+    temporary: Path,
+) -> Tuple[List[TargetPublication], List[Path]]:
+    """Translate ownership updates into target unlinks or private-boundary revisions.
+
+    :param targets: Active centralized target records.
+    :param updates: Selected owner records after removal.
+    :param temporary: Workspace for revised multi-owner package boundaries.
+    :return: Publications and targets that will be fully unlinked.
+    :raises InstallError: If a non-directory target unexpectedly has multiple owners.
+    """
+    publications = []
+    unlinked = []
+    for number, (destination, target) in enumerate(targets.items()):
+        state = target.get("state", {}).get("artifacts", {})
+        affected = set(state) & set(updates)
+        if not affected:
+            continue
+        retained = dict(state)
+        removed = []
+        for owner in affected:
+            replacement = updates[owner]
+            if replacement is None or str(destination) not in replacement.get(
+                "managed_targets", []
+            ):
+                removed.append(state[owner])
+                retained.pop(owner)
+            else:
+                retained[owner] = replacement
+        if not retained:
+            publications.append(TargetPublication(destination, delete=True))
+            unlinked.append(destination)
+            continue
+        if not removed:
+            publications.append(TargetPublication(destination, state={"artifacts": retained}))
+            continue
+        if not destination.is_dir():
+            raise InstallError(f"Cannot remove one owner from file target: {destination}")
+        staged = temporary / f"target-{number}"
+        shutil.copytree(destination, staged, ignore=shutil.ignore_patterns("__pycache__"))
+        for record in removed:
+            for name in record["files"]:
+                path = staged / name
+                if path.is_file():
+                    path.unlink()
+        for path in sorted(staged.rglob("*"), key=lambda value: len(value.parts), reverse=True):
             if path.is_dir() and not any(path.iterdir()):
                 path.rmdir()
-        (staged / MANIFEST).write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
-        changes.append((staged, root))
-    return changes
+        publications.append(TargetPublication(destination, staged, {"artifacts": retained}))
+    return publications, unlinked
+
+
+def _delete_history(destinations: Iterable[Path]) -> None:
+    """Delete retained payload revisions for fully unlinked targets.
+
+    :param destinations: Targets unlinked by the completed operation.
+    :return: None.
+    :raises OSError: If retained payloads cannot be removed.
+    """
+    for destination in destinations:
+        versions = destination.parent / config.DIR_VERSIONS
+        if not versions.is_dir():
+            continue
+        for revision in versions.glob(destination.name + ".*"):
+            if revision.is_dir() and not revision.is_symlink():
+                shutil.rmtree(revision)
+            else:
+                revision.unlink()
+        sync_directory(versions)
 
 
 def uninstall(args: argparse.Namespace) -> int:
-    """Remove selected managed packages with preflight checks and reversible publication.
+    """Remove selected package targets through centralized deployment metadata.
 
     :param args: Package selectors, runtime filters, dry-run and confirmation options.
     :return: Zero on success or already absent, one if confirmation is declined.
     :raises InstallError: If selection, ownership, or retained dependencies are unsafe.
-    :raises OSError: If staging or publication fails.
+    :raises OSError: If publication fails.
     """
     selectors = requests(args.packages)
     policy = Policy()
     print(f"Effective deployment root: {policy.deploy_root}")
     with operation(policy.deploy_root, read_only=args.dryrun):
-        groups = {root: {} for root in policy.managed_roots()}
-        include_companions(groups)
-        roots = sorted(groups)
-        for i, root in enumerate(roots):
-            if any(root in other.parents for other in roots[i + 1 :]):
-                raise InstallError(f"Overlapping managed boundaries: {root}")
-        with locks(roots, args.dryrun):
-            states = {root: read_state(root) for root in roots}
-            records = [
-                record for state in states.values() for record in state["artifacts"].values()
-            ]
-            labels = runtime_labels(args, records)
-            proposed = removal_states(states, selectors, labels)
-            retained = [
-                record for state in proposed.values() for record in state["artifacts"].values()
-            ]
-            validate_removal(records, retained, force=args.force)
-            with tempfile.TemporaryDirectory(prefix="distman-uninstall-") as work:
-                changes = stage_removal(states, proposed, Path(work))
-                if args.dryrun:
-                    print(f"Dry run: {len(changes)} revision(s); deployment directories unchanged")
-                    return 0
-                if not changes:
-                    print("Unchanged: selected packages/runtimes are not installed")
-                    return 0
-                if not args.yes and not util.yesNo(f"Remove packages from {policy.deploy_root}?"):
-                    return 1
-                publish_directories(changes, policy.deploy_root)
-                print(f"Uninstalled: {len(changes)} revision(s)")
-        return 0
+        store = Store(policy.deploy_root)
+        targets, artifacts = _active_targets(store)
+        records = list(artifacts.values())
+        labels = runtime_labels(args, records)
+        updates = _selection_updates(artifacts, selectors, labels)
+        proposed = dict(artifacts)
+        for owner, replacement in updates.items():
+            if replacement is None:
+                proposed.pop(owner, None)
+            else:
+                proposed[owner] = replacement
+        validate_removal(records, list(proposed.values()), force=args.force)
+        with tempfile.TemporaryDirectory(prefix="distman-uninstall-") as work:
+            publications, unlinked = _plan_targets(targets, updates, Path(work))
+            if args.dryrun:
+                print(f"Dry run: {len(publications)} target(s); deployment targets unchanged")
+                return 0
+            if not publications:
+                print("Unchanged: selected packages/runtimes are not installed")
+                return 0
+            if not args.yes and not util.yesNo(f"Remove packages from {policy.deploy_root}?"):
+                return 1
+            publish_targets(publications, policy.deploy_root)
+            if args.delete:
+                _delete_history(unlinked)
+            print(f"Uninstalled: {len(publications)} target(s)")
+    return 0

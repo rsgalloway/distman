@@ -95,7 +95,7 @@ class InstalledArtifact(Selection):
 
 
 class InstallState(TypedDict):
-    """Internal deployment receipt for all artifacts in a composed revision.
+    """Legacy embedded receipt for artifacts in a whole-root revision.
 
     :ivar schema: Internal receipt schema version.
     :ivar artifacts: Ownership keys mapped to complete installed artifact records.

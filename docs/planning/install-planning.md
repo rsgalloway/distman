@@ -10,15 +10,15 @@ policy rather than inferring packages from arbitrary envstack variables.
 |---|---|---|
 | Direct PyPI requirements, pins, and requirements files | Implemented | pip-backed resolution and offline installer tests; preserving satisfactory installed versions is pending |
 | Explicit upgrades | Planned | `-U` is not implemented |
-| Package removal | Implemented | Receipt-owned revisions, version/runtime selection, dependency checks, and retained history |
+| Package removal | Implemented | Per-target unlink, version/runtime selection, dependency checks, retained history, and optional `--delete` |
 | Local packaging, requirements-only, dist-only, and combined projects | Implemented | Exact-directory discovery; dist.json owns custom publication; project tests |
 | Bounded architecture refactor | Implemented | Central CLI, shared policy, separate dist command/domain modules, journaled package publication; [architecture audit](architecture.md) |
 | Configurable shared/runtime libraries and bins | Implemented | Five DISTMAN path templates, packaged fallback, active overrides, custom-layout tests |
-| Complete wheel contents and ownership | Implemented | Metadata, resources, scripts, RECORD, namespaces, collision and integrity checks |
+| Complete wheel contents and ownership | Implemented | Per-package targets, central ownership/inventory, metadata, resources, scripts, RECORD, namespaces, collisions, and integrity checks |
 | Shared cross-platform generated entrypoints | Implemented | POSIX `tool` plus Windows `tool.exe`; combined/sequential installs, upgrades, removal, and idempotency tests |
 | Retained dependency validation | Implemented | Configured runtime-root discovery, recorded target scopes, transitive shared dependencies, conflict rejection |
 | Dry run and revision publication | Implemented with limits | No deployment writes on preview; exception rollback and persisted recovery for package publication; no global cross-root transaction |
-| Deployment list/status and metadata consolidation | Follow-up | No list/status commands; embedded receipts and legacy dist metadata still need migration |
+| Deployment list/status and metadata consolidation | In progress | New package metadata is centralized; list/status and migration of legacy dist/embedded records remain |
 | envstack activation | Examples implemented | Default, flat, and NumPy layouts; no automatic environment generation |
 | `--env` environment installation / creation | Not implemented | Reserved flag rejects use; CLI meaning and isolation contract remain unresolved |
 | Recipe selection, versioned environment files, catalog fetching | Proposed | No `--recipe` implementation or validated catalog releases |
@@ -119,14 +119,18 @@ Implementation and acceptance work:
 
 ## Package lifecycle follow-ups
 
-`distman uninstall` is implemented. It composes revisions without selected owned
-files, preserves unrelated distributions and rollback history, and rejects newly
-broken dependencies in configured managed roots unless explicitly forced. Force
-reports the affected consumers and does not bypass ownership or integrity checks. Unqualified names select all
-versions/runtimes; exact pins and runtime filters narrow removal. Shared payloads
-remain until their last runtime is removed, and empty roots retain managed receipts.
-Dependencies are not automatically removed. See [package removal](../install.md#removing-packages)
-for activation limits and legacy-receipt behavior.
+`distman uninstall` is implemented. Normal removal unlinks the selected package's
+individual targets and records null selections while retaining numbered payloads.
+`--delete` additionally removes retained payload revisions for fully unlinked targets.
+Exact package pins and runtime filters narrow selection; dependency checks protect
+retained consumers unless `--force` is explicit. Partial shared-runtime removal keeps
+library targets and removes generated launcher forms only when no retained platform
+needs them. Shared container directories are never replaced with empty tombstone
+revisions. Dependencies are not automatically removed. See
+[package removal](../install.md#removing-packages).
+
+Remaining lifecycle work includes list/status, explicit snapshot rollback, history
+pruning, legacy metadata migration, and stronger native/network-filesystem validation.
 
 Source-distribution fallback is another proposed extension. Named-package acquisition
 currently requires prebuilt wheels, while local projects can be built into wheels.
@@ -139,28 +143,22 @@ need a separate design and tests.
 
 Current behavior and limits:
 
-- Legacy `.<target>.dist` contents have no parser in the current command paths.
-  Their existence is checked when initializing destinations, and target deletion
-  cleans them up. Verbose distribution display uses symlinks, revision filenames,
-  filesystem timestamps, and Git metadata. Preserve these files during migration
-  because their existence still affects behavior.
-- `.distman-install.json` records ownership, package provenance/dependencies, and
-  each managed revision's file paths, SHA-256 hashes, and permission modes. It is
-  not a deployment-wide history log. Each historical revision retains its snapshot.
-- Ownership inventories prevent collisions and identify exactly which files an
-  upgrade or uninstall can remove. Hashes and modes detect changed or incomplete
-  contents. These are separate responsibilities even though stored together.
-- Hashing currently uses standard-library hashlib in streamed blocks. Validation
-  hashes entire managed roots, sometimes repeatedly in one operation. Measure
-  full-tree reads, metadata size, and revision duplication before scaling this
-  design. Reuse verified results within a safe operation boundary where possible.
-- Missing or invalid ownership metadata prevents updates to affected existing roots;
-  force does not override this. Packages can still run because Python imports do
-  not need the distman receipt. Uninstall discovery can skip versioned roots with
-  missing receipts, which needs an explicit unknown/unmanaged-state diagnostic.
-- There is no automatic repair or reconstruction command. Restoring a matching
-  metadata backup or a complete known-good revision is currently required. A new
-  file scan alone cannot recover historical ownership or original artifact identity.
+- New package target records live under `${DEPLOY_ROOT}/.distman/targets/` and contain
+  inventory, selected payload, ownership, provenance, dependencies, and runtimes.
+- Incremental snapshots and operation journals under `.distman/` record activation,
+  metadata-only selection changes, and unlinks. One deployment-wide writer lock
+  serializes cooperating install, uninstall, and dist processes.
+- Shared library/bin paths are containers. Their children have independent active
+  links and numbered revisions, so removing or upgrading one distribution does not
+  copy or revise the entire shared tree.
+- Standard `.dist-info` remains package content. New package writes do not create
+  `.distman-install.json`; the legacy reader remains for older deployments. Legacy
+  `.<target>.dist` writes still need migration into central records.
+- Missing/corrupt central metadata or an active link differing from its selected
+  payload fails mutation preflight. Reconstructing provenance from payload bytes
+  alone remains a separate recovery design.
+- Hashing uses standard-library hashlib in streamed blocks. Publication inventories
+  changed targets only; a future full status scan remains explicit.
 
 ### Deployment inventory and status (proposed)
 
@@ -566,17 +564,14 @@ DISTMAN_SHARED_LIB_PATH and DISTMAN_SHARED_BIN_PATH; the flat example carries th
 activation settings in default.env. Installing a package does not add these paths
 to the caller's shell.
 
-Implementation boundary: shared libraries and bins are separate managed revisions,
-validated and published together with rollback on caught activation failures.
-Their receipts link the artifacts and detect mismatched library/bin versions.
-Manual rollback must select matching revisions of both roots. Runtime scripts
-inside DISTMAN_TARGET_PATH share the package revision directly. Cross-root
-activation is not globally atomic. Interrupted package publication is recoverable
-from persisted journals; legacy dist publication is not yet journaled.
-Existing unmanaged bin directories and changing previously recorded layout mappings
-are rejected. General migration and coexistence with legacy bin shims remain future
-work. TOOLS_ROOT itself is not one managed boundary because binary package roots
-also live beneath it.
+Implementation boundary: shared library and bin paths are ordinary containers. Each
+pure package/module, metadata directory, data target, and command is independently
+versioned and linked. Binary runtime scripts inside `DISTMAN_TARGET_PATH` share that
+package/version target unless policy places them in an external bin container.
+Activation is not globally atomic across targets, but interruption is recoverable
+from persisted journals. Legacy dist publication is not yet journaled. Unmanaged
+neighbor files are allowed in containers; collisions at the same target path fail.
+General migration from legacy whole-root installer receipts remains future work.
 
 ## Named environments and conflict recovery (follow-up)
 

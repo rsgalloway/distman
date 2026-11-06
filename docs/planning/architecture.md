@@ -10,16 +10,16 @@ and remaining architectural constraints.
 | `cli.py` | Suite parsing originally imported separate command parsers | Centralized options, parser construction, and dispatch following rhps-ingest |
 | `dist/command.py`, `dist/distribution.py` | Command orchestration and existing Git-aware distribution operations | Replaced `dist.py`; updated internal callers and entry points without an import facade |
 | `source.py` | `Source` loads `dist.json`; `GitRepo` adds repository inspection | Preserved both classes and Git checks |
-| `deployment.py` | Git-independent revision publication for install/uninstall | Stages payloads, journals link changes, and restores interrupted publication |
+| `deployment.py` | Git-independent target publication for install/uninstall | Versions files/directories, journals replacements/unlinks, and restores interrupted publication |
 | `operations.py`, `metadata.py`, `recovery.py` | Writer coordination, durable state storage, and explicit recovery | Root lock and pending-operation checks surround command execution |
 | `config.py` | Legacy constants evaluated from the environment at import time | Preserved defaults for existing callers |
 | `install/policy.py` | Optional envstack/pathbase policy mixed into command namespace | Moved to `policy.py`; retained an import compatibility shim |
 | `resources/install.env` | Packaged fallback policy, formerly install/defaults.env | Configuration moved out of command implementation |
 | `install/wheels.py` | pip resolution, wheel inspection, build, and staging | Typed artifacts and provenance; stages shared platform launchers |
-| `install/ownership.py` | Validate and compose package snapshots | Shared inventory and locks extracted; package-specific ownership/dependency checks remain |
+| `install/ownership.py` | Package compatibility and dependency validation | Central records are primary; legacy embedded receipt reads remain transitional |
 | `inventory.py`, `locking.py` | Generic SHA-256 inventory and writer coordination | No package acquisition dependencies; deployment-root locks with transitional target locks |
-| `install/uninstall.py` | Package removal from configured managed roots | Receipt-based selection, reverse dependency checks, staged removal, and retained history |
-| `install/command.py` | Orchestrates acquisition and publication | Added explicit local-project planning and retained dependency discovery |
+| `install/uninstall.py` | Package removal from central deployment state | Per-target unlink, partial binary revision, dependency checks, retained history, and `--delete` |
+| `install/command.py` | Orchestrates acquisition and publication | Decomposes shared wheels into independent targets and keeps binary roots package-exclusive |
 | Former `install/cli.py` | Separate installer parser and error reporting | Removed; options and error handling now live in `cli.py` |
 | `pipeline.py`, `transform.py` | Transform specification, callable imports, shell execution | Preserved callable paths and behavior |
 | `cache.py` | Cache CLI, mirroring, epoch/TTL checks, pruning | Preserved APIs and cache-specific filesystem operations |
@@ -95,11 +95,11 @@ assign every retained pure-Python application to every newly requested platform.
 Installed dependencies in separate configured package roots participate in checks
 and locking without being copied or republished.
 
-Shared generated entrypoints combine POSIX and Windows launchers in one scripts
-receipt. Staging regenerates variants for requested and previously recorded
-platforms from the selected wheel, including complete wheel RECORD entries.
-Normalized Windows ZIP timestamps keep comparisons deterministic. Library/scripts
-pair validation and publication rollback remain in the ownership/deployment layers.
+Shared generated entrypoints become independent command targets, with POSIX and
+Windows variants recorded under one package component. Staging regenerates variants
+for requested and previously recorded platforms from the selected wheel. Normalized
+Windows ZIP timestamps keep comparisons deterministic. Library/scripts selection
+validation and publication rollback remain in the ownership/deployment layers.
 This supports cross-generation on Linux. Native Windows CI executes generated
 console launchers for wheel and local-project installs; GUI launchers and broader
 argument/interpreter discovery cases remain separate validation work. See the
@@ -254,7 +254,7 @@ lock/state contract. Document a coordinated writer upgrade requirement.
 1. Acquire/build/transform into private staging. Resolve all deployment boundaries.
 2. Acquire writer locks in deterministic order with bounded waiting, an owner token,
    hostname, user, PID, and operation description. A timeout is an actionable failure.
-3. Read current links and records, compose shared payloads, validate ownership and
+3. Read current links and records, plan independent targets, validate ownership and
    dependencies, and present the final plan. If locks are released for confirmation,
    reacquire and revalidate; changed plans require renewed confirmation.
 4. Prepare payload revisions and matching immutable metadata. Record operation
@@ -312,8 +312,9 @@ publication was interrupted.
    shared roots, dist/install contention, dependency changes, timeout, cancellation,
    and non-overlapping deployments. Existing locks need a transition strategy;
    do not allow old and new binaries to silently use different locks.
-3. **Migrate publication/metadata:** add file publication, operation records, new
-   metadata adapters, and legacy initialization replacement. Test new-only writes,
+3. **Migrate publication/metadata:** file/directory/unlink publication and new package
+   records are implemented; add dist migration and legacy initialization replacement.
+   Test new-only writes,
    mixed formats, corrupt records, interruption at every publication boundary,
    rollback ownership, version-only records, cache invalidation, and custom roots.
 4. **Finish lifecycle inspection:** adapt uninstall, then add list/status with

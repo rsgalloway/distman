@@ -183,6 +183,76 @@ class Store:
         if not isinstance(identifier, str) or re.fullmatch(r"[0-9a-f]{32}", identifier) is None:
             raise RecoveryRequired(f"Invalid deployment record identifier: {identifier!r}")
 
+    def selections(self) -> dict:
+        """Resolve the latest recorded selection for every deployment target.
+
+        Snapshot entries are incremental. Newer entries win while parent snapshots
+        supply targets that were unchanged by later operations. A ``None`` value
+        records an intentionally unlinked target.
+
+        :return: Root-relative or absolute target paths mapped to revision-record paths or None.
+        :raises RecoveryRequired: If the snapshot chain is corrupt or cyclic.
+        """
+        identifier = self.current()
+        selections = {}
+        visited = set()
+        while identifier is not None:
+            if identifier in visited:
+                raise RecoveryRequired("Cyclic deployment snapshot history")
+            visited.add(identifier)
+            snapshot = self.read(f"snapshots/{identifier}.json")
+            if snapshot is None or snapshot.get("id") != identifier:
+                raise RecoveryRequired(f"Missing or mismatched snapshot: {identifier}")
+            changes = snapshot.get("changes")
+            if not isinstance(changes, dict):
+                raise RecoveryRequired(f"Invalid deployment snapshot: {identifier}")
+            for target, revision in changes.items():
+                valid_revision = revision is None or (
+                    isinstance(revision, str)
+                    and re.fullmatch(
+                        r"targets/[0-9a-f]{64}/revisions/[0-9a-f]{32}\.json",
+                        revision,
+                    )
+                    is not None
+                )
+                target_path = Path(target) if isinstance(target, str) else None
+                if (
+                    target_path is None
+                    or (not target_path.is_absolute() and ".." in target_path.parts)
+                    or not valid_revision
+                ):
+                    raise RecoveryRequired(f"Invalid target selection: {identifier}")
+                selections.setdefault(target, revision)
+            identifier = snapshot.get("parent")
+            if identifier is not None:
+                self.validate_id(identifier)
+        return selections
+
+    def target_records(self) -> dict:
+        """Read active centralized target revision records.
+
+        :return: Absolute destination paths mapped to validated revision dictionaries.
+        :raises RecoveryRequired: If a selected revision record is missing or inconsistent.
+        """
+        records = {}
+        for target, reference in self.selections().items():
+            if reference is None:
+                continue
+            record = self.read(reference)
+            payload = Path(record.get("payload", "")) if record is not None else None
+            if (
+                record is None
+                or record.get("destination") != target
+                or payload is None
+                or (not payload.is_absolute() and ".." in payload.parts)
+            ):
+                raise RecoveryRequired(f"Missing or mismatched target revision: {target}")
+            destination = Path(target)
+            if not destination.is_absolute():
+                destination = self.root / destination
+            records[destination] = record
+        return records
+
     def pending(self) -> Optional[dict]:
         """Read and validate the operation blocking further publication.
 
@@ -221,8 +291,8 @@ class Store:
                 or destination in destinations
                 or (before is not None and (not isinstance(before, str) or not before))
                 or not isinstance(change.get("allow_absent", False), bool)
-                or not isinstance(after, str)
-                or not after
+                or (after is not None and (not isinstance(after, str) or not after))
+                or (before is None and after is None)
             ):
                 raise RecoveryRequired("Invalid publication destination or link")
             path = Path(destination)

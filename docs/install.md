@@ -203,31 +203,38 @@ Package resources, metadata, bundled native libraries, headers, and other wheel
 data retain their library-side layout. No dist.json or recipe is needed for these
 standard wheel contents, including a locally built project's wheel.
 
-Shared libraries and commands represent one compatible environment, with one
-active version per distribution. Both managed roots are validated and published
-in the same operation; caught activation failures restore previous links. Changes
-to their artifacts produce corresponding revisions. Generated entrypoints can
-coexist in a shared bin: Linux/macOS use `tool`, Windows uses `tool.exe`.
-`--platform all` generates both forms, including when run on Linux. Installing
-another platform later preserves existing launcher variants; upgrading regenerates
-all recorded variants from the new wheel and removes obsolete commands.
-Wheel-provided scripts with conflicting platform-specific contents still require
-separate paths.
+Shared library and bin paths are ordinary container directories. Distman versions
+each wheel-owned top-level package, module, metadata directory, data target, and
+command independently beneath the container. For example:
 
-Dependency validation follows each package's recorded targets and their dependencies.
-Adding Windows support for one package does not require Windows dependencies for
-an unrelated Linux-only application. Shared upgrades must still satisfy existing
-consumers on their recorded runtimes.
-Metadata checks do not guarantee application compatibility.
+```text
+tools/lib/python/
+    numpy -> versions/numpy.0
+    numpy-2.2.6.dist-info -> versions/numpy-2.2.6.dist-info.0
+tools/bin/
+    f2py -> versions/f2py.0
+```
 
-Existing unmanaged bin directories (including those populated by legacy `dist`)
-are rejected rather than overwritten. Choose an empty managed destination. Changing
-an already-recorded library/bin mapping requires a separate deployment root;
-automatic migration between arbitrary layouts is not implemented. Earlier managed
-installs with scripts under lib/python/bin can migrate on reinstall: their owned
-old scripts are removed and the new locations are recorded. Migration affects only
-reinstalled distributions; migrate all command providers before removing the old
-script directory from runtime PATH.
+A package upgrade switches only that package's targets. Other packages and unmanaged
+neighbors in the shared container are left alone. Namespace package directories are
+ordinary containers too; their owned children are independent targets so several
+distributions can share a namespace. A binary package/version path remains one
+package-exclusive target containing its selected runtime layouts.
+
+Generated entrypoints can coexist in a shared bin: Linux/macOS use `tool`, Windows
+uses `tool.exe`. `--platform all` generates both forms, including when run on Linux.
+Installing another platform later preserves existing launcher variants; upgrading
+regenerates recorded variants and removes obsolete commands. A command, module, or
+package target already owned by another distribution is a collision. Unmanaged files
+with other names in a shared container are preserved.
+
+Dependency validation follows each package's recorded runtimes and considers all
+versions in package-exclusive binary roots. Adding Windows support for one package
+does not assign Windows dependencies to an unrelated Linux-only application. A
+shared upgrade must still satisfy retained consumers on their recorded runtimes.
+Metadata checks do not guarantee application compatibility. Changing a recorded
+package's library/bin mapping requires reinstalling it into the intended deployment;
+automatic migration between arbitrary layouts is not implemented.
 
 ## distman.env examples
 
@@ -267,17 +274,17 @@ all:
 ```
 
 The library and target templates match, while both bin templates select the same
-shared command root. Libraries and commands publish together as a pair of revisions.
-Use this root for exactly one platform, architecture, and Python runtime, for example:
+shared command container. Use this layout for exactly one platform, architecture,
+and Python runtime, for example:
 
 ```bash
 distman install numpy --platform linux --arch x86_64 --python 3.11 --dryrun
 ```
 
 Add `/etc/tools/lib/python` to the application's `PYTHONPATH`. Later installs
-preserve unrelated managed packages, and rollback restores the entire shared
-environment (both library and bin revisions). A pre-existing unmanaged directory
-cannot be adopted automatically.
+preserve unrelated packages and files. Each package/module and command has its own
+active link and retained revision history; there is no shared-environment link to
+roll back as a unit.
 
 ### One flat root per runtime
 
@@ -296,24 +303,22 @@ all:
 
 For example, Linux x86_64 Python 3.11 packages share
 `/studio/tools/linux/x86_64/python3.11/lib/python`; Python 3.12 uses a separate root.
-Pure packages are copied into each selected runtime root. Each root has its own
-revision history and holds one active version of each distribution.
+Pure package targets are published into each selected runtime container. Each
+distribution target has its own revision history.
 
 ## Installed ownership metadata
 
-A *receipt* is distman's internal `.distman-install.json` file inside each managed
-library, bin, or package revision. It records package versions, wheel provenance,
-declared dependencies, target runtimes, and owned files with hashes and modes.
-For shared defaults, inspect `tools/lib/python/.distman-install.json` and
-`tools/bin/.distman-install.json` beneath the deployment root. These records let
-uninstall distinguish one package's files from unrelated files in a shared directory.
-Packages acquired as dependencies are recorded too; no explicit install request
-for each dependency is needed. Receipts do not record the original command line.
+All new distman-owned package metadata lives under `${DEPLOY_ROOT}/.distman/`. Target
+revision records contain the package version, sanitized wheel source, declared
+dependencies, runtime selections, active payload, file hashes, modes, and owned
+targets. Incremental snapshots select the active revision record for each target.
+There is no `.distman-install.json` inside new package payloads or shared containers.
 
-These differ from legacy `dist`'s `.<target>.dist` files beside deployed targets
-and `.distman/epoch`, which signals deployment changes to cache clients. Python's
-standard `.dist-info` metadata is also preserved. Receipts are generated internal
-state, not configuration files users need to author or edit.
+Python's standard `.dist-info` directories remain package content. Older deployments
+may still contain embedded `.distman-install.json` receipts and legacy `.<target>.dist`
+files; compatibility readers can inspect those formats, but new package publications
+do not author them. The metadata is generated internal state, not configuration users
+need to edit. Packages acquired as dependencies are recorded too.
 
 ## Removing packages
 
@@ -321,65 +326,57 @@ state, not configuration files users need to author or edit.
 distman uninstall cowsay --dryrun
 distman uninstall cowsay --yes
 distman uninstall 'numpy==1.24.4' --platform linux --python 3.8
+distman uninstall cowsay --delete
 ```
 
-Uninstall reads managed receipts through the selected installation policy; it does
-not inspect distman's own Python environment or need network access. An unqualified
-name selects all installed versions and runtimes in those configured roots. Exact
-`name==version` pins and `--platform`, `--arch`, and `--python` narrow the selection;
-omitted runtime filters mean all installed values, not the host defaults.
+Uninstall reads the selected deployment's centralized records; it does not inspect
+distman's own Python environment or need network access. An unqualified name selects
+all recorded versions and runtimes. Exact `name==version` pins and `--platform`,
+`--arch`, and `--python` narrow the selection. Omitted runtime filters mean every
+installed runtime, not the host defaults.
 
-Removal publishes new revisions without the selected owned files. Shared libraries
-and POSIX launchers remain while retained runtimes still need them; generated Windows
-launchers are removed when no Windows target remains. Wheel-provided scripts remain
-with a partially retained shared package. Dependencies are not automatically removed,
-and removal is rejected by default if it eliminates a required dependency of a retained package
-in the discoverable managed roots. Environment files and activation variables remain
-unchanged; application-specific version selections are not inferred from those files.
+Normal uninstall removes the selected package's active links and records null target
+selections in the deployment journal. Retained payloads under sibling `versions/`
+directories remain available for audit or later recovery work. `--delete` also removes
+those retained payload revisions for targets fully unlinked by this operation. It does
+not delete unrelated package history. Shared container directories remain in place.
 
-A dependency refusal is a preflight check: nothing is removed, with or without
-`--dryrun`. Diagnostics list the retained dependent packages, their requirements,
-and affected runtimes. Keep the required package, or explicitly request removal
-of its dependents too if that is intended. `-f`/`--force` overrides dependency blockers
-after listing the affected packages. It leaves those dependents installed and may
-make them unusable. Force does not bypass ownership, integrity, paired-revision
-checks, writer locks, confirmation, or dry-run behavior. `Planned removal` lines describe proposed
-changes, not completed deletion.
+For partial runtime removal, common library targets remain active while their central
+runtime selection is updated. Generated Windows or POSIX launchers are unlinked when
+no retained platform needs that launcher form. Binary package boundaries are revised
+only when other runtime layouts remain inside the same package/version target.
+Dependencies are not automatically removed. Removal is rejected if it would break a
+retained package unless `--force` is supplied; force reports the affected dependents
+and leaves them installed. It never bypasses ownership, integrity, the writer lock,
+confirmation, or dry-run behavior.
 
-Uninstall previews its selected roots and asks for confirmation unless `--yes` is
-supplied. Already absent selections succeed without new revisions. Empty managed
-roots retain an empty receipt and active revision link, so history and rollback stay
-available. Modified contents and unmanaged fixed destinations are rejected. Packages
-outside the current policy's discovery paths are not managed by this operation;
-use their original path policy. Legacy receipts without a scripts mapping require
-reinstallation before partial removal of shared entrypoint runtimes.
+A dependency refusal is preflight-only: no active targets change. Already absent
+selections succeed without a new snapshot. Modified, missing, or externally relinked
+managed targets fail closed. `Planned removal` describes intended changes, not a
+completed deletion.
 
 ## Revisions
 
-Installs create complete revisions and switch the active symlink. Unchanged
-installs create no revision unless forced. Upgrades preserve unrelated managed
-packages and reject file collisions, modified installations, and unmanaged
-destinations; `--force` does not bypass these checks.
+Each installed target is copied to a numbered sibling under `versions/`, then its
+active symlink is created or replaced. Shared library and bin directories themselves
+are not versioned. Unchanged targets create no new payload revision unless forced.
+Upgrades replace only the selected distribution's targets and reject ownership
+collisions, modified payloads, missing targets, and active links that differ from the
+central snapshot.
 
-Dependency checks include retained packages in separate runtime roots located
-through the configured path templates. These roots are validated without being
-republished. If multiple installed versions satisfy a dependency, include an
-explicit package version in the install request. Missing or incompatible
-dependencies stop the install before publication.
+Package-exclusive binary paths such as `tools/numpy/2.2.6` remain single versioned
+targets because all runtime layouts beneath them belong to that package version.
+Pure packages and shared commands instead use one link per package/module, metadata
+directory, data target, or command. Restoring one payload link manually is detected
+as a state conflict even when its bytes happen to match another revision. A future
+snapshot rollback command can select a recorded set of target revisions; it is not
+implemented by `install` or `uninstall`.
 
-Use `dist`'s version options with a `dist.json` target to select an older revision.
-Shared libraries and shared bins have separate revision symlinks. Restore matching
-revisions of both when rolling back the shared environment; moving just one link
-can leave commands and libraries inconsistent. Subsequent installs check their
-paired receipts. Runtime libraries and bins under DISTMAN_TARGET_PATH roll back
-through that single package boundary.
-
-POSIX activation replaces each managed link atomically, not all links together.
-Windows directory links require an unlink/rename swap with a brief visibility gap;
-the publication journal allows recovery if that swap is interrupted. Local
-`dist.json` publication is separate: a later target failure can leave installed
-dependencies in place.
-Windows deployment requires symlink permission.
+POSIX activation replaces each created/revised target link atomically. Multiple links
+are not globally atomic to readers. Windows directory links require an unlink/rename
+swap with a brief visibility gap; the publication journal permits recovery after an
+interruption. Unlinks are journaled too, so caught exceptions restore links already
+removed by the operation. Windows deployment requires symlink permission.
 
 See the [usage guide](usage.md) and [architecture guide](planning/architecture.md)
 for command and implementation details.

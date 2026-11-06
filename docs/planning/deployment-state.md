@@ -53,7 +53,7 @@ Cross-root restoration, path relocation, and export remain later work.
 
 ## Implemented foundation
 
-The journaled directory publisher writes:
+The journaled target publisher writes:
 
 ```text
 .distman/
@@ -66,33 +66,35 @@ The journaled directory publisher writes:
     locks/write/owner.json
 ```
 
-Revision records reference payloads in the existing `versions/` layout. Package
-ownership still lives in embedded `.distman-install.json` receipts; revision records
-identify that format without duplicating every file entry. Legacy sibling `.dist`
-records and embedded receipt readers remain unchanged during this foundation slice.
-No migration of historical payloads or ownership has occurred yet.
+It publishes individual files and directories and records unlinks with a null target
+selection. Revision records reference payloads in the existing sibling `versions/`
+layout and contain the target inventory plus package ownership/provenance state. New
+package publications write no embedded `.distman-install.json` receipt. Shared
+library and bin paths are ordinary containers; package/module, metadata, data, and
+command children are independent targets. Package-exclusive binary roots remain one
+target containing their runtime layouts.
 
 A snapshot contains schema version, ID, UTC creation time, parent ID, coverage, and
-changed destination-to-revision-record selections. A null parent starts a partial
-history; it does not claim that preexisting unrecorded targets are absent. Coverage
-is currently `recorded-targets`: installer/uninstaller directory publications only.
-Legacy dist still publishes through its existing implementation and does not yet
-participate in snapshot history. Do not advertise these records as complete
-whole-root snapshots until writer migration and baseline discovery are implemented.
+changed destination-to-revision-record selections. Newer changes override parent
+selections; null selections prevent an unlinked target from reappearing while
+traversing history. Coverage remains `recorded-targets`: journaled install/uninstall
+targets only. Legacy dist publication does not yet participate, so these are not
+complete whole-deployment snapshots.
 
 Successful publication proceeds as follows:
 
-1. Under the root writer lock, reject unresolved pending work and validate targets.
-2. Copy and flush replacement revisions, retaining existing revisions.
-3. Persist revision records, a candidate snapshot, and the operation journal.
-4. Persist the pending pointer before switching any active links.
-5. Switch links, persist the current snapshot, and durably update the epoch token.
+1. Under the deployment writer lock, reject unresolved pending work and validate targets.
+2. Copy and flush new file/directory payload revisions; an unlink prepares no payload.
+3. Persist target revision records, a candidate snapshot, and the operation journal.
+4. Persist the pending pointer before changing active links.
+5. Replace or unlink targets, persist the current snapshot, and update the epoch token.
 6. Mark the operation committed, then remove the pending pointer.
 
-Prepared but unselected snapshots/revisions may remain after failure. The current
-pointer and its parent chain identify committed selections; merely finding a
-snapshot file is not evidence that it was activated. Journal lookup and pending
-checks do not walk the whole history or read unrelated payload contents.
+Metadata-only runtime-selection changes reference the existing payload while writing
+a new target record. Prepared but unselected records/payloads may remain after
+failure. The current pointer and parent chain identify committed selections. Normal
+uninstall retains inactive payloads; `uninstall --delete` removes revisions only
+after the unlink operation commits.
 
 ## Recovery behavior
 
@@ -112,8 +114,7 @@ or corrupt records block recovery before changes where possible.
 Exceptions, including KeyboardInterrupt, use the same recovery path during journaled
 activation. Failure to restore retains pending state and blocks later mutations.
 The command reports cancellation with exit status 130 after cleanup. Retained
-revisions remain available for inspection. Deletion/quarantine recovery for legacy
-dist is not implemented by this directory publisher.
+revisions remain available for inspection. Journaled package unlinks are recoverable. Legacy dist deletion/quarantine is not yet migrated to this publisher.
 
 Cache replication excludes source lock directories, operation journals, and pending
 state; these are not transferable ownership of work. Consistent cache observation
@@ -133,7 +134,7 @@ Hashio remains optional; no dependency has been added. Snapshot creation does no
 implicitly run hashio or certify unrelated filesystem contents.
 
 Next migrate legacy dist publication and revision selection to the shared publisher,
-replace legacy metadata writes with revision ownership/provenance records, and add
-baseline discovery for existing deployments. Define recoverable deletion using
-retention/quarantine before migrating deletion. Then implement list/status against
-shared metadata, snapshot-aware pruning and rollback, and optional audit integration.
+add explicit adapters/migration for old embedded installer receipts and sibling
+`.dist` records, and define baseline discovery for existing deployments. Then
+implement list/status against central metadata, snapshot-aware pruning and rollback,
+and optional audit integration.

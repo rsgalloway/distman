@@ -29,13 +29,12 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
-"""Compose complete revisions while retaining per-distribution file ownership."""
+"""Read legacy ownership and validate package compatibility and dependencies."""
 
 import json
 import os
-import shutil
 from pathlib import Path, PurePosixPath
-from typing import Dict, Iterable, Iterator, Sequence
+from typing import Dict, Iterable, Iterator
 
 from packaging.markers import default_environment
 from packaging.requirements import Requirement
@@ -43,9 +42,10 @@ from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name, parse_wheel_filename
 
 from distman.install import InstallError
-from distman.install.models import Addition, InstalledArtifact, InstallState
+from distman.install.models import InstalledArtifact, InstallState
 from distman.install.targets import Target
 from distman.inventory import inventory
+from distman.metadata import Store
 
 MANIFEST = ".distman-install.json"
 
@@ -71,6 +71,28 @@ def read_state(destination: Path) -> InstallState:
     :raises InstallError: If ownership metadata is invalid or installed contents differ from the
         receipt.
     """
+    deployment = next(
+        (
+            candidate
+            for candidate in (destination, *destination.parents)
+            if (candidate / ".distman/current.json").is_file()
+        ),
+        None,
+    )
+    if deployment is not None:
+        artifacts = {}
+        for target, record in Store(deployment).target_records().items():
+            if target != destination and destination not in target.parents:
+                continue
+            for owner, artifact in record.get("state", {}).get("artifacts", {}).items():
+                _, _, remainder = owner.partition(":")
+                key, _, _ = remainder.partition(":")
+                key = key or artifact["name"]
+                previous = artifacts.get(key)
+                if previous is not None and previous != artifact:
+                    raise InstallError(f"Inconsistent centralized ownership: {key}")
+                artifacts[key] = artifact
+        return {"schema": 1, "artifacts": artifacts}
     if not os.path.lexists(destination):
         return {"schema": 1, "artifacts": {}}
     if not destination.is_symlink() or not (destination / MANIFEST).is_file():
@@ -98,67 +120,6 @@ def read_state(destination: Path) -> InstallState:
         return state
     except (ValueError, KeyError, TypeError) as exc:
         raise InstallError(f"Invalid ownership metadata in {destination}: {exc}") from exc
-
-
-def compose(destination: Path, staged: Path, additions: Sequence[Addition]) -> InstallState:
-    """Merge all selected wheels in a target, never editing its active revision.
-
-    :param destination: Active managed target to use as the prior revision, if present.
-    :param staged: New temporary directory in which to assemble the complete proposed revision.
-    :param additions: Ownership key, staged payload, selection receipt, and relative prefix for
-        each wheel.
-    :return: Complete receipt written inside the proposed revision.
-    :raises InstallError: If prior integrity validation fails or added paths conflict with other
-        owners.
-    """
-    state = read_state(destination)
-    if destination.exists():
-        shutil.copytree(destination, staged, ignore=shutil.ignore_patterns("__pycache__"))
-    else:
-        staged.mkdir()
-    records = state["artifacts"]
-    # Remove all replaced artifacts first: coordinated upgrades may transfer paths.
-    for key, _, _, _ in additions:
-        previous = records.pop(key, None)
-        if previous:
-            for name in previous["files"]:
-                (staged / name).unlink()
-    # Prune directories left by obsolete files, but never touch unowned content.
-    for path in sorted(staged.rglob("*"), key=lambda p: len(p.parts), reverse=True):
-        if path.is_dir() and not any(path.iterdir()):
-            path.rmdir()
-    owners = {name: key for key, record in records.items() for name in record["files"]}
-    for key, payload, provenance, prefix in additions:
-        if (payload / MANIFEST).exists():
-            raise InstallError(f"Wheel contains reserved metadata path: {MANIFEST}")
-        files = inventory(payload)
-        mapped = {}
-        for name, checksum in files.items():
-            relative = (prefix / name).as_posix()
-            path = staged / relative
-            if relative == MANIFEST or relative in owners or path.exists():
-                raise InstallError(f"File ownership conflict at {destination / relative}")
-            try:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(payload / name, path)
-            except (FileExistsError, IsADirectoryError) as exc:
-                raise InstallError(f"File/directory ownership conflict: {path}") from exc
-            owners[relative] = key
-            mapped[relative] = checksum
-        records[key] = InstalledArtifact(**provenance, files=mapped)
-    (staged / MANIFEST).write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
-    return state
-
-
-def same_state(destination: Path, state: InstallState) -> bool:
-    """Verify active contents and compare their receipt with the proposed revision.
-
-    :param destination: Active managed target whose integrity must still be valid.
-    :param state: Proposed complete revision receipt to compare with the active receipt.
-    :return: True if the destination exists and its verified receipt equals the proposed state.
-    :raises InstallError: If active ownership or file integrity validation fails.
-    """
-    return destination.exists() and read_state(destination) == state
 
 
 def marker_environment(target: Target) -> Dict[str, str]:
@@ -277,18 +238,23 @@ def check_dependencies(records: Iterable[InstalledArtifact], target: Target) -> 
         unknown.
     """
     records = list(records)
-    selected = target_records(records, target)
-    for record in records:
-        if record.get("component") == "scripts" or target.label not in record["targets"]:
-            continue
+    available = [
+        record
+        for record in records
+        if record.get("component") != "scripts" and target.label in record["targets"]
+    ]
+    for record in available:
         tags = parse_wheel_filename(record["wheel"])[3]
         if not tags & target.tags or not SpecifierSet(record["requires_python"]).contains(
             target.compatibility_python, prereleases=True
         ):
             raise InstallError(f"{record['name']} is incompatible with {target.label}")
         for requirement in target_requirements(record, target):
-            dependency = selected.get(canonicalize_name(requirement.name))
-            if dependency is None or not requirement.specifier.contains(
-                dependency["version"], prereleases=True
-            ):
+            candidates = [
+                dependency
+                for dependency in available
+                if dependency["name"] == canonicalize_name(requirement.name)
+                and requirement.specifier.contains(dependency["version"], prereleases=True)
+            ]
+            if not candidates:
                 raise InstallError(f"{record['name']} requires {requirement} for {target.label}")
