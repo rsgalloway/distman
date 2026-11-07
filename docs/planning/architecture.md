@@ -10,7 +10,7 @@ and remaining architectural constraints.
 | `cli.py` | Suite parsing originally imported separate command parsers | Centralized options, parser construction, and dispatch following rhps-ingest |
 | `dist/command.py`, `dist/distribution.py` | Command orchestration and existing Git-aware distribution operations | Replaced `dist.py`; updated internal callers and entry points without an import facade |
 | `source.py` | `Source` loads `dist.json`; `GitRepo` adds repository inspection | Preserved both classes and Git checks |
-| `deployment.py` | Git-independent target publication for install/uninstall | Versions files/directories, journals replacements/unlinks, and restores interrupted publication |
+| `deployment.py` | Git-independent target publication for install/uninstall/undist | Versions files/directories, journals replacements/unlinks, and restores interrupted publication |
 | `operations.py`, `metadata.py`, `recovery.py` | Writer coordination, durable state storage, and explicit recovery | Root lock and pending-operation checks surround command execution |
 | `config.py` | Legacy constants evaluated from the environment at import time | Preserved defaults for existing callers |
 | `install/policy.py` | Optional envstack/pathbase policy mixed into command namespace | Moved to `policy.py`; retained an import compatibility shim |
@@ -385,7 +385,8 @@ writer lock and checks pending recovery state before command execution. Domain
 methods no longer acquire the deployment-root lock themselves. Temporary per-target
 locks remain until the coordinated metadata migration.
 
-The directory publisher used by install/uninstall now persists incremental snapshots
+The directory publisher used by install, uninstall, and undist now persists incremental
+snapshots
 and pre-publication journals, flushes prepared contents and metadata, and inspects
 actual links during rollback. `recover` previews or performs explicit restoration.
 Legacy dist publication still needs migration; its command layer is coordinated but
