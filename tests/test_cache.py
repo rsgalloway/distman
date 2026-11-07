@@ -36,6 +36,8 @@ Contains tests for the cache module.
 import time
 from pathlib import Path
 
+import pytest
+
 from distman import cache, util
 
 
@@ -213,3 +215,23 @@ def test_diff_ignores_pycache(tmp_path, caplog):
 
     diff = cache.diff_trees(src, dst)
     assert diff == 0
+
+
+@pytest.mark.parametrize("same", [False, True])
+def test_legacy_opaque_epoch_diagnostics(same: bool, capsys: pytest.CaptureFixture) -> None:
+    """Legacy UUID epochs retain freshness reporting without timestamp conversion.
+
+    :param same: Whether source and cached epoch tokens match.
+    :param capsys: Captured cache diagnostic output.
+    :return: None.
+    """
+    from distman.cache import print_staleness
+    from distman.logger import setup_logging
+
+    setup_logging(dryrun=True)
+    source = "abcdef0123456789abcdef0123456789"
+    print_staleness(source, source if same else "1234567890", threshold=0)
+    assert (
+        f"cache is {'fresh' if same else 'stale'} (epoch age unavailable)"
+        in capsys.readouterr().out
+    )

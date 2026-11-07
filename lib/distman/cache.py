@@ -53,12 +53,20 @@ STALE_EXIT = 10
 
 
 def _cache_meta_dir(cache_root: Path) -> Path:
-    """Get the .distman metadata directory under cache_root."""
+    """Get the .distman metadata directory under cache_root.
+
+    :param cache_root: Root of the local cache tree.
+    :return: Path of the cache's .distman metadata directory.
+    """
     return cache_root / ".distman"
 
 
 def _last_check_path(cache_root: Path) -> Path:
-    """Get the path to the last_check file under cache metadata."""
+    """Get the path to the last_check file under cache metadata.
+
+    :param cache_root: Root of the local cache tree.
+    :return: Path of the recorded last-check timestamp.
+    """
     return _cache_meta_dir(cache_root) / "last_check"
 
 
@@ -82,14 +90,21 @@ def _ttl_expired(cache_root: Path, ttl: float) -> bool:
 
 
 def _mark_checked(cache_root: Path) -> None:
-    """Mark the current time as the last check time."""
+    """Mark the current time as the last check time.
+
+    :param cache_root: Cache root beneath which the current timestamp should be written.
+    :return: None.
+    """
     p = _last_check_path(cache_root)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(f"{time.time()}\n", encoding="utf-8")
 
 
 def is_windows() -> bool:
-    """Check if the current operating system is Windows."""
+    """Check if the current operating system is Windows.
+
+    :return: True when the host uses Windows filesystem conventions.
+    """
     return os.name == "nt"
 
 
@@ -117,6 +132,8 @@ def ensure_dir(p: Path) -> None:
     """Ensure that directory p exists.
 
     :param p: Directory path to ensure
+
+    :return: None.
     """
     p.mkdir(parents=True, exist_ok=True)
 
@@ -126,6 +143,8 @@ def atomic_replace(src_tmp: Path, dst: Path) -> None:
 
     :param src_tmp: Temporary source file path.
     :param dst: Destination file path.
+
+    :return: None.
     """
     os.replace(src_tmp, dst)
 
@@ -269,6 +288,9 @@ def copy_tree_fallback(src_dir: Path, dst_dir: Path, executor: cf.Executor, resu
     :param src_dir: Source directory.
     :param dst_dir: Destination directory.
     :param executor: Executor to submit copy tasks to.
+
+    :param results: Mutable list to which submitted copy futures are appended.
+    :return: None; tasks are submitted to the supplied executor.
     """
     for root, dirs, files in os.walk(src_dir, followlinks=False):
         root_p = Path(root)
@@ -280,7 +302,7 @@ def copy_tree_fallback(src_dir: Path, dst_dir: Path, executor: cf.Executor, resu
             results.append(executor.submit(copy_file_task, s, d))
 
 
-def diff_sort_key(rel: Path):
+def diff_sort_key(rel: Path) -> Tuple[str, str, int, str, str]:
     """Sort key for diffing paths, prioritizing versioned files.
 
     :param rel: Relative path to analyze.
@@ -404,23 +426,32 @@ def print_staleness(src_epoch: int, dst_epoch: int, threshold: int = config.CACH
     :param src_epoch: Epoch time (ns) of the source tree.
     :param dst_epoch: Epoch time (ns) of the destination tree.
     :param threshold: Threshold in seconds to consider stale.
+
+    :return: None.
     """
     if src_epoch is None:
-        print("missing source epoch file")
+        log.warning("missing source epoch file")
         return
     if dst_epoch is None:
-        print("missing destination epoch file")
+        log.warning("missing destination epoch file")
         return
 
-    age_ns = int(src_epoch) - int(dst_epoch)
+    try:
+        age_ns = int(src_epoch) - int(dst_epoch)
+    except (TypeError, ValueError):
+        # Earlier installer journals used opaque UUIDs as cache change tokens.
+        # Equality still determines freshness, but these tokens have no age.
+        state = "fresh" if src_epoch == dst_epoch else "stale"
+        log.info("cache is %s (epoch age unavailable)", state)
+        return
     age_sec = age_ns / 1e9
 
     # print staleness status (with last update time if stale, epoch is in ns)
     if age_sec > threshold:
         stale_time = datetime.fromtimestamp(int(dst_epoch) / 1e9).strftime("%Y-%m-%d %H:%M:%S")
-        print(f"cache is stale (last update {stale_time})")
+        log.info("cache is stale (last update %s)", stale_time)
     else:
-        print("cache is fresh")
+        log.info("cache is fresh")
 
 
 def cache(
@@ -440,6 +471,13 @@ def cache(
       - Planning phase shows an indeterminate tqdm (Option C).
       - If a referenced version object already exists in cache, skip copying it.
       - No dynamic mutation of file_ops during execution (avoids missed copies).
+
+    :param src_root: Remote/source distribution root to mirror.
+    :param dst_root: Local cache root to create or update.
+    :param workers: Maximum number of concurrent copy worker threads.
+    :param force: If True, recopy existing version objects rather than reusing them.
+    :return: None.
+    :raises SystemExit: If the source root does not exist.
     """
     if not src_root.exists():
         raise SystemExit(f"Source does not exist: {src_root}")
@@ -458,10 +496,20 @@ def cache(
     version_objects: Set[Path] = set()
 
     def _skip_versions_dir(dirs: list) -> None:
+        """Exclude immutable revision storage from active-tree traversal.
+
+        :param dirs: Mutable os.walk directory-name list to filter in place.
+        :return: None.
+        """
         if "versions" in dirs:
             dirs.remove("versions")
 
     def _link_points_into_versions(src_link: Path) -> Optional[Path]:
+        """Resolve a relative active link into sibling revision storage, if present.
+
+        :param src_link: Active symlink whose stored target should be inspected.
+        :return: Path of a referenced sibling revision, or None for other/unreadable links.
+        """
         try:
             target_text = os.readlink(src_link)
         except OSError:
@@ -480,6 +528,15 @@ def cache(
     ) as plan:
         for root, dirs, files in os.walk(src_root, followlinks=False):
             _skip_versions_dir(dirs)
+            # Coordination state belongs to the source, never to its cached replica.
+            if Path(root) == src_root / config.DISTMAN_META_DIR:
+                dirs[:] = [name for name in dirs if name not in ("locks", "operations")]
+                files[:] = [name for name in files if name != "pending.json"]
+            dirs[:] = [
+                name
+                for name in dirs
+                if not (name.startswith(".") and name.endswith(".install-lock"))
+            ]
 
             if util.is_ignorable(root, include_hidden=True):
                 dirs[:] = []
@@ -661,7 +718,11 @@ def cache(
 
 
 def _is_dangerous_cache_root(p: Path) -> bool:
-    """Best-effort guard against nuking the wrong directory."""
+    """Best-effort guard against nuking the wrong directory.
+
+    :param p: Candidate cache root to validate before recursive deletion.
+    :return: True if the path is a filesystem root or too shallow to delete safely.
+    """
     try:
         rp = p.resolve()
     except Exception:
@@ -683,6 +744,8 @@ def delete_cache(cache_root: Path, dryrun: bool = False) -> int:
 
     :param cache_root: Root of the cache directory to delete.
     :param dryrun: If True, only print what would be deleted.
+
+    :return: Zero when the cache is absent, deletion is previewed, or deletion succeeds.
     """
     if not cache_root.exists():
         log.error("cache does not exist")
@@ -710,6 +773,8 @@ def prune_cache(cache_root: Path, dryrun: bool = False) -> int:
 
     :param cache_root: Root of the cache directory to prune.
     :param dryrun: If True, only print what would be pruned.
+
+    :return: Zero after pruning, previewing, or finding no cache to process.
     """
     cache_root = cache_root.resolve()
     if not cache_root.exists():
@@ -719,13 +784,22 @@ def prune_cache(cache_root: Path, dryrun: bool = False) -> int:
     referenced: Set[Path] = set()
 
     def _rel(p: Path) -> str:
-        """Relative path string for ignorable checks."""
+        """Relative path string for ignorable checks.
+
+        :param p: Cache path to express relative to the enclosing cache root.
+        :return: Relative path string, or the original path string if relativization fails.
+        """
         try:
             return str(p.relative_to(cache_root))
         except Exception:
             return str(p)
 
     def _is_under_versions(p: Path) -> bool:
+        """Report whether a cache path lies within revision storage.
+
+        :param p: Cache path to inspect against the enclosing cache root.
+        :return: True if its relative path includes a versions directory component.
+        """
         try:
             rel = p.relative_to(cache_root)
         except Exception:
@@ -822,7 +896,7 @@ def prune_cache(cache_root: Path, dryrun: bool = False) -> int:
 
             # otherwise, prune
             if dryrun:
-                print(f"would prune: {child_abs.relative_to(cache_root)}")
+                log.info("would prune: %s", child_abs.relative_to(cache_root))
                 removed += 1
                 continue
 
@@ -840,76 +914,33 @@ def prune_cache(cache_root: Path, dryrun: bool = False) -> int:
 
 
 def build_parser(prog: str = "cache") -> argparse.ArgumentParser:
-    """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(
-        prog=prog,
-        description="Cross-platform caching with optional diff.",
-        formatter_class=argparse.RawTextHelpFormatter,
-    )
-    parser.add_argument(
-        "--src",
-        default=config.DEPLOY_ROOT,
-        type=Path,
-        help="Source directory",
-    )
-    parser.add_argument(
-        "--dst",
-        default=config.CACHE_ROOT,
-        type=Path,
-        help="Destination directory",
-    )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=min(32, (os.cpu_count() or 8) * 4),
-        help="Copy threads (default: 4x CPU, capped at 32)",
-    )
-    parser.add_argument(
-        "--delete",
-        action="store_true",
-        help="Delete the cache",
-    )
-    parser.add_argument(
-        "-p",
-        "--prune",
-        action="store_true",
-        help="Prune the cache",
-    )
-    parser.add_argument(
-        "--diff",
-        action="store_true",
-        help="Show differences only (no copy)",
-    )
-    parser.add_argument(
-        "-t",
-        "--ttl",
-        type=float,
-        default=config.CACHE_TTL,
-        help="TTL (seconds) for remote epoch checks (0 = always check)",
-    )
-    parser.add_argument(
-        "-f",
-        "--force",
-        action="store_true",
-        help="Force cache even if cache appears fresh (overrides TTL and epoch check)",
-    )
-    parser.add_argument(
-        "-d",
-        "--dryrun",
-        action="store_true",
-        help="Dry run (no changes made)",
-    )
-    return parser
+    """Build the legacy parser through the centralized command-line interface.
+
+    :param prog: Executable name to display in the standalone cache parser.
+    :return: Cache parser supplied by the centralized CLI.
+    """
+    from distman.cli import build_command_parser
+
+    return build_command_parser("cache", prog=prog)
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
-    """Parse arguments for the cache utility."""
+    """Parse arguments for the cache utility.
+
+    :param argv: Optional arguments excluding the executable; None reads sys.argv.
+    :return: Parsed cache command options.
+    """
     parser = build_parser()
     return parser.parse_args(list(argv) if argv is not None else None)
 
 
 def run(args: argparse.Namespace) -> int:
-    """Run the cache utility based on parsed arguments."""
+    """Run the cache utility based on parsed arguments.
+
+    :param args: Parsed cache options controlling paths, freshness checks, and requested
+        operation.
+    :return: Zero for success, STALE_EXIT for a stale dry run, or one for a handled failure.
+    """
 
     src = args.src.resolve()
     dst = args.dst.resolve()
@@ -930,7 +961,7 @@ def run(args: argparse.Namespace) -> int:
     # TTL gate (skip remote checks)
     if not args.dryrun and not args.force:
         if not _ttl_expired(dst, args.ttl):
-            print("cache check skipped (use -t 0 to override TTL)")
+            log.info("cache check skipped (use -t 0 to override TTL)")
             return 0
 
     # check epochs to determine staleness
@@ -977,10 +1008,14 @@ def run(args: argparse.Namespace) -> int:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    """Main entry point for cache utility."""
+    """Main entry point for cache utility.
+
+    :param argv: Optional arguments excluding the executable; None reads sys.argv.
+    :return: Exit status returned by the cache command.
+    """
 
     args = parse_args(argv)
 
-    setup_logging()
+    setup_logging(dryrun=args.dryrun)
 
     return run(args)

@@ -38,6 +38,12 @@ Destination paths use brace-delimited variables:
 }
 ```
 
+The settings below are distman conventions, not requirements imposed by envstack.
+The deployment and cache rows below describe legacy `dist`/`cache` configuration.
+Logging settings apply to every subcommand. `distman install` has
+[its own documented policy loading order and path variables](install.md#destinations),
+including a different standalone fallback root.
+
 Common settings are:
 
 | Variable | Purpose | Default behavior |

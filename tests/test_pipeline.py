@@ -39,7 +39,7 @@ import sys
 
 import pytest
 
-from distman.dist import Target
+from distman.dist.distribution import Target
 from distman.pipeline import (
     ValidationError,
     get_pipeline_for_target,
