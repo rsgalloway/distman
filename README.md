@@ -116,7 +116,7 @@ distman is distributed under the [BSD 3-Clause License](LICENSE).
 
 ### Installing Python distributions
 
-Install the optional dependencies with `pip install "distman[install]"`, then use
+A normal `pip install distman` includes the package-installation dependencies. Use
 `distman install numpy`, `distman install -r requirements.txt`, or
 `distman install ./myapp`. See the [installation guide](docs/install.md)
 for configurable paths, cross-platform wheels, ownership, and current limitations.

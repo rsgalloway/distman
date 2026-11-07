@@ -50,6 +50,7 @@ from distman.install.command import _active_targets
 from distman.install.models import InstalledArtifact
 from distman.install.ownership import check_script_pairs, target_requirements
 from distman.install.targets import Target
+from distman.logger import log
 from distman.metadata import Store, sync_directory
 from distman.operations import operation
 from distman.policy import Policy
@@ -191,10 +192,10 @@ def validate_removal(
                     )
                 pending.extend(retained)
     if blockers and force:
-        print(
-            "WARNING: --force allows removal despite retained dependency requirements:\n"
-            + "\n".join(sorted(blockers))
-            + "\nDependent packages will remain installed and may stop working."
+        log.warning(
+            "WARNING: --force allows removal despite retained dependency requirements:\n%s"
+            "\nDependent packages will remain installed and may stop working.",
+            "\n".join(sorted(blockers)),
         )
     elif blockers:
         raise InstallError(
@@ -250,9 +251,11 @@ def _selection_updates(
             updates[owner] = retained
         else:
             updates[owner] = None
-        print(
-            f"Planned removal: {record['name']}=={record['version']} "
-            f"[{', '.join(sorted(removed))}]"
+        log.info(
+            "Planned removal: %s==%s [%s]",
+            record["name"],
+            record["version"],
+            ", ".join(sorted(removed)),
         )
     return updates
 
@@ -395,7 +398,7 @@ def uninstall(args: argparse.Namespace) -> int:
     """
     selectors = requests(args.packages)
     policy = Policy()
-    print(f"Effective deployment root: {policy.deploy_root}")
+    log.info("Effective deployment root: %s", policy.deploy_root)
     with operation(policy.deploy_root, read_only=args.dryrun):
         store = Store(policy.deploy_root)
         targets, artifacts = _active_targets(store)
@@ -415,13 +418,15 @@ def uninstall(args: argparse.Namespace) -> int:
                 _selected_payloads(store, selectors, args, unlinked) if args.delete else set()
             )
             if args.dryrun:
-                print(
-                    f"Dry run: {len(publications)} target(s), "
-                    f"{len(payloads)} retained payload(s); deployment targets unchanged"
+                log.info(
+                    "Dry run: %d target(s), %d retained payload(s); "
+                    "deployment targets unchanged",
+                    len(publications),
+                    len(payloads),
                 )
                 return 0
             if not publications and not payloads:
-                print("Unchanged: selected packages/runtimes are not installed")
+                log.info("Unchanged: selected packages/runtimes are not installed")
                 return 0
             if not args.yes and not util.yesNo(f"Remove packages from {policy.deploy_root}?"):
                 return 1
@@ -431,5 +436,5 @@ def uninstall(args: argparse.Namespace) -> int:
             message = f"Uninstalled: {len(publications)} target(s)"
             if args.delete:
                 message += f"; deleted {deleted} retained payload(s)"
-            print(message)
+            log.info(message)
     return 0

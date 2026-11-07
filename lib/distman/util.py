@@ -896,20 +896,23 @@ def safe_copytree(src: str, dst: str) -> None:
         shutil.copy2(file, target_path)
 
 
-def yesNo(question: str) -> bool:
-    """Displays question text to user and reads yes/no input.
+def yesNo(question: str, default: Optional[bool] = None) -> bool:
+    """Display a yes/no question and honor an optional empty-input default.
 
-    :param question: question text.
-    :return: True if user answers yes.
+    :param question: Question text shown before the choice indicator.
+    :param default: Value returned for Enter alone; None requires an explicit answer.
+    :return: True for yes and False for no.
     """
+    choice = "[Y/n]" if default is True else "[y/N]" if default is False else "[y/n]"
     while True:
-        answer = input(f"{question} (y/n): ").strip().lower()
+        answer = input(f"{question} {choice}: ").strip().lower()
+        if not answer and default is not None:
+            return default
         if answer in {"y", "yes"}:
             return True
-        elif answer in {"n", "no"}:
+        if answer in {"n", "no"}:
             return False
-        else:
-            print("Please answer 'y' or 'n'.")
+        print("Please answer 'y' or 'n'.")
 
 
 def get_files(start: str, all_files: bool = False) -> List[str]:

@@ -32,12 +32,12 @@
 """Explicit recovery command for interrupted journaled publications."""
 
 import argparse
-import sys
 from pathlib import Path
 
 from distman import util
 from distman.deployment import recover_publication
 from distman.locking import deployment_lock
+from distman.logger import log
 
 
 def recover(args: argparse.Namespace) -> int:
@@ -53,21 +53,21 @@ def recover(args: argparse.Namespace) -> int:
         with deployment_lock(root, dryrun=args.dryrun):
             actions = recover_publication(root, dryrun=True)
             if not actions:
-                print(f"No pending publication at {root}")
+                log.info("No pending publication at %s", root)
                 return 0
             for action in actions:
-                print(f"Planned recovery: {action}")
+                log.info("Planned recovery: %s", action)
             if args.dryrun:
-                print("Dry run: deployment unchanged")
+                log.info("Dry run: deployment unchanged")
                 return 0
             if not args.yes and not util.yesNo(f"Recover publication at {root}?"):
                 return 1
             recover_publication(root)
-            print(f"Recovered publication at {root}")
+            log.info("Recovered publication at %s", root)
             return 0
     except KeyboardInterrupt:
-        print("Recovery canceled; inspect pending publication before continuing", file=sys.stderr)
+        log.error("Recovery canceled; inspect pending publication before continuing")
         return 130
     except (OSError, ValueError) as exc:
-        print(f"Recovery failed: {exc}", file=sys.stderr)
+        log.error("Recovery failed: %s", exc)
         return 1

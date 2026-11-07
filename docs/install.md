@@ -1,11 +1,14 @@
 # Installing Python distributions
 
 `distman install` installs Python packages and local projects into versioned
-deployment directories. Install the optional dependencies first:
+deployment directories. Its runtime dependencies are included by a normal install:
 
 ```bash
-python -m pip install 'distman[install]'
+python -m pip install distman
 ```
+
+The former `distman[install]` extra remains accepted for command and automation
+compatibility, but it is no longer required.
 
 Direct Python installation does not require a catalog recipe. See the
 [package catalog](packages.md) for the planned, separate recipe workflow.
@@ -41,6 +44,10 @@ Packaging metadata means a `pyproject.toml` project/build-system declaration or
 | `-y`, `--yes` | Accept publication without prompting |
 | `-f`, `--force` | Create a revision even when unchanged; also forward force to local `dist` targets |
 | `-v`, `--verbose` | Show pip output |
+
+When publication requires confirmation, the prompt displays `[Y/n]`; press Enter to
+publish or enter `n` to cancel. `--yes` remains useful for noninteractive commands.
+Uninstall and recovery continue to require an explicit answer.
 
 Dry runs still resolve, download, and stage packages. Local builds run on a
 temporary source copy, excluding Git metadata, common virtualenv directories,
@@ -81,6 +88,29 @@ Dependencies require compatible prebuilt wheels. Local projects build on the
 host; native cross-compilation is not provided. Foreign dependency-marker and
 extras resolution is limited, so use tested pinned requirements for complex
 cross-platform installs. `--env` selection is not yet supported.
+
+## Zero-configuration layout
+
+Without `ENVPATH`, a discoverable `distman.env`, or active path overrides, distman
+uses its packaged policy and reports this deployment root before resolving packages:
+
+```text
+~/.local/distman/prod
+```
+
+Pure Python libraries are installed beneath
+`~/.local/distman/prod/tools/lib/python`, their commands beneath
+`~/.local/distman/prod/tools/bin`, and native packages beneath versioned
+package/runtime directories in `~/.local/distman/prod/tools`. Installation does not
+change the current shell. A simple POSIX activation for shared pure packages is:
+
+```bash
+export PYTHONPATH="$HOME/.local/distman/prod/tools/lib/python${PYTHONPATH:+:$PYTHONPATH}"
+export PATH="$HOME/.local/distman/prod/tools/bin:$PATH"
+```
+
+Use an envstack example or studio policy before installing when that personal `prod`
+root is not the intended destination. Always preview a new policy with `--dryrun`.
 
 ## Destinations
 

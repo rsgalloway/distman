@@ -6,13 +6,12 @@ both installation policy and runtime search paths.
 
 | Example | Configuration and layout |
 |---|---|
-| [Flat](https://github.com/rsgalloway/distman/tree/feat/install/examples/flat) | One default.env supplies all settings; distman.env explicitly includes it |
-| [Default](https://github.com/rsgalloway/distman/tree/feat/install/examples/default) | default.env includes tools.env for shared runtime paths and distman.env for installation policy |
-| [NumPy](https://github.com/rsgalloway/distman/tree/feat/install/examples/numpy) | An optional package environment layered over the default example |
+| [Flat](https://github.com/rsgalloway/distman/tree/master/examples/flat) | One default.env supplies all settings; distman.env explicitly includes it |
+| [Default](https://github.com/rsgalloway/distman/tree/master/examples/default) | default.env includes tools.env for shared runtime paths and distman.env for installation policy |
+| [NumPy](https://github.com/rsgalloway/distman/tree/master/examples/numpy) | An optional package environment layered over the default example |
 
-Follow the [example instructions](https://github.com/rsgalloway/distman/blob/feat/install/examples/README.md)
-for preview, installation, import checks, and command execution. These links target
-the feature branch while the examples await merge.
+Follow the [example instructions](https://github.com/rsgalloway/distman/blob/master/examples/README.md)
+for preview, installation, import checks, and command execution.
 
 Both base layouts add the configured shared bin directory to PATH and shared
 library directory to PYTHONPATH. The NumPy stack adds its runtime-specific bin

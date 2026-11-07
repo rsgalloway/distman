@@ -558,9 +558,10 @@ architecture, and Python runtime. Add the scripts directory,
 not TOOLS_ROOT itself, and never export an unresolved artifact template to PATH.
 A matching Python interpreter must still be available to launch the scripts.
 
-Loading distman.env as installation policy does not activate the shell. The current
-repository distman.env adds only `${DEPLOY_ROOT}/bin` and
-`${DEPLOY_ROOT}/lib/python`. The default example's tools.env adds
+Loading distman.env as installation policy does not activate the shell. Distman's
+deployable `env/distman.env` adds only `${DEPLOY_ROOT}/bin` and
+`${DEPLOY_ROOT}/lib/python`. Keeping it outside the repository root prevents source
+checkout discovery from silently selecting that deployment policy. The default example's tools.env adds
 DISTMAN_SHARED_LIB_PATH and DISTMAN_SHARED_BIN_PATH; the flat example carries those
 activation settings in default.env. Installing a package does not add these paths
 to the caller's shell.

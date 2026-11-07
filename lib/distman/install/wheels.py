@@ -62,6 +62,7 @@ from distman.install import InstallError
 from distman.install.models import Provenance
 from distman.install.targets import Target
 from distman.inventory import sha256
+from distman.logger import log
 
 
 @dataclass
@@ -157,7 +158,7 @@ def pip(command: Sequence[str], verbose: bool = False) -> None:
         text=True,
     )
     if verbose or process.returncode:
-        print(process.stdout, end="")
+        log.info(process.stdout.rstrip())
     if process.returncode:
         raise InstallError(process.stderr.strip() or "pip failed")
 

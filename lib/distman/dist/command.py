@@ -74,11 +74,11 @@ def _run(args: argparse.Namespace) -> int:
 
     # validate
     if not os.path.isdir(args.location):
-        print(f"{args.location} is not a directory")
+        log.error("%s is not a directory", args.location)
         return 1
 
     if sum([bool(args.commit), bool(args.number), bool(args.reset)]) > 1:
-        print("--commit,--number and --reset are mutually exclusive")
+        log.error("--commit, --number, and --reset are mutually exclusive")
         return 1
 
     distributor = Distributor()
@@ -121,14 +121,14 @@ def _run(args: argparse.Namespace) -> int:
                 try:
                     target_version = int(args.number)
                 except Exception:
-                    print(f"Invalid version number: {args.number}")
+                    log.error("Invalid version number: %s", args.number)
                     return 2
                 target_commit = ""
             else:
                 target_version = args.number
                 target_commit = args.commit
                 if len(target_commit) < config.LEN_MINHASH:
-                    print(f"Hashes must be at least {config.LEN_MINHASH} characters")
+                    log.error("Hashes must be at least %d characters", config.LEN_MINHASH)
                     return 2
 
             ok = distributor.change_file_version(

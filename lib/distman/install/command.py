@@ -55,6 +55,7 @@ from distman.install.projects import (
 from distman.install.targets import Target, expand_targets
 from distman.install.wheels import acquire, build_project, stage, staged_path
 from distman.inventory import inventory, sha256
+from distman.logger import log
 from distman.metadata import Store
 from distman.operations import operation
 from distman.policy import Policy
@@ -105,7 +106,7 @@ def collect(
                 separate_scripts=False,
             )
             if artifact.name == excluded_name:
-                print(f"Project {artifact.name}: publication is owned by dist.json")
+                log.info("Project %s: publication is owned by dist.json", artifact.name)
                 project_records.append(InstalledArtifact(**provenance, files={}))
                 continue
             # pip may combine config files, environment and requirement-file indexes.
@@ -404,7 +405,7 @@ def plan(
                 )
             proposed_artifacts[owner] = record
             before = old["version"] if old else "absent"
-            print(f"{key}: {before} -> {record['version']} at {boundary}")
+            log.info("%s: %s -> %s at %s", key, before, record["version"], boundary)
 
     by_boundary = defaultdict(list)
     for item in binary_groups:
@@ -436,7 +437,9 @@ def plan(
             state[owner] = record
             proposed_artifacts[owner] = record
             before = previous["version"] if previous else "absent"
-            print(f"{owner.split(':', 2)[1]}: {before} -> {record['version']} at {boundary}")
+            log.info(
+                "%s: %s -> %s at %s", owner.split(":", 2)[1], before, record["version"], boundary
+            )
         target_state = {"artifacts": state}
         if (
             not force
@@ -464,9 +467,9 @@ def install(args: argparse.Namespace) -> int:
     args, project = prepare_arguments(args)
     targets = expand_targets(args.platform, args.arch, args.python)
     policy = Policy()
+    log.info("Effective deployment root: %s", policy.deploy_root)
     if project:
-        print(f"Local project: {project.path}")
-        print(f"Effective deployment root: {policy.deploy_root}")
+        log.info("Local project: %s", project.path)
     with operation(policy.deploy_root, read_only=args.dryrun):
         with tempfile.TemporaryDirectory(prefix="distman-install-") as work:
             temporary = Path(work)
@@ -509,13 +512,13 @@ def install(args: argparse.Namespace) -> int:
             for target in check_targets.values():
                 check_dependencies(records, target)
             if args.dryrun:
-                print(f"Dry run: {len(changes)} target(s); deployment directories unchanged")
+                log.info("Dry run: %d target(s); deployment directories unchanged", len(changes))
                 return 0
             if (changes or project) and not args.yes:
-                if not util.yesNo(f"Publish installation to {policy.deploy_root}?"):
+                if not util.yesNo(f"Publish installation to {policy.deploy_root}?", default=True):
                     return 1
             publish_targets(changes, policy.deploy_root)
-            print(f"Installed: {len(changes)} target(s)")
+            log.info("Installed: %d target(s)", len(changes))
             if project and project.distribution:
                 return distribute_project(project, args, policy.values, dryrun=False)
         return 0

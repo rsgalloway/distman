@@ -15,6 +15,14 @@ distman --version
 
 The `dist` command is a shorthand for `distman dist`.
 
+## Logging
+
+Every subcommand sends its user-facing status and diagnostics through the shared
+logger. Console output is written to stdout and successful non-dry-run commands are
+also recorded in `${LOG_DIR}/distman.log`. `LOG_DIR` defaults to
+`~/log/distman`; `LOG_LEVEL` defaults to `INFO`. Dry runs do not create or append to
+the deployment log.
+
 ## Distribution
 
 ```bash

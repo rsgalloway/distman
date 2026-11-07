@@ -6,7 +6,7 @@
             "destination": "{DEPLOY_ROOT}/bin/%1"
         },
         "env": {
-            "source": "distman.env",
+            "source": "env/distman.env",
             "destination": "{DEPLOY_ROOT}/env/distman.env"
         },
         "lib": {

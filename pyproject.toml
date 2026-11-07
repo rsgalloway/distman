@@ -27,10 +27,6 @@ classifiers = [
 dependencies = [
   "GitPython>=3.1,<4.0",
   "tqdm>=4.67,<5.0",
-]
-
-[project.optional-dependencies]
-install = [
   "pip>=23",
   "packaging>=24",
   "installer>=0.7,<0.8",
@@ -38,6 +34,10 @@ install = [
   "pathbase>=0.2,<0.3",
   "tomli>=2; python_version < '3.11'",
 ]
+
+[project.optional-dependencies]
+# Retained so existing distman[install] installation commands remain valid.
+install = []
 minify = [
   "htmlmin>=0.1,<1.0; python_version < '3.13'",
   "jsmin>=3.0,<4.0",

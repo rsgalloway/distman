@@ -106,6 +106,17 @@ argument/interpreter discovery cases remain separate validation work. See the
 [installation roadmap](install-planning.md) for remaining validation checks and
 unimplemented features.
 
+## Dist and install boundaries
+
+`dist` and `install` are acquisition and planning interfaces over the same deployment
+model. `dist` reads repository-owned filesystem targets, Git state, and transforms;
+`install` resolves Python distributions, dependency metadata, runtime compatibility,
+and generated entrypoints. Both should converge on shared locking, target publication,
+content matching, centralized metadata, recovery, and logging rather than developing
+separate filesystem semantics. A package-provided `.env` file remains ordinary content:
+a future recipe or wheel integration may select and publish it, while envstack remains
+responsible for composing it at runtime.
+
 ## Refactoring direction (proposed)
 
 Review distribution from its responsibilities outward before choosing new module

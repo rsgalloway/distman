@@ -226,7 +226,9 @@ def test_legacy_opaque_epoch_diagnostics(same: bool, capsys: pytest.CaptureFixtu
     :return: None.
     """
     from distman.cache import print_staleness
+    from distman.logger import setup_logging
 
+    setup_logging(dryrun=True)
     source = "abcdef0123456789abcdef0123456789"
     print_staleness(source, source if same else "1234567890", threshold=0)
     assert (

@@ -1145,8 +1145,14 @@ def test_project_requires_confirmation(
     configure_dist(project)
     prompts = []
 
-    def decline(prompt: str) -> bool:
-        """Record the proposed write destination and decline the activation."""
+    def decline(prompt: str, default: Optional[bool] = None) -> bool:
+        """Record the proposed write destination and decline the activation.
+
+        :param prompt: Publication question containing the deployment root.
+        :param default: Suggested response, which should be yes for publication.
+        :return: False to decline the test publication.
+        """
+        assert default is True
         prompts.append(prompt)
         return False
 
@@ -1984,7 +1990,11 @@ def test_parallel_installs_and_dist_share_writer_lock(
                     stderr=subprocess.PIPE,
                 )
                 processes.append(process)
-                assert "Waiting for deployment lock" in process.stderr.readline()
+                while True:
+                    line = process.stdout.readline()
+                    assert line, process.stderr.read()
+                    if "Waiting for deployment lock" in line:
+                        break
         for process in processes:
             output, error = process.communicate(timeout=60)
             assert process.returncode == 0, output + error

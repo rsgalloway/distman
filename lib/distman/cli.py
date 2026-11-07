@@ -49,7 +49,7 @@ from typing import List, Optional
 
 from distman import cache, config
 from distman.dist import command as dist
-from distman.logger import setup_logging
+from distman.logger import log, setup_logging
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -382,13 +382,13 @@ def _run_uninstall(args: argparse.Namespace) -> int:
 
         return uninstall(args)
     except KeyboardInterrupt:
-        print("Operation canceled", file=sys.stderr)
+        log.error("Operation canceled")
         return 130
     except ImportError as exc:
-        print(f"uninstall requires optional dependencies: pip install 'distman[install]' ({exc})")
+        log.error("uninstall dependencies are unavailable: %s", exc)
         return 1
     except (InstallError, OSError, ValueError) as exc:
-        print(f"Uninstall failed: {exc}")
+        log.error("Uninstall failed: %s", exc)
         return 1
 
 
@@ -412,13 +412,13 @@ def _run_install(args: argparse.Namespace) -> int:
 
         return install(args)
     except KeyboardInterrupt:
-        print("Operation canceled", file=sys.stderr)
+        log.error("Operation canceled")
         return 130
     except ImportError as exc:
-        print(f"install requires optional dependencies: pip install 'distman[install]' ({exc})")
+        log.error("install dependencies are unavailable: %s", exc)
         return 1
     except (InstallError, OSError, ValueError) as exc:
-        print(f"Install failed: {exc}")
+        log.error("Install failed: %s", exc)
         return 1
 
 

@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Dict, Iterable, Iterator, Optional
 
 from distman import config
+from distman.logger import has_console_handler, log
 from distman.metadata import durable_directory
 
 
@@ -132,7 +133,10 @@ def deployment_lock(
             break
         except FileExistsError:
             if not announced:
-                print(f"Waiting for deployment lock: {lock}", file=sys.stderr, flush=True)
+                if has_console_handler():
+                    log.warning("Waiting for deployment lock: %s", lock)
+                else:
+                    print(f"Waiting for deployment lock: {lock}", file=sys.stderr, flush=True)
                 announced = True
             if time.monotonic() >= deadline:
                 try:

@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Tuple
 
 from distman.install import InstallError
+from distman.logger import log
 
 
 @dataclass(frozen=True)
@@ -182,8 +183,7 @@ def distribute_project(
         text=True,
     )
     if preflight and result.returncode and result.stdout:
-        print("Project validation failed (dry-run diagnostics):", flush=True)
-        print(result.stdout, end="", flush=True)
+        log.error("Project validation failed (dry-run diagnostics):\n%s", result.stdout.rstrip())
     return result.returncode
 
 

@@ -430,10 +430,10 @@ def print_staleness(src_epoch: int, dst_epoch: int, threshold: int = config.CACH
     :return: None.
     """
     if src_epoch is None:
-        print("missing source epoch file")
+        log.warning("missing source epoch file")
         return
     if dst_epoch is None:
-        print("missing destination epoch file")
+        log.warning("missing destination epoch file")
         return
 
     try:
@@ -442,16 +442,16 @@ def print_staleness(src_epoch: int, dst_epoch: int, threshold: int = config.CACH
         # Earlier installer journals used opaque UUIDs as cache change tokens.
         # Equality still determines freshness, but these tokens have no age.
         state = "fresh" if src_epoch == dst_epoch else "stale"
-        print(f"cache is {state} (epoch age unavailable)")
+        log.info("cache is %s (epoch age unavailable)", state)
         return
     age_sec = age_ns / 1e9
 
     # print staleness status (with last update time if stale, epoch is in ns)
     if age_sec > threshold:
         stale_time = datetime.fromtimestamp(int(dst_epoch) / 1e9).strftime("%Y-%m-%d %H:%M:%S")
-        print(f"cache is stale (last update {stale_time})")
+        log.info("cache is stale (last update %s)", stale_time)
     else:
-        print("cache is fresh")
+        log.info("cache is fresh")
 
 
 def cache(
@@ -896,7 +896,7 @@ def prune_cache(cache_root: Path, dryrun: bool = False) -> int:
 
             # otherwise, prune
             if dryrun:
-                print(f"would prune: {child_abs.relative_to(cache_root)}")
+                log.info("would prune: %s", child_abs.relative_to(cache_root))
                 removed += 1
                 continue
 
@@ -961,7 +961,7 @@ def run(args: argparse.Namespace) -> int:
     # TTL gate (skip remote checks)
     if not args.dryrun and not args.force:
         if not _ttl_expired(dst, args.ttl):
-            print("cache check skipped (use -t 0 to override TTL)")
+            log.info("cache check skipped (use -t 0 to override TTL)")
             return 0
 
     # check epochs to determine staleness
@@ -1016,6 +1016,6 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     args = parse_args(argv)
 
-    setup_logging()
+    setup_logging(dryrun=args.dryrun)
 
     return run(args)
