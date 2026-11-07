@@ -53,6 +53,16 @@ class UndistError(ValueError):
     """A requested target cannot safely be withdrawn."""
 
 
+def _normalize_local_path(value: str) -> str:
+    """Normalize local separators and platform path casing.
+
+    :param value: Local project or source path.
+    :return: Platform-normalized path identity.
+    """
+    value = value.replace("\\", os.sep).replace("/", os.sep)
+    return os.path.normcase(os.path.normpath(value))
+
+
 def _same_origin(first: str, second: str) -> bool:
     """Return whether two receipt origins identify the same project.
 
@@ -66,17 +76,7 @@ def _same_origin(first: str, second: str) -> bool:
     """
     if "://" in first or "://" in second or first.startswith("git@") or second.startswith("git@"):
         return first == second
-
-    def normalize(value: str) -> str:
-        """Normalize local separators and platform path casing.
-
-        :param value: Local project path.
-        :return: Platform-normalized path identity.
-        """
-        value = value.replace("\\", os.sep).replace("/", os.sep)
-        return os.path.normcase(os.path.normpath(value))
-
-    return normalize(first) == normalize(second)
+    return _normalize_local_path(first) == _normalize_local_path(second)
 
 
 def read_receipt(destination: Path) -> Optional[Dict[str, str]]:
@@ -130,7 +130,7 @@ def _add_target(resolved: Dict[Path, str], destination: Path, source: str) -> No
     :raises UndistError: If another source resolves to the same destination.
     """
     previous = resolved.get(destination)
-    if previous is not None and previous != source:
+    if previous is not None and _normalize_local_path(previous) != _normalize_local_path(source):
         raise UndistError(
             f"Ambiguous destination {destination}: selected by {previous} and {source}"
         )
