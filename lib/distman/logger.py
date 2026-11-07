@@ -35,7 +35,9 @@ Contains logging functions and classes.
 
 import logging
 import os
+import sys
 from logging.handlers import RotatingFileHandler
+from typing import Optional
 
 from distman import config
 
@@ -67,7 +69,7 @@ log.addHandler(logging.NullHandler())
 class DryRunFilter(logging.Filter):
     """Filter that removes log records when in dry run mode."""
 
-    def __init__(self, dryrun: bool = False):
+    def __init__(self, dryrun: bool = False) -> None:
         """Initialize the filter.
 
         :param dryrun: dry run flag.
@@ -75,7 +77,7 @@ class DryRunFilter(logging.Filter):
         super().__init__()
         self.dryrun = dryrun
 
-    def filter(self, record: logging.LogRecord):
+    def filter(self, record: logging.LogRecord) -> bool:
         """Filter the log record.
         :param record: log record.
         :return: True if the record should be logged, False otherwise.
@@ -86,7 +88,7 @@ class DryRunFilter(logging.Filter):
 class UserFilter(logging.Filter):
     """Adds the username to the log record."""
 
-    def filter(self, record: logging.LogRecord):
+    def filter(self, record: logging.LogRecord) -> bool:
         """Add the username to the log record.
 
         :param record: log record.
@@ -112,7 +114,7 @@ class UserRotatingFileHandler(RotatingFileHandler):
         backupCount: int = 0,
         encoding: str = None,
         delay: bool = False,
-    ):
+    ) -> None:
         """Initialize the rotating file handler.
 
         :param filename: name of the log file.
@@ -126,17 +128,26 @@ class UserRotatingFileHandler(RotatingFileHandler):
         self.addFilter(UserFilter())
 
 
-def setup_stream_handler(level: int = LOG_LEVEL):
+def has_console_handler() -> bool:
+    """Return whether suite logging currently has a user-facing console handler.
+
+    :return: True when ``setup_logging`` has configured console output.
+    """
+    return any(type(handler) is logging.StreamHandler for handler in log.handlers)
+
+
+def setup_stream_handler(level: int = LOG_LEVEL) -> logging.StreamHandler:
     """Adds a new stdout stream handler.
 
     :param level: log level.
     :return: handler.
     """
-    for h in log.handlers:
-        if h.name == log.name and "StreamHandler" in str(h):
-            del log.handlers[log.handlers.index(h)]
+    for handler in list(log.handlers):
+        if handler.name == log.name and type(handler) is logging.StreamHandler:
+            log.removeHandler(handler)
+            handler.close()
 
-    handler = logging.StreamHandler()
+    handler = logging.StreamHandler(sys.stdout)
     handler.set_name(log.name)
     handler.setLevel(level)
     handler.setFormatter(logging.Formatter("%(message)s"))
@@ -151,7 +162,7 @@ def setup_file_handler(
     level: int = LOG_LEVEL,
     logdir: str = config.LOG_DIR,
     dryrun: bool = False,
-):
+) -> UserRotatingFileHandler:
     """Adds a new rotating file handler.
 
     :param maxBytes: max bytes per file.
@@ -161,9 +172,10 @@ def setup_file_handler(
     :param dryrun: dry run flag.
     :return: handler.
     """
-    for h in log.handlers:
-        if h.name == log.name and "RotatingFileHandler" in str(h):
-            del log.handlers[log.handlers.index(h)]
+    for handler in list(log.handlers):
+        if handler.name == log.name and isinstance(handler, RotatingFileHandler):
+            log.removeHandler(handler)
+            handler.close()
 
     os.makedirs(logdir, exist_ok=True)
     log_file = os.path.join(logdir, "distman.log")
@@ -181,15 +193,26 @@ def setup_file_handler(
     return handler
 
 
-def setup_logging(dryrun: bool = False):
-    """Setup log handlers.
+def setup_logging(dryrun: bool = False, logdir: Optional[str] = None) -> None:
+    """Set up one console handler and an optional rotating deployment log.
 
-    :param dryrun: dry run flag
+    :param dryrun: If True, remove file handlers so previews are never persisted.
+    :param logdir: Optional log-directory override, primarily for embedded callers and tests.
+    :return: None.
     """
     setup_stream_handler()
-
-    if not dryrun:
-        try:
+    file_handlers = [
+        handler for handler in log.handlers if isinstance(handler, RotatingFileHandler)
+    ]
+    if dryrun:
+        for handler in file_handlers:
+            log.removeHandler(handler)
+            handler.close()
+        return
+    try:
+        if logdir is None:
             setup_file_handler()
-        except Exception as err:
-            log.debug("Could not create log file: %s", str(err))
+        else:
+            setup_file_handler(logdir=logdir)
+    except Exception as err:
+        log.debug("Could not create log file: %s", str(err))

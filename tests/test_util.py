@@ -38,6 +38,7 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
@@ -63,6 +64,47 @@ def temp_dir():
     path = tempfile.mkdtemp()
     yield path
     shutil.rmtree(path)
+
+
+@pytest.mark.parametrize(
+    "default,answer,expected,indicator",
+    [
+        (True, "", True, "[Y/n]"),
+        (True, "n", False, "[Y/n]"),
+        (False, "", False, "[y/N]"),
+        (None, "yes", True, "[y/n]"),
+    ],
+)
+def test_yes_no_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+    default: Optional[bool],
+    answer: str,
+    expected: bool,
+    indicator: str,
+) -> None:
+    """Honor empty-input defaults and keep explicit answers authoritative.
+
+    :param monkeypatch: Fixture replacing interactive input.
+    :param default: Suggested response supplied to the helper.
+    :param answer: Simulated user response.
+    :param expected: Expected Boolean result.
+    :param indicator: Choice indicator expected in the prompt.
+    :return: None.
+    """
+    prompts = []
+
+    def respond(prompt: str) -> str:
+        """Capture the prompt and return one simulated response.
+
+        :param prompt: Complete input prompt.
+        :return: Test response.
+        """
+        prompts.append(prompt)
+        return answer
+
+    monkeypatch.setattr("builtins.input", respond)
+    assert util.yesNo("Continue?", default=default) is expected
+    assert indicator in prompts[0]
 
 
 def test_normalize_path():

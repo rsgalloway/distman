@@ -1,21 +1,27 @@
-# CLI Reference
+# Usage
 
 ## Commands
 
-The convenience commands are the primary user-facing interfaces:
-
-```bash
-dist [OPTIONS] [LOCATION]
-distcache [OPTIONS]
-```
-
-The `distman` suite command provides equivalent namespaced interfaces:
+Use the `distman` suite for these operations:
 
 ```bash
 distman dist [OPTIONS] [LOCATION]
 distman cache [OPTIONS]
+distman install [OPTIONS] [REQUIREMENTS...]
+distman uninstall [OPTIONS] PACKAGES...
+distman recover --root PATH [--dryrun] [--yes]
 distman --version
 ```
+
+The `dist` command is a shorthand for `distman dist`.
+
+## Logging
+
+Every subcommand sends its user-facing status and diagnostics through the shared
+logger. Console output is written to stdout and successful non-dry-run commands are
+also recorded in `${LOG_DIR}/distman.log`. `LOG_DIR` defaults to
+`~/log/distman`; `LOG_LEVEL` defaults to `INFO`. Dry runs do not create or append to
+the deployment log.
 
 ## Distribution
 
@@ -77,10 +83,8 @@ matching `%1`, `%2`, etc. placeholders.
 ## Cache Management
 
 ```bash
-distcache [OPTIONS]
+distman cache [OPTIONS]
 ```
-
-`distman cache [OPTIONS]` is equivalent.
 
 | Option | Meaning |
 |---|---|
@@ -97,9 +101,50 @@ distcache [OPTIONS]
 Examples:
 
 ```bash
-distcache --dryrun
-distcache --ttl 0
-distcache --diff
-distcache --prune --dryrun
-distcache --src /studio/apps/prod --dst /var/tmp/apps
+distman cache --dryrun
+distman cache --ttl 0
+distman cache --diff
+distman cache --prune --dryrun
+distman cache --src /studio/apps/prod --dst /var/tmp/apps
 ```
+
+## Python installation
+
+See [Installing Python Distributions](install.md) for runtime selection, optional
+dependencies, path policy, ownership, and activation behavior.
+
+```bash
+distman install numpy
+distman install -r requirements.txt --dryrun
+distman install ./myapp --yes
+```
+
+## Python package removal
+
+```bash
+distman uninstall cowsay --dryrun
+distman uninstall cowsay pygments --yes
+distman uninstall 'numpy==1.24.4' --platform linux --python 3.8
+distman uninstall cowsay --delete
+```
+
+Package names select all installed versions and runtimes in the configured deployment;
+exact version pins and runtime filters narrow that selection. Options are `--platform`,
+`--arch`, `--python`, `-d`/`--dryrun`, `-y`/`--yes`, `-f`/`--force`, and `--delete`.
+`--delete` removes matching inactive payload history and can run after a normal uninstall.
+Force permits broken retained dependencies; ownership and integrity checks still apply. See
+[Removing packages](install.md#removing-packages) for ownership, dependency checks,
+activation limits, and rollback history.
+
+## recover
+
+Recover interrupted journaled install/uninstall publication:
+
+```bash
+distman recover --root PATH [--dryrun] [--yes]
+```
+
+The root is explicit. Preview is read-only; recovery requires the writer lock and
+confirmation unless `--yes` is supplied. Unexpected links or missing prior revisions
+block restoration. This is not a general snapshot rollback command. A canceled
+command returns 130; failed or declined recovery returns 1.

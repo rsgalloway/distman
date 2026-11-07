@@ -94,7 +94,7 @@ The namespaced `distman dist` command provides the same distribution
 interface. Cache a shared deployment locally with:
 
 ```bash
-distcache
+distman cache
 ```
 
 ## Documentation
@@ -103,7 +103,7 @@ Full documentation is available in the [docs](docs/) folder:
 
 - [Getting Started](docs/getting-started.md)
 - [Distribution Configuration](docs/distribution-config.md)
-- [CLI Reference](docs/cli-reference.md)
+- [Usage](docs/usage.md)
 - [Transform Pipelines](docs/transform-pipelines.md)
 - [Local Caching](docs/caching.md)
 
@@ -113,3 +113,10 @@ workflow.
 ## License
 
 distman is distributed under the [BSD 3-Clause License](LICENSE).
+
+### Installing Python distributions
+
+A normal `pip install distman` includes the package-installation dependencies. Use
+`distman install numpy`, `distman install -r requirements.txt`, or
+`distman install ./myapp`. See the [installation guide](docs/install.md)
+for configurable paths, cross-platform wheels, ownership, and current limitations.
