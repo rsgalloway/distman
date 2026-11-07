@@ -380,11 +380,11 @@ def publish_targets(publications: Iterable[TargetPublication], deploy_root: Path
         return
     identifier = uuid.uuid4().hex
     previous_snapshot = store.current()
-    history = list(store.target_history_records().values())
     prepared = []
     selections: Dict[str, Optional[str]] = {}
     for value in values:
         destination = value.destination
+        target_path = _record_path(destination, store.root)
         previous = observed_link(destination)
         if previous is not None and not (destination.parent / previous).exists():
             raise RecoveryRequired(f"Previous revision is missing: {destination}")
@@ -400,12 +400,7 @@ def publish_targets(publications: Iterable[TargetPublication], deploy_root: Path
             link = previous
         else:
             reserved = []
-            for record in history:
-                recorded_destination = Path(record["destination"])
-                if not recorded_destination.is_absolute():
-                    recorded_destination = store.root / recorded_destination
-                if recorded_destination != destination:
-                    continue
+            for record in store.target_revision_records(target_path).values():
                 payload = Path(record["payload"])
                 reserved.append(payload if payload.is_absolute() else store.root / payload)
             revision = prepare_revision(value.source, destination, value.reuse, reserved)
@@ -418,7 +413,6 @@ def publish_targets(publications: Iterable[TargetPublication], deploy_root: Path
                 "allow_absent": platform.system() == "Windows",
             }
         )
-        target_path = _record_path(destination, store.root)
         if revision is None:
             selections[target_path] = None
             continue

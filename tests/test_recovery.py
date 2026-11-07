@@ -325,6 +325,55 @@ def test_invalid_pending_metadata_blocks_operations(tmp_path: Path) -> None:
         assert (metadata / "pending.json").exists()
 
 
+def test_revision_allocation_reads_only_affected_target_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Allocate revisions without loading unrelated snapshot-history records.
+
+    :param tmp_path: Isolated deployment and staged-source root.
+    :param monkeypatch: Fixture rejecting the former global-history scan.
+    :return: None.
+    """
+    root = tmp_path / "deployment"
+    publications = []
+    for name in ("library", "scripts"):
+        source = tmp_path / f"{name}-initial"
+        source.write_text("initial")
+        publications.append(deployment.TargetPublication(root / name, source))
+    deployment.publish_targets(publications, root)
+
+    def reject_global_history(self: Store) -> dict:
+        """Fail if allocation traverses the global snapshot history.
+
+        :param self: Deployment metadata store.
+        :return: Never returns.
+        :raises AssertionError: Always.
+        """
+        raise AssertionError("global history scan")
+
+    original = Store.target_revision_records
+    selected = []
+
+    def record_target(self: Store, target: str) -> dict:
+        """Record the indexed target and delegate to the real reader.
+
+        :param self: Deployment metadata store.
+        :param target: Recorded target path selected for allocation.
+        :return: Validated revision records for that target.
+        """
+        selected.append(target)
+        return original(self, target)
+
+    monkeypatch.setattr(Store, "target_history_records", reject_global_history)
+    monkeypatch.setattr(Store, "target_revision_records", record_target)
+    updated = tmp_path / "library-updated"
+    updated.write_text("updated")
+    deployment.publish_targets([deployment.TargetPublication(root / "library", updated)], root)
+    assert selected == ["library"]
+    assert (root / "library").read_text() == "updated"
+    assert (root / "scripts").read_text() == "initial"
+
+
 def test_reserved_versions_target_is_rejected_before_publication(tmp_path: Path) -> None:
     """Reject a target that would occupy its own revision-storage directory.
 

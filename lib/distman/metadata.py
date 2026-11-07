@@ -31,6 +31,7 @@
 
 """Durable JSON records for incremental publication history and recovery."""
 
+import hashlib
 import json
 import os
 import re
@@ -272,6 +273,38 @@ class Store:
             ):
                 raise RecoveryRequired(f"Invalid target revision: {reference}")
             records[reference] = record
+        return records
+
+    def target_revision_records(self, target: str) -> dict:
+        """Read revision records belonging to one recorded deployment target.
+
+        Target revision directories form a durable per-target allocation index.
+        Records remain present after payload deletion, so callers can reserve old
+        revision identities without traversing the global snapshot history.
+
+        :param target: Root-relative or absolute target path stored in revision records.
+        :return: Revision-record paths mapped to validated revision dictionaries.
+        :raises RecoveryRequired: If a target revision record is invalid.
+        """
+        identifier = hashlib.sha256(target.encode()).hexdigest()
+        directory = self.directory / f"targets/{identifier}/revisions"
+        if not directory.exists():
+            return {}
+        records = {}
+        for path in sorted(directory.glob("*.json")):
+            if re.fullmatch(r"[0-9a-f]{32}\.json", path.name) is None:
+                raise RecoveryRequired(f"Invalid target revision filename: {path}")
+            relative = path.relative_to(self.directory).as_posix()
+            record = self.read(relative)
+            payload = record.get("payload") if record is not None else None
+            if (
+                record is None
+                or record.get("destination") != target
+                or not isinstance(payload, str)
+                or (not Path(payload).is_absolute() and ".." in Path(payload).parts)
+            ):
+                raise RecoveryRequired(f"Invalid target revision: {relative}")
+            records[relative] = record
         return records
 
     def target_records(self) -> dict:
