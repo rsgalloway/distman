@@ -12,9 +12,9 @@ and remaining architectural constraints.
 | `source.py` | `Source` loads `dist.json`; `GitRepo` adds repository inspection | Preserved both classes and Git checks |
 | `deployment.py` | Git-independent target publication for install/uninstall/undist | Versions files/directories, journals replacements/unlinks, and restores interrupted publication |
 | `operations.py`, `metadata.py`, `recovery.py` | Writer coordination, durable state storage, and explicit recovery | Root lock and pending-operation checks surround command execution |
-| `config.py` | Legacy constants evaluated from the environment at import time | Preserved defaults for existing callers |
+| `config.py` | Compatibility constants and generic settings | Deployment defaults now come from the shared packaged policy |
 | `install/policy.py` | Optional envstack/pathbase policy mixed into command namespace | Moved to `policy.py`; retained an import compatibility shim |
-| `resources/install.env` | Packaged fallback policy, formerly install/defaults.env | Configuration moved out of command implementation |
+| `resources/distman.env` | Packaged deployment fallback for all commands | One baseline with discoverable user overrides |
 | `install/wheels.py` | pip resolution, wheel inspection, build, and staging | Typed artifacts and provenance; stages shared platform launchers |
 | `install/ownership.py` | Package compatibility and dependency validation | Central records are primary; legacy embedded receipt reads remain transitional |
 | `inventory.py`, `locking.py` | Generic SHA-256 inventory and writer coordination | No package acquisition dependencies; deployment-root locks with transitional target locks |

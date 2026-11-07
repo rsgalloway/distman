@@ -48,7 +48,7 @@ Validation evidence and remaining tooling work:
 
 - [x] Build a wheel and install `distman[install]` into a clean Python 3.8 environment
   outside the checkout, using released envstack 1.0.5 and pathbase 0.2.0. Verify
-  imports come from site-packages, the packaged install.env is present, pip check
+  imports come from site-packages, the packaged distman.env is present, pip check
   passes, and dist/distman entry points load without checkout paths.
 - [x] From that wheel installation, preview and install Pygments 2.19.2 using the
   packaged fallback policy and an isolated DEPLOY_ROOT. Verify imports, distribution

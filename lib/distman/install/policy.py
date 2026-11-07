@@ -29,7 +29,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
-"""Compatibility import for installer policy, now owned by configuration."""
+"""Compatibility import for deployment policy, now owned by configuration."""
 
 from distman.policy import Policy
 

@@ -16,6 +16,14 @@ distman --version
 
 The `dist` command is a shorthand for `distman dist`.
 
+## Deployment policy
+
+`dist`, `undist`, `install`, and `uninstall` resolve deployment paths from the same
+policy. The packaged `distman/resources/distman.env` defaults to
+`${HOME}/.local/distman/${ENV}`. A `distman.env` on `ENVPATH` and active path variables
+override that baseline for every command. See [Installing Python
+Distributions](install.md#destinations) for the variables and a copyable policy.
+
 ## Logging
 
 Every subcommand sends its user-facing status and diagnostics through the shared

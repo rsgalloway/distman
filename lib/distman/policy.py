@@ -44,10 +44,10 @@ from distman.install import InstallError
 
 
 class Policy:
-    """Resolved installation paths, with active tier overrides taking precedence."""
+    """Resolved deployment paths, with active environment overrides taking precedence."""
 
     def __init__(self) -> None:
-        """Load packaged defaults and optional studio policy without leaking state.
+        """Load packaged defaults and optional user policy without leaking state.
 
         :raises ImportError: If the optional envstack or pathbase integration is unavailable.
         """
@@ -61,7 +61,7 @@ class Policy:
 
             os.environ.clear()
             os.environ.update(active)
-            values = load_environ(str(Path(__file__).parent / "resources" / "install.env"))
+            values = load_environ(str(Path(__file__).parent / "resources" / "distman.env"))
             values.update(load_environ("distman", ignore_missing=True))
             values.setdefault(
                 "HOME", active.get("HOME") or active.get("USERPROFILE") or str(Path.home())
