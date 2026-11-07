@@ -228,6 +228,52 @@ class Store:
                 self.validate_id(identifier)
         return selections
 
+    def target_history_records(self) -> dict:
+        """Read every target revision referenced by the current snapshot history.
+
+        :return: Revision-record paths mapped to validated revision dictionaries.
+        :raises RecoveryRequired: If the snapshot chain or a revision record is invalid.
+        """
+        identifier = self.current()
+        references = set()
+        visited = set()
+        while identifier is not None:
+            if identifier in visited:
+                raise RecoveryRequired("Cyclic deployment snapshot history")
+            visited.add(identifier)
+            snapshot = self.read(f"snapshots/{identifier}.json")
+            if snapshot is None or snapshot.get("id") != identifier:
+                raise RecoveryRequired(f"Missing or mismatched snapshot: {identifier}")
+            changes = snapshot.get("changes")
+            if not isinstance(changes, dict):
+                raise RecoveryRequired(f"Invalid deployment snapshot: {identifier}")
+            references.update(reference for reference in changes.values() if reference is not None)
+            identifier = snapshot.get("parent")
+            if identifier is not None:
+                self.validate_id(identifier)
+        records = {}
+        for reference in references:
+            if (
+                not isinstance(reference, str)
+                or re.fullmatch(r"targets/[0-9a-f]{64}/revisions/[0-9a-f]{32}\.json", reference)
+                is None
+            ):
+                raise RecoveryRequired(f"Invalid target revision reference: {reference!r}")
+            record = self.read(reference)
+            if record is None:
+                raise RecoveryRequired(f"Missing target revision: {reference}")
+            destination = record.get("destination")
+            payload = record.get("payload")
+            if (
+                not isinstance(destination, str)
+                or not isinstance(payload, str)
+                or (not Path(destination).is_absolute() and ".." in Path(destination).parts)
+                or (not Path(payload).is_absolute() and ".." in Path(payload).parts)
+            ):
+                raise RecoveryRequired(f"Invalid target revision: {reference}")
+            records[reference] = record
+        return records
+
     def target_records(self) -> dict:
         """Read active centralized target revision records.
 

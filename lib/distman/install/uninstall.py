@@ -33,6 +33,7 @@
 
 import argparse
 import copy
+import os
 import re
 import shutil
 import tempfile
@@ -42,7 +43,7 @@ from typing import Dict, Iterable, List, Optional, Set, Tuple
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
-from distman import config, util
+from distman import util
 from distman.deployment import TargetPublication, publish_targets
 from distman.install import InstallError
 from distman.install.command import _active_targets
@@ -310,23 +311,78 @@ def _plan_targets(
     return publications, unlinked
 
 
-def _delete_history(destinations: Iterable[Path]) -> None:
-    """Delete retained payload revisions for fully unlinked targets.
+def _selected_payloads(
+    store: Store,
+    selectors: List[Requirement],
+    args: argparse.Namespace,
+    releasing: Iterable[Path] = (),
+) -> Set[Path]:
+    """Find inactive retained payloads wholly owned by selected packages and runtimes.
 
-    :param destinations: Targets unlinked by the completed operation.
-    :return: None.
+    :param store: Deployment metadata store containing target history.
+    :param selectors: Package names and optional exact versions to delete.
+    :param args: Optional platform, architecture, and Python filters.
+    :param releasing: Active destinations that this operation will unlink.
+    :return: Retained payload paths safe to delete after publication.
+    :raises InstallError: If a runtime filter is invalid.
+    :raises RecoveryRequired: If deployment history is invalid.
+    """
+    released = {Path(path) for path in releasing}
+    active_payloads = set()
+    for destination, record in store.target_records().items():
+        if destination in released:
+            continue
+        payload = Path(record["payload"])
+        active_payloads.add(payload if payload.is_absolute() else store.root / payload)
+    selected = set()
+    for record in store.target_history_records().values():
+        state = record.get("state", {})
+        artifacts = state.get("artifacts", {}) if isinstance(state, dict) else {}
+        if not isinstance(artifacts, dict) or not artifacts:
+            continue
+        matches = []
+        for artifact in artifacts.values():
+            if not isinstance(artifact, dict):
+                matches.append(False)
+                continue
+            package_match = any(
+                canonicalize_name(selector.name) == artifact.get("name")
+                and selector.specifier.contains(artifact.get("version", ""), prereleases=True)
+                for selector in selectors
+            )
+            labels = runtime_labels(args, [artifact]) if package_match else set()
+            matches.append(package_match and labels == set(artifact.get("targets", [])))
+        if not matches or not all(matches):
+            continue
+        payload = Path(record["payload"])
+        if not payload.is_absolute():
+            payload = store.root / payload
+        if payload not in active_payloads and os.path.lexists(payload):
+            selected.add(payload)
+    return selected
+
+
+def _delete_history(payloads: Iterable[Path]) -> int:
+    """Delete selected inactive payload revisions.
+
+    :param payloads: Exact retained revision files or directories to remove.
+    :return: Number of payload revisions removed.
     :raises OSError: If retained payloads cannot be removed.
     """
-    for destination in destinations:
-        versions = destination.parent / config.DIR_VERSIONS
-        if not versions.is_dir():
+    removed = 0
+    parents = set()
+    for payload in sorted(set(payloads)):
+        if payload.is_dir() and not payload.is_symlink():
+            shutil.rmtree(payload)
+        elif payload.exists() or payload.is_symlink():
+            payload.unlink()
+        else:
             continue
-        for revision in versions.glob(destination.name + ".*"):
-            if revision.is_dir() and not revision.is_symlink():
-                shutil.rmtree(revision)
-            else:
-                revision.unlink()
-        sync_directory(versions)
+        parents.add(payload.parent)
+        removed += 1
+    for parent in parents:
+        sync_directory(parent)
+    return removed
 
 
 def uninstall(args: argparse.Namespace) -> int:
@@ -355,16 +411,25 @@ def uninstall(args: argparse.Namespace) -> int:
         validate_removal(records, list(proposed.values()), force=args.force)
         with tempfile.TemporaryDirectory(prefix="distman-uninstall-") as work:
             publications, unlinked = _plan_targets(targets, updates, Path(work))
+            payloads = (
+                _selected_payloads(store, selectors, args, unlinked) if args.delete else set()
+            )
             if args.dryrun:
-                print(f"Dry run: {len(publications)} target(s); deployment targets unchanged")
+                print(
+                    f"Dry run: {len(publications)} target(s), "
+                    f"{len(payloads)} retained payload(s); deployment targets unchanged"
+                )
                 return 0
-            if not publications:
+            if not publications and not payloads:
                 print("Unchanged: selected packages/runtimes are not installed")
                 return 0
             if not args.yes and not util.yesNo(f"Remove packages from {policy.deploy_root}?"):
                 return 1
-            publish_targets(publications, policy.deploy_root)
+            if publications:
+                publish_targets(publications, policy.deploy_root)
+            deleted = _delete_history(payloads) if args.delete else 0
+            message = f"Uninstalled: {len(publications)} target(s)"
             if args.delete:
-                _delete_history(unlinked)
-            print(f"Uninstalled: {len(publications)} target(s)")
+                message += f"; deleted {deleted} retained payload(s)"
+            print(message)
     return 0

@@ -117,11 +117,13 @@ distman install ./myapp --yes
 distman uninstall cowsay --dryrun
 distman uninstall cowsay pygments --yes
 distman uninstall 'numpy==1.24.4' --platform linux --python 3.8
+distman uninstall cowsay --delete
 ```
 
 Package names select all installed versions and runtimes in the configured deployment;
 exact version pins and runtime filters narrow that selection. Options are `--platform`,
-`--arch`, `--python`, `-d`/`--dryrun`, `-y`/`--yes`, and `-f`/`--force`.
+`--arch`, `--python`, `-d`/`--dryrun`, `-y`/`--yes`, `-f`/`--force`, and `--delete`.
+`--delete` removes matching inactive payload history and can run after a normal uninstall.
 Force permits broken retained dependencies; ownership and integrity checks still apply. See
 [Removing packages](install.md#removing-packages) for ownership, dependency checks,
 activation limits, and rollback history.

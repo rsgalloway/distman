@@ -399,7 +399,9 @@ def plan(
                     and existing.get("state") == state
                 ):
                     continue
-                publications[destination] = TargetPublication(destination, source, state)
+                publications[destination] = TargetPublication(
+                    destination, source, state, reuse=not force
+                )
             proposed_artifacts[owner] = record
             before = old["version"] if old else "absent"
             print(f"{key}: {before} -> {record['version']} at {boundary}")
@@ -443,7 +445,7 @@ def plan(
             and existing.get("state") == target_state
         ):
             continue
-        publications[boundary] = TargetPublication(boundary, staged, target_state)
+        publications[boundary] = TargetPublication(boundary, staged, target_state, reuse=not force)
 
     return list(publications.values()), list(proposed_artifacts.values())
 

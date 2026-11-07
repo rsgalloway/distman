@@ -68,12 +68,14 @@ class TargetPublication:
     :param source: Prepared file or directory to publish; None keeps the current payload.
     :param state: Optional centralized ownership/provenance data for this target revision.
     :param delete: If True, unlink the active target without deleting retained revisions.
+    :param reuse: If True, select an identical retained payload instead of copying it again.
     """
 
     destination: Path
     source: Optional[Path] = None
     state: Optional[Dict[str, Any]] = None
     delete: bool = False
+    reuse: bool = True
 
 
 def get_version_dest(dest: str, version_num: int, short_head: Optional[str]) -> str:
@@ -120,16 +122,25 @@ def replace_link(destination: Union[str, Path], target: Union[str, Path]) -> Non
             temporary.unlink()
 
 
-def prepare_revision(source: Path, destination: Path) -> Path:
+def prepare_revision(source: Path, destination: Path, reuse: bool = True) -> Path:
     """Copy one file or directory before exposing a complete numbered revision.
 
     :param source: Complete staged file or directory to copy without normalization.
     :param destination: Active destination used to select the next sibling revision.
+    :param reuse: Return the newest identical retained revision when available.
     :return: Path of the completed, inactive revision.
     :raises OSError: If the staged content cannot be copied or renamed.
     """
     destination = Path(destination)
     versions = util.get_file_versions(str(destination))
+    if reuse:
+        source_inventory = _payload_inventory(source)
+        for candidate, _, _ in reversed(versions):
+            path = Path(candidate)
+            if path.is_dir() != source.is_dir():
+                continue
+            if _payload_inventory(path) == source_inventory:
+                return path
     number = versions[-1][1] + 1 if versions else 0
     revision = Path(get_version_dest(str(destination), number, None))
     durable_directory(revision.parent)
@@ -317,6 +328,7 @@ def publish_targets(publications: Iterable[TargetPublication], deploy_root: Path
             Path(value.source) if value.source is not None else None,
             value.state,
             value.delete,
+            value.reuse,
         )
         for value in publications
     ]
@@ -360,7 +372,7 @@ def publish_targets(publications: Iterable[TargetPublication], deploy_root: Path
             revision = destination.parent / previous
             link = previous
         else:
-            revision = prepare_revision(value.source, destination)
+            revision = prepare_revision(value.source, destination, value.reuse)
             link = os.path.relpath(revision, destination.parent)
         prepared.append(
             {

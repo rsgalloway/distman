@@ -337,9 +337,10 @@ installed runtime, not the host defaults.
 
 Normal uninstall removes the selected package's active links and records null target
 selections in the deployment journal. Retained payloads under sibling `versions/`
-directories remain available for audit or later recovery work. `--delete` also removes
-those retained payload revisions for targets fully unlinked by this operation. It does
-not delete unrelated package history. Shared container directories remain in place.
+directories remain available for audit or later relinking. `--delete` also removes the
+selected package's inactive retained payloads. It may be supplied during uninstall or
+run later after a normal uninstall. It does not delete active payloads or unrelated
+package history. Shared container directories remain in place.
 
 For partial runtime removal, common library targets remain active while their central
 runtime selection is updated. Generated Windows or POSIX launchers are unlinked when
@@ -359,7 +360,9 @@ completed deletion.
 
 Each installed target is copied to a numbered sibling under `versions/`, then its
 active symlink is created or replaced. Shared library and bin directories themselves
-are not versioned. Unchanged targets create no new payload revision unless forced.
+are not versioned. Installation reuses the newest retained revision whose hashes and
+modes match the staged target, including when recreating a link after uninstall.
+Unchanged targets create no new payload revision unless forced.
 Upgrades replace only the selected distribution's targets and reject ownership
 collisions, modified payloads, missing targets, and active links that differ from the
 central snapshot.

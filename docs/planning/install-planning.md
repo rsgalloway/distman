@@ -121,7 +121,8 @@ Implementation and acceptance work:
 
 `distman uninstall` is implemented. Normal removal unlinks the selected package's
 individual targets and records null selections while retaining numbered payloads.
-`--delete` additionally removes retained payload revisions for fully unlinked targets.
+`--delete` additionally removes matching inactive payload revisions, either during
+removal or as a later cleanup after the active links have already been removed.
 Exact package pins and runtime filters narrow selection; dependency checks protect
 retained consumers unless `--force` is explicit. Partial shared-runtime removal keeps
 library targets and removes generated launcher forms only when no retained platform

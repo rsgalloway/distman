@@ -547,6 +547,7 @@ def command_wheel(
     version: str = "1.0",
     command: Optional[str] = "sample-cli",
     tag: str = "py3-none-any",
+    entrypoint: Optional[str] = None,
 ) -> Path:
     """Create a wheel with an optional console entrypoint for publication tests.
 
@@ -555,12 +556,13 @@ def command_wheel(
     :param version: Upstream wheel version.
     :param command: Generated command name, or None to remove commands on upgrade.
     :param tag: Wheel compatibility tag.
+    :param entrypoint: Optional import target used to make generated launcher bytes differ.
     :return: Created wheel archive.
     """
     files = {f"{name}.py": f"def main():\n    print({version!r})\n".encode()}
     if command:
         files[f"{name}-{version}.dist-info/entry_points.txt"] = (
-            f"[console_scripts]\n{command} = {name}:main\n"
+            f"[console_scripts]\n{command} = {entrypoint or f'{name}:main'}\n"
         ).encode()
     return wheel(directory, name, version, tag, files=files)
 
@@ -631,7 +633,7 @@ def test_script_activation_failure_restores_libraries(
     library, scripts = root / "tools/lib/python", root / "tools/bin"
     library_target, script_target = library / "sample.py", scripts / "sample-cli"
     initial = (os.readlink(library_target), os.readlink(script_target))
-    command_wheel(wheels, version="2.0")
+    command_wheel(wheels, version="2.0", entrypoint="sample:main2")
     replace = deployment.replace_link
 
     def fail_bin(destination: Path, target: Path) -> None:
@@ -760,7 +762,7 @@ def test_mismatched_shared_revisions_fail_before_publication(
     library, scripts = root / "tools/lib/python", root / "tools/bin"
     library_target, script_target = library / "sample.py", scripts / "sample-cli"
     old_bin = os.readlink(script_target)
-    command_wheel(wheels, version="2.0")
+    command_wheel(wheels, version="2.0", entrypoint="sample:main2")
     assert invoke(wheels, "sample==2.0") == 0
     deployment.replace_link(script_target, old_bin)
     before = (os.readlink(library_target), os.readlink(script_target))
@@ -860,6 +862,7 @@ def test_failed_copy_never_activates_partial_revision(
         (destination / "one").write_bytes(b"partial")
         raise OSError("copy failed")
 
+    (source / "one").write_bytes(b"updated")
     monkeypatch.setattr(shutil, "copytree", broken_copy)
     with pytest.raises(OSError, match="copy failed"):
         deployment.publish_directories([(source, destination)], tmp_path)
@@ -1487,10 +1490,37 @@ def test_uninstall_shared_package_history_and_idempotency(
     assert not library.is_symlink() and not scripts.is_symlink()
 
 
-def test_uninstall_delete_removes_unlinked_payload_history(installation: Tuple[Path, Path]) -> None:
-    """Delete retained revisions only when explicitly requested.
+def test_reinstall_reuses_unlinked_payload_history(installation: Tuple[Path, Path]) -> None:
+    """Relink identical retained targets without creating duplicate revisions.
 
     :param installation: Isolated deployment root and offline wheelhouse.
+    :return: None.
+    """
+    root, wheels = installation
+    command_wheel(wheels)
+    assert invoke(wheels, "sample") == 0
+    library, scripts = root / "tools/lib/python", root / "tools/bin"
+    targets = [
+        library / "sample.py",
+        library / "sample-1.0.dist-info",
+        scripts / "sample-cli",
+    ]
+    payloads = [target.resolve() for target in targets]
+    assert remove("sample") == 0
+    assert all(not target.exists() for target in targets)
+    assert invoke(wheels, "sample") == 0
+    assert [target.resolve() for target in targets] == payloads
+    assert all(len(util.get_file_versions(str(target))) == 1 for target in targets)
+
+
+@pytest.mark.parametrize("previous_uninstall", [False, True])
+def test_uninstall_delete_removes_unlinked_payload_history(
+    installation: Tuple[Path, Path], previous_uninstall: bool
+) -> None:
+    """Delete retained revisions during removal or after a prior unlink operation.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :param previous_uninstall: Whether payload deletion follows an earlier normal uninstall.
     :return: None.
     """
     root, wheels = installation
@@ -1503,11 +1533,15 @@ def test_uninstall_delete_removes_unlinked_payload_history(installation: Tuple[P
         (scripts / "sample-cli").resolve(),
     ]
     assert all(path.exists() for path in payloads)
+    if previous_uninstall:
+        assert remove("sample") == 0
+        assert all(path.exists() for path in payloads)
     assert remove("sample", "--delete") == 0
     assert all(not path.exists() for path in payloads)
     assert not (library / "sample.py").exists()
     assert not (library / "sample-1.0.dist-info").exists()
     assert not (scripts / "sample-cli").exists()
+    assert remove("sample", "--delete") == 0
 
 
 @pytest.mark.parametrize("host_architecture", ["x86_64", "arm64"])
