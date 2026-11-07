@@ -872,6 +872,40 @@ def test_failed_copy_never_activates_partial_revision(
     assert not list((tmp_path / "versions").glob("*.staging"))
 
 
+def test_file_revision_uses_writable_descriptor_for_flush(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Open standalone staging files read/write so Windows permits fsync.
+
+    :param tmp_path: Temporary deployment and staged-source root.
+    :param monkeypatch: Fixture intercepting opens of private staging files.
+    :return: None.
+    """
+    source = tmp_path / "source.txt"
+    source.write_text("payload")
+    destination = tmp_path / "target.txt"
+    original = Path.open
+    modes = []
+
+    def record_open(path: Path, mode: str = "r", *args: object, **kwargs: object) -> Any:
+        """Record private staging descriptor modes and delegate the open.
+
+        :param path: File being opened.
+        :param mode: Requested descriptor mode.
+        :param args: Additional positional arguments for ``Path.open``.
+        :param kwargs: Additional keyword arguments for ``Path.open``.
+        :return: Open file object from the original implementation.
+        """
+        if path.name.endswith(".staging"):
+            modes.append(mode)
+        return original(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", record_open)
+    revision = deployment.prepare_revision(source, destination)
+    assert revision.read_text() == "payload"
+    assert modes == ["r+b"]
+
+
 def make_project(directory: Path, requires: Sequence[str] = ()) -> Path:
     """Create an offline PEP 517 project whose backend returns a fixture wheel."""
     directory.mkdir()

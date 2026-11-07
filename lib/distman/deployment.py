@@ -151,8 +151,7 @@ def prepare_revision(source: Path, destination: Path, reuse: bool = True) -> Pat
             flush_payload(temporary)
         else:
             shutil.copy2(source, temporary)
-            with temporary.open("rb") as stream:
-                os.fsync(stream.fileno())
+            flush_file(temporary)
         os.rename(temporary, revision)
         sync_directory(revision.parent)
     finally:
@@ -174,18 +173,29 @@ def flush_payload(directory: Path) -> None:
         for name in files:
             path = Path(root) / name
             if not path.is_symlink():
-                # Windows requires a writable descriptor for fsync. Only these
-                # private copies may have permissions relaxed, never active files.
-                mode = stat.S_IMODE(path.stat().st_mode)
-                try:
-                    if not mode & stat.S_IWUSR:
-                        path.chmod(mode | stat.S_IWUSR)
-                    with path.open("r+b") as stream:
-                        os.fsync(stream.fileno())
-                finally:
-                    if not mode & stat.S_IWUSR:
-                        path.chmod(mode)
+                flush_file(path)
         sync_directory(Path(root))
+
+
+def flush_file(path: Path) -> None:
+    """Flush one private payload copy using a Windows-compatible descriptor.
+
+    Windows requires a writable descriptor for ``fsync``. Permissions may be
+    relaxed only on the private copy and are restored before it becomes active.
+
+    :param path: Prepared regular file that has not yet been activated.
+    :return: None.
+    :raises OSError: If permission changes, opening, or flushing fails.
+    """
+    mode = stat.S_IMODE(path.stat().st_mode)
+    try:
+        if not mode & stat.S_IWUSR:
+            path.chmod(mode | stat.S_IWUSR)
+        with path.open("r+b") as stream:
+            os.fsync(stream.fileno())
+    finally:
+        if not mode & stat.S_IWUSR:
+            path.chmod(mode)
 
 
 def observed_link(destination: Path) -> Optional[str]:
