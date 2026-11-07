@@ -33,6 +33,7 @@
 
 import argparse
 import copy
+import csv
 import os
 import re
 import shutil
@@ -48,8 +49,9 @@ from distman.deployment import TargetPublication, publish_targets
 from distman.install import InstallError
 from distman.install.command import _active_targets
 from distman.install.models import InstalledArtifact
-from distman.install.ownership import check_script_pairs, target_requirements
+from distman.install.ownership import check_script_pairs, target_requirements, validate_files
 from distman.install.targets import Target
+from distman.inventory import inventory
 from distman.logger import log
 from distman.metadata import Store, sync_directory
 from distman.operations import operation
@@ -210,15 +212,19 @@ def _selection_updates(
     artifacts: Dict[str, InstalledArtifact],
     selectors: List[Requirement],
     labels: Set[str],
-) -> Dict[str, Optional[InstalledArtifact]]:
-    """Build ownership updates for matching package/runtime selections.
+) -> Tuple[
+    Dict[str, Optional[InstalledArtifact]],
+    Dict[Tuple[str, str, str], Set[str]],
+]:
+    """Build ownership updates and external launcher paths removed from RECORD.
 
     :param artifacts: Active artifacts indexed by centralized owner identifier.
     :param selectors: Package names and optional exact versions.
     :param labels: Runtime labels selected for removal.
-    :return: Selected owners mapped to retained records or None for complete removal.
+    :return: Owner replacements and removed launchers grouped by package/path identity.
     """
     updates = {}
+    launcher_removals: Dict[Tuple[str, str, str], Set[str]] = {}
     for owner, record in artifacts.items():
         if not any(
             canonicalize_name(selector.name) == record["name"]
@@ -240,14 +246,32 @@ def _selection_updates(
             }
             if record.get("component") == "scripts":
                 platforms = {label.split("-")[0] for label in remaining}
-                retained["managed_targets"] = [
+                original_targets = {Path(target) for target in record.get("managed_targets", [])}
+                retained_targets = {
                     target
-                    for target in record.get("managed_targets", [])
+                    for target in original_targets
                     if not (
-                        (target.endswith(".exe") and "windows" not in platforms)
-                        or (not target.endswith(".exe") and not platforms & {"linux", "darwin"})
+                        (target.name.endswith(".exe") and "windows" not in platforms)
+                        or (
+                            not target.name.endswith(".exe") and not platforms & {"linux", "darwin"}
+                        )
                     )
-                ]
+                }
+                retained["managed_targets"] = [str(target) for target in sorted(retained_targets)]
+                scripts_root = Path(record["scripts_path"])
+                retained["files"] = {
+                    name: digest
+                    for name, digest in record["files"].items()
+                    if any(
+                        target == scripts_root / Path(name)
+                        or target in (scripts_root / Path(name)).parents
+                        for target in retained_targets
+                    )
+                }
+                identity = (record["name"], record["library_path"], record["scripts_path"])
+                launcher_removals.setdefault(identity, set()).update(
+                    str(target) for target in original_targets - retained_targets
+                )
             updates[owner] = retained
         else:
             updates[owner] = None
@@ -257,21 +281,61 @@ def _selection_updates(
             record["version"],
             ", ".join(sorted(removed)),
         )
-    return updates
+    return updates, launcher_removals
+
+
+def _rewrite_launcher_record(
+    staged: Path,
+    destination: Path,
+    record: InstalledArtifact,
+    removed: Set[str],
+) -> None:
+    """Remove withdrawn external launchers from a staged ``RECORD`` file.
+
+    :param staged: Private copy of the distribution metadata directory.
+    :param destination: Active metadata-directory target represented by the copy.
+    :param record: Retained library ownership record to refresh.
+    :param removed: Absolute launcher paths withdrawn by this operation.
+    :return: None.
+    :raises InstallError: If the metadata target cannot be reconciled safely.
+    """
+    record_file = staged / "RECORD"
+    if not record_file.is_file():
+        raise InstallError(f"Missing wheel RECORD in {destination}")
+    rows = list(csv.reader(record_file.read_text(encoding="utf-8").splitlines()))
+    normalized = {os.path.normcase(os.path.normpath(path)) for path in removed}
+    retained = [
+        row
+        for row in rows
+        if not row or os.path.normcase(os.path.normpath(row[0])) not in normalized
+    ]
+    if len(retained) == len(rows):
+        raise InstallError(f"Wheel RECORD does not contain removed launchers: {destination}")
+    with record_file.open("w", encoding="utf-8", newline="") as stream:
+        csv.writer(stream, lineterminator="\n").writerows(retained)
+    try:
+        name = (destination.relative_to(Path(record["library_path"])) / "RECORD").as_posix()
+    except ValueError as exc:
+        raise InstallError(f"Metadata target is outside its library path: {destination}") from exc
+    if name not in record["files"]:
+        raise InstallError(f"Wheel RECORD is absent from ownership metadata: {destination}")
+    record["files"][name] = inventory(staged)["RECORD"]
 
 
 def _plan_targets(
     targets: dict,
     updates: Dict[str, Optional[InstalledArtifact]],
+    launcher_removals: Dict[Tuple[str, str, str], Set[str]],
     temporary: Path,
 ) -> Tuple[List[TargetPublication], List[Path]]:
-    """Translate ownership updates into target unlinks or private-boundary revisions.
+    """Translate ownership updates into target unlinks or private revisions.
 
     :param targets: Active centralized target records.
     :param updates: Selected owner records after removal.
+    :param launcher_removals: External launcher paths removed from paired wheel metadata.
     :param temporary: Workspace for revised multi-owner package boundaries.
     :return: Publications and targets that will be fully unlinked.
-    :raises InstallError: If a non-directory target unexpectedly has multiple owners.
+    :raises InstallError: If a target or its wheel metadata cannot be revised safely.
     """
     publications = []
     unlinked = []
@@ -282,6 +346,7 @@ def _plan_targets(
             continue
         retained = dict(state)
         removed = []
+        record_updates = []
         for owner in affected:
             replacement = updates[owner]
             if replacement is None or str(destination) not in replacement.get(
@@ -289,17 +354,29 @@ def _plan_targets(
             ):
                 removed.append(state[owner])
                 retained.pop(owner)
-            else:
-                retained[owner] = replacement
+                continue
+            retained[owner] = replacement
+            identity = (
+                replacement["name"],
+                replacement["library_path"],
+                replacement["scripts_path"],
+            )
+            removed_launchers = launcher_removals.get(identity, set())
+            if (
+                replacement.get("component") == "library"
+                and removed_launchers
+                and destination.name.endswith(".dist-info")
+            ):
+                record_updates.append((replacement, removed_launchers))
         if not retained:
             publications.append(TargetPublication(destination, delete=True))
             unlinked.append(destination)
             continue
-        if not removed:
+        if not removed and not record_updates:
             publications.append(TargetPublication(destination, state={"artifacts": retained}))
             continue
         if not destination.is_dir():
-            raise InstallError(f"Cannot remove one owner from file target: {destination}")
+            raise InstallError(f"Cannot revise non-directory target: {destination}")
         staged = temporary / f"target-{number}"
         shutil.copytree(destination, staged, ignore=shutil.ignore_patterns("__pycache__"))
         for record in removed:
@@ -307,6 +384,8 @@ def _plan_targets(
                 path = staged / name
                 if path.is_file():
                     path.unlink()
+        for record, removed_launchers in record_updates:
+            _rewrite_launcher_record(staged, destination, record, removed_launchers)
         for path in sorted(staged.rglob("*"), key=lambda value: len(value.parts), reverse=True):
             if path.is_dir() and not any(path.iterdir()):
                 path.rmdir()
@@ -320,14 +399,18 @@ def _selected_payloads(
     args: argparse.Namespace,
     releasing: Iterable[Path] = (),
 ) -> Set[Path]:
-    """Find inactive retained payloads wholly owned by selected packages and runtimes.
+    """Find inactive retained payloads wholly owned by selected package versions.
+
+    A physical payload can be referenced by more than one historical record. It
+    is eligible only when every record that names it belongs entirely to the
+    requested package/runtime selection.
 
     :param store: Deployment metadata store containing target history.
     :param selectors: Package names and optional exact versions to delete.
     :param args: Optional platform, architecture, and Python filters.
     :param releasing: Active destinations that this operation will unlink.
     :return: Retained payload paths safe to delete after publication.
-    :raises InstallError: If a runtime filter is invalid.
+    :raises InstallError: If a runtime filter or historical ownership record is invalid.
     :raises RecoveryRequired: If deployment history is invalid.
     """
     released = {Path(path) for path in releasing}
@@ -337,30 +420,45 @@ def _selected_payloads(
             continue
         payload = Path(record["payload"])
         active_payloads.add(payload if payload.is_absolute() else store.root / payload)
-    selected = set()
+
+    histories: Dict[Path, List[dict]] = {}
     for record in store.target_history_records().values():
         state = record.get("state", {})
         artifacts = state.get("artifacts", {}) if isinstance(state, dict) else {}
         if not isinstance(artifacts, dict) or not artifacts:
             continue
-        matches = []
         for artifact in artifacts.values():
             if not isinstance(artifact, dict):
-                matches.append(False)
-                continue
-            package_match = any(
-                canonicalize_name(selector.name) == artifact.get("name")
-                and selector.specifier.contains(artifact.get("version", ""), prereleases=True)
-                for selector in selectors
-            )
-            labels = runtime_labels(args, [artifact]) if package_match else set()
-            matches.append(package_match and labels == set(artifact.get("targets", [])))
-        if not matches or not all(matches):
-            continue
+                raise InstallError("Invalid historical ownership record")
+            try:
+                validate_files(artifact.get("files"))
+            except (AttributeError, ValueError) as exc:
+                raise InstallError(f"Invalid historical ownership record: {exc}") from exc
         payload = Path(record["payload"])
         if not payload.is_absolute():
             payload = store.root / payload
-        if payload not in active_payloads and os.path.lexists(payload):
+        histories.setdefault(payload, []).append(record)
+
+    selected = set()
+    for payload, records in histories.items():
+        if payload in active_payloads or not os.path.lexists(payload):
+            continue
+        all_selected = True
+        for record in records:
+            artifacts = record["state"]["artifacts"].values()
+            for artifact in artifacts:
+                package_match = any(
+                    canonicalize_name(selector.name) == artifact.get("name")
+                    and selector.specifier.contains(artifact.get("version", ""), prereleases=True)
+                    for selector in selectors
+                )
+                labels = runtime_labels(args, [artifact]) if package_match else set()
+                if not package_match or labels != set(artifact.get("targets", [])):
+                    all_selected = False
+                    break
+            if not all_selected:
+                break
+        if all_selected:
             selected.add(payload)
     return selected
 
@@ -404,7 +502,7 @@ def uninstall(args: argparse.Namespace) -> int:
         targets, artifacts = _active_targets(store)
         records = list(artifacts.values())
         labels = runtime_labels(args, records)
-        updates = _selection_updates(artifacts, selectors, labels)
+        updates, launcher_removals = _selection_updates(artifacts, selectors, labels)
         proposed = dict(artifacts)
         for owner, replacement in updates.items():
             if replacement is None:
@@ -413,7 +511,7 @@ def uninstall(args: argparse.Namespace) -> int:
                 proposed[owner] = replacement
         validate_removal(records, list(proposed.values()), force=args.force)
         with tempfile.TemporaryDirectory(prefix="distman-uninstall-") as work:
-            publications, unlinked = _plan_targets(targets, updates, Path(work))
+            publications, unlinked = _plan_targets(targets, updates, launcher_removals, Path(work))
             payloads = (
                 _selected_payloads(store, selectors, args, unlinked) if args.delete else set()
             )

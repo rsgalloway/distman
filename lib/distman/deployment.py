@@ -122,12 +122,18 @@ def replace_link(destination: Union[str, Path], target: Union[str, Path]) -> Non
             temporary.unlink()
 
 
-def prepare_revision(source: Path, destination: Path, reuse: bool = True) -> Path:
+def prepare_revision(
+    source: Path,
+    destination: Path,
+    reuse: bool = True,
+    reserved: Iterable[Path] = (),
+) -> Path:
     """Copy one file or directory before exposing a complete numbered revision.
 
     :param source: Complete staged file or directory to copy without normalization.
     :param destination: Active destination used to select the next sibling revision.
     :param reuse: Return the newest identical retained revision when available.
+    :param reserved: Historical revision identities that must not be allocated again.
     :return: Path of the completed, inactive revision.
     :raises OSError: If the staged content cannot be copied or renamed.
     """
@@ -141,7 +147,16 @@ def prepare_revision(source: Path, destination: Path, reuse: bool = True) -> Pat
                 continue
             if _payload_inventory(path) == source_inventory:
                 return path
-    number = versions[-1][1] + 1 if versions else 0
+    numbers = [version for _, version, _ in versions]
+    version_directory = destination.parent / config.DIR_VERSIONS
+    for path in reserved:
+        path = Path(path)
+        if path.parent != version_directory:
+            continue
+        parsed = util.parse_versioned_filename(path.name, destination.name)
+        if parsed is not None:
+            numbers.append(parsed[1])
+    number = max(numbers, default=-1) + 1
     revision = Path(get_version_dest(str(destination), number, None))
     durable_directory(revision.parent)
     temporary = revision.with_name(f".{revision.name}.{uuid.uuid4().hex}.staging")
@@ -349,6 +364,7 @@ def publish_targets(publications: Iterable[TargetPublication], deploy_root: Path
             raise ValueError(f"Deleted target cannot have a source: {destination}")
         if (
             ".." in destination.parts
+            or destination.name == config.DIR_VERSIONS
             or destination == store.root
             or destination in store.root.parents
             or destination == store.directory
@@ -364,6 +380,7 @@ def publish_targets(publications: Iterable[TargetPublication], deploy_root: Path
         return
     identifier = uuid.uuid4().hex
     previous_snapshot = store.current()
+    history = list(store.target_history_records().values())
     prepared = []
     selections: Dict[str, Optional[str]] = {}
     for value in values:
@@ -382,7 +399,16 @@ def publish_targets(publications: Iterable[TargetPublication], deploy_root: Path
             revision = destination.parent / previous
             link = previous
         else:
-            revision = prepare_revision(value.source, destination, value.reuse)
+            reserved = []
+            for record in history:
+                recorded_destination = Path(record["destination"])
+                if not recorded_destination.is_absolute():
+                    recorded_destination = store.root / recorded_destination
+                if recorded_destination != destination:
+                    continue
+                payload = Path(record["payload"])
+                reserved.append(payload if payload.is_absolute() else store.root / payload)
+            revision = prepare_revision(value.source, destination, value.reuse, reserved)
             link = os.path.relpath(revision, destination.parent)
         prepared.append(
             {

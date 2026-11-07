@@ -92,12 +92,13 @@ def inventory(directory: Path, exclude: Iterable[str] = ()) -> Dict[str, FileDig
     excluded = set(exclude)
     result = {}
     for path in sorted(directory.rglob("*")):
-        if "__pycache__" in path.parts:
+        relative = path.relative_to(directory)
+        if "__pycache__" in relative.parts:
             continue
         if path.is_symlink():
             raise ValueError(f"Unexpected link in installed payload: {path}")
-        if path.is_file() and path.relative_to(directory).as_posix() not in excluded:
-            result[path.relative_to(directory).as_posix()] = {
+        if path.is_file() and relative.as_posix() not in excluded:
+            result[relative.as_posix()] = {
                 "sha256": sha256(path),
                 "mode": file_mode(path),
             }

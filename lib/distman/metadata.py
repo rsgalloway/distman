@@ -343,7 +343,8 @@ class Store:
                 raise RecoveryRequired("Invalid publication destination or link")
             path = Path(destination)
             if (
-                path == self.root
+                path.name == config.DIR_VERSIONS
+                or path == self.root
                 or path in self.root.parents
                 or path == self.directory
                 or self.directory in path.parents

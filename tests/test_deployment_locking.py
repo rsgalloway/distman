@@ -315,6 +315,20 @@ def test_inventory_detects_preserved_timestamp_edits(tmp_path: Path) -> None:
     assert inventory(tmp_path) != before
 
 
+def test_inventory_ignores_only_relative_pycache_directories(tmp_path: Path) -> None:
+    """Inventory payloads whose external ancestors happen to be named ``__pycache__``.
+
+    :param tmp_path: Isolated filesystem root.
+    :return: None.
+    """
+    payload = tmp_path / "__pycache__" / "staging"
+    payload.mkdir(parents=True)
+    (payload / "managed.py").write_text("VALUE = 1\n")
+    (payload / "nested/__pycache__").mkdir(parents=True)
+    (payload / "nested/__pycache__/ignored.pyc").write_bytes(b"cache")
+    assert set(inventory(payload)) == {"managed.py"}
+
+
 def test_cache_does_not_copy_writer_locks(tmp_path: Path) -> None:
     """A replica must not inherit another deployment's live or stale lock ownership.
 

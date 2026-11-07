@@ -34,7 +34,7 @@
 import json
 import os
 from pathlib import Path, PurePosixPath
-from typing import Dict, Iterable, Iterator
+from typing import Dict, Iterable, Iterator, Mapping
 
 from packaging.markers import default_environment
 from packaging.requirements import Requirement
@@ -44,7 +44,7 @@ from packaging.utils import canonicalize_name, parse_wheel_filename
 from distman.install import InstallError
 from distman.install.models import InstalledArtifact, InstallState
 from distman.install.targets import Target
-from distman.inventory import inventory
+from distman.inventory import FileDigest, inventory
 from distman.metadata import Store
 
 MANIFEST = ".distman-install.json"
@@ -61,6 +61,21 @@ def legacy_python(label: str) -> str:
     if not marker or len(compact) < 2 or not compact.isdigit():
         raise ValueError(f"invalid runtime label: {label}")
     return f"{compact[0]}.{compact[1:]}.0"
+
+
+def validate_files(files: Mapping[str, FileDigest]) -> None:
+    """Reject ownership paths that could escape an artifact staging root.
+
+    :param files: Relative artifact paths mapped to content digests.
+    :return: None.
+    :raises ValueError: If the inventory is not a mapping or contains an unsafe path.
+    """
+    if not isinstance(files, dict):
+        raise ValueError("files inventory is not a mapping")
+    for name in files:
+        path = PurePosixPath(name) if isinstance(name, str) else None
+        if path is None or path.is_absolute() or ".." in path.parts or "\\" in name or ":" in name:
+            raise ValueError(f"invalid ownership path: {name!r}")
 
 
 def read_state(destination: Path) -> InstallState:
@@ -108,10 +123,8 @@ def read_state(destination: Path) -> InstallState:
             )
             if set(compatibility) != set(record["targets"]):
                 raise ValueError("runtime compatibility metadata does not match targets")
+            validate_files(record["files"])
             for name, checksum in record["files"].items():
-                path = PurePosixPath(name)
-                if path.is_absolute() or ".." in path.parts or "\\" in name or ":" in name:
-                    raise ValueError("invalid ownership path")
                 if name in expected:
                     raise ValueError("duplicate file ownership")
                 expected[name] = checksum

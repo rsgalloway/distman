@@ -45,7 +45,7 @@ from distman import util
 from distman.deployment import TargetPublication, publish_targets
 from distman.install import InstallError
 from distman.install.models import Groups, InstalledArtifact, Selection
-from distman.install.ownership import check_dependencies, check_script_pairs
+from distman.install.ownership import check_dependencies, check_script_pairs, validate_files
 from distman.install.projects import (
     Project,
     distribute_project,
@@ -244,6 +244,12 @@ def _active_targets(store: Store) -> Tuple[dict, dict]:
         if not isinstance(owned, dict):
             raise InstallError(f"Invalid centralized ownership for {destination}")
         for owner, record in owned.items():
+            try:
+                validate_files(record.get("files"))
+            except (AttributeError, ValueError) as exc:
+                raise InstallError(
+                    f"Invalid centralized ownership for {destination}: {exc}"
+                ) from exc
             previous = artifacts.get(owner)
             if previous is not None and previous != record:
                 raise InstallError(f"Inconsistent centralized ownership record: {owner}")
@@ -362,7 +368,11 @@ def plan(
             if old:
                 record["targets"] = sorted(set(old["targets"] + record["targets"]))
                 record["compatibility"] = {**old["compatibility"], **record["compatibility"]}
-            if not selection["pure"] and component == "library":
+            if (
+                not selection["pure"]
+                and component == "library"
+                and Path(selection["library_path"]) != boundary
+            ):
                 binary_groups.append((boundary, owner, contents, record))
                 continue
             targets = list(_target_sources(contents, boundary))

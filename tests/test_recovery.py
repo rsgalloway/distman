@@ -325,6 +325,21 @@ def test_invalid_pending_metadata_blocks_operations(tmp_path: Path) -> None:
         assert (metadata / "pending.json").exists()
 
 
+def test_reserved_versions_target_is_rejected_before_publication(tmp_path: Path) -> None:
+    """Reject a target that would occupy its own revision-storage directory.
+
+    :param tmp_path: Isolated deployment and staged-source root.
+    :return: None.
+    """
+    root = tmp_path / "deployment"
+    source = tmp_path / "source"
+    source.write_text("payload")
+    destination = root / "lib/versions"
+    with pytest.raises(ValueError, match="Reserved or invalid"):
+        deployment.publish_targets([deployment.TargetPublication(destination, source)], root)
+    assert not root.exists()
+
+
 def test_missing_baseline_payload_blocks_restoration(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

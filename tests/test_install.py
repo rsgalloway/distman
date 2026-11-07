@@ -533,6 +533,42 @@ def test_binary_flat_root_rejects_incompatible_runtime_replacement(
     ]
 
 
+@pytest.mark.parametrize("order", [("shared", "native"), ("native", "shared")])
+def test_flat_root_mixes_pure_and_binary_packages(
+    installation: Tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    order: Tuple[str, str],
+) -> None:
+    """Publish pure and binary packages as independent targets in one flat root.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :param monkeypatch: Fixture selecting one shared import container.
+    :param order: Package installation order covering either initial layout.
+    :return: None.
+    """
+    root, wheels = installation
+    flat = "{TOOLS_ROOT}/flat"
+    monkeypatch.setenv("DISTMAN_SHARED_LIB_PATH", flat)
+    monkeypatch.setenv("DISTMAN_RUNTIME_LIB_PATH", flat)
+    monkeypatch.setenv("DISTMAN_TARGET_PATH", flat)
+    monkeypatch.setenv("DISTMAN_SHARED_BIN_PATH", "{TOOLS_ROOT}/bin")
+    monkeypatch.setenv("DISTMAN_RUNTIME_BIN_PATH", "{TOOLS_ROOT}/bin")
+    wheel(wheels, "shared")
+    wheel(
+        wheels,
+        "native",
+        tag="cp311-cp311-manylinux_2_17_x86_64",
+        files={"native.pyd": b"binary"},
+    )
+    target = ("--platform", "linux", "--arch", "x86_64", "--python", "3.11")
+    for package in order:
+        assert invoke(wheels, package, *target) == 0
+    boundary = root / "tools/flat"
+    assert boundary.is_dir() and not boundary.is_symlink()
+    assert (boundary / "shared").is_symlink()
+    assert (boundary / "native.pyd").is_symlink()
+
+
 def test_cross_target_marker_omission_fails_closed(installation: Tuple[Path, Path]) -> None:
     """Detect foreign-platform dependencies omitted by host marker resolution."""
     root, wheels = installation
@@ -1590,6 +1626,32 @@ def test_uninstall_delete_removes_unlinked_payload_history(
     assert remove("sample", "--delete") == 0
 
 
+def test_historical_delete_cannot_reuse_or_remove_a_newer_payload(
+    installation: Tuple[Path, Path],
+) -> None:
+    """Keep deleted revision identities reserved and protect newer retained payloads.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :return: None.
+    """
+    root, wheels = installation
+    wheel(wheels, version="1.0")
+    assert invoke(wheels, "sample==1.0") == 0
+    target = root / "tools/lib/python/sample"
+    first = target.resolve()
+    assert remove("sample==1.0", "--delete") == 0
+    assert not first.exists()
+    wheel(wheels, version="2.0")
+    assert invoke(wheels, "sample==2.0") == 0
+    second = target.resolve()
+    assert second != first
+    assert second.name.endswith(".1")
+    assert remove("sample==2.0") == 0
+    assert second.exists()
+    assert remove("sample==1.0", "--delete") == 0
+    assert second.exists()
+
+
 @pytest.mark.parametrize("host_architecture", ["x86_64", "arm64"])
 def test_uninstall_runtime_selection_and_record(
     installation: Tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, host_architecture: str
@@ -1620,7 +1682,10 @@ def test_uninstall_runtime_selection_and_record(
     assert record["targets"] == ["darwin-x86_64-cp311", "darwin-x86_64-cp312"]
     rows = list(csv.reader((library / "sample-1.0.dist-info/RECORD").read_text().splitlines()))
     assert any(row[0].endswith("sample-cli") for row in rows)
-    assert read_state(scripts)["artifacts"]["sample"]["targets"] == record["targets"]
+    scripts_record = read_state(scripts)["artifacts"]["sample"]
+    assert scripts_record["targets"] == record["targets"]
+    assert set(scripts_record["files"]) == {"sample-cli"}
+    assert not any(row[0].endswith("sample-cli.exe") for row in rows)
     assert (
         invoke(wheels, "sample", "--platform", "windows", "--arch", "x86_64", "--python", "3.11")
         == 0
@@ -1740,6 +1805,31 @@ def test_uninstall_scoped_roots_confirmation_and_integrity(
     assert remove("sample") == 1
     launcher = "sample-cli.exe" if os.name == "nt" else "sample-cli"
     assert (root / "tools/bin" / launcher).exists()
+
+
+def test_uninstall_rejects_unsafe_central_ownership_paths(
+    installation: Tuple[Path, Path],
+) -> None:
+    """Reject a centralized receipt that could delete outside its staged target.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :return: None.
+    """
+    root, wheels = installation
+    wheel(wheels)
+    assert invoke(wheels, "sample") == 0
+    store = Store(root)
+    reference = next(value for value in store.selections().values() if value is not None)
+    path = store.directory / reference
+    data = json.loads(path.read_text())
+    artifact = next(iter(data["state"]["artifacts"].values()))
+    digest = next(iter(artifact["files"].values()))
+    artifact["files"] = {"../outside": digest}
+    path.write_text(json.dumps(data))
+    outside = root / "outside"
+    outside.write_text("preserve")
+    assert remove("sample") == 1
+    assert outside.read_text() == "preserve"
 
 
 @pytest.mark.parametrize(
