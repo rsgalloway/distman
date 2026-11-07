@@ -38,7 +38,17 @@ from pathlib import Path
 import pytest
 
 from distman import cli, config, util
-from distman.dist.undist import run
+from distman.dist.undist import _same_origin, run
+
+
+def test_project_origins_accept_equivalent_path_separators() -> None:
+    """Treat native and sanitized Windows project paths as one identity.
+
+    :return: None.
+    """
+    assert _same_origin(r"C:\work\sample", "C:/work/sample")
+    assert not _same_origin(r"C:\work\sample", "C:/work/other")
+    assert not _same_origin("https://example.test/One", "https://example.test/one")
 
 
 def managed_target(root: Path, source: Path, name: str = "tool", origin: Path = None) -> tuple:

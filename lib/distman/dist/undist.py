@@ -53,6 +53,32 @@ class UndistError(ValueError):
     """A requested target cannot safely be withdrawn."""
 
 
+def _same_origin(first: str, second: str) -> bool:
+    """Return whether two receipt origins identify the same project.
+
+    Local paths recorded on Windows may contain either separator depending on
+    whether they came from pathlib, Git, or legacy receipt code. Remote
+    repository identities remain opaque strings.
+
+    :param first: First project path or repository identity.
+    :param second: Second project path or repository identity.
+    :return: True when both values identify the same project.
+    """
+    if "://" in first or "://" in second or first.startswith("git@") or second.startswith("git@"):
+        return first == second
+
+    def normalize(value: str) -> str:
+        """Normalize local separators and platform path casing.
+
+        :param value: Local project path.
+        :return: Platform-normalized path identity.
+        """
+        value = value.replace("\\", os.sep).replace("/", os.sep)
+        return os.path.normcase(os.path.normpath(value))
+
+    return normalize(first) == normalize(second)
+
+
 def read_receipt(destination: Path) -> Optional[Dict[str, str]]:
     """Read a legacy dist ownership receipt without treating it as YAML.
 
@@ -145,7 +171,7 @@ def _manifest_targets(
         if include_all:
             for candidate in _receipt_destinations(destination_template):
                 receipt = read_receipt(candidate)
-                if receipt is None or receipt.get("origin") != distributor.path:
+                if receipt is None or not _same_origin(receipt.get("origin", ""), distributor.path):
                     continue
                 recorded_source = util.resolve_relative_path(
                     distributor.directory, receipt["source"]
@@ -183,7 +209,7 @@ def _validate_target(
         if allow_absent and not os.path.lexists(destination):
             return False
         raise UndistError(f"Destination is not managed by distman: {destination}")
-    if expected_origin is not None and receipt.get("origin") != expected_origin:
+    if expected_origin is not None and not _same_origin(receipt.get("origin", ""), expected_origin):
         raise UndistError(
             f"Destination is owned by another project: {destination} "
             f"({receipt.get('origin', 'unknown origin')})"

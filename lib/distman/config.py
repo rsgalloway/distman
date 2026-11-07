@@ -44,7 +44,9 @@ from distman.policy import Policy
 # import-failure contingency keeps core help available in a broken/minimal
 # installation; supported installations resolve the packaged resource.
 try:
-    _POLICY_VALUES = Policy().values
+    _policy = Policy()
+    _POLICY_VALUES = _policy.values
+    _POLICY_VALUES["DEPLOY_ROOT"] = str(_policy.deploy_root)
 except ImportError:
     _home = os.getenv("HOME", os.path.expanduser("~"))
     _environment = os.getenv("ENV", "prod")
