@@ -54,7 +54,7 @@ from distman.install.projects import (
 )
 from distman.install.targets import Target, expand_targets
 from distman.install.wheels import acquire, build_project, stage, staged_path
-from distman.inventory import inventory, sha256
+from distman.inventory import file_mode, inventory, sha256
 from distman.logger import log
 from distman.metadata import Store
 from distman.operations import operation
@@ -216,7 +216,7 @@ def _target_inventory(path: Path) -> dict:
     """
     if path.is_dir():
         return inventory(path)
-    return {".": {"sha256": sha256(path), "mode": path.stat().st_mode & 0o777}}
+    return {".": {"sha256": sha256(path), "mode": file_mode(path)}}
 
 
 def _active_targets(store: Store) -> Tuple[dict, dict]:

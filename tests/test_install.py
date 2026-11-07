@@ -579,13 +579,14 @@ def test_shared_commands_upgrade_remove_and_preserve(installation: Tuple[Path, P
     assert invoke(wheels, "sample", "other") == 0
     library, scripts = root / "tools/lib/python", root / "tools/bin"
     initial_sample = os.readlink(library / "sample.py")
-    initial_other = os.readlink(scripts / "other-cli")
+    other_launcher = "other-cli.exe" if os.name == "nt" else "other-cli"
+    initial_other = os.readlink(scripts / other_launcher)
     command_wheel(wheels, version="2.0", command=None)
     assert invoke(wheels, "sample==2.0") == 0
     assert not list(scripts.glob("sample-cli*"))
     assert list(scripts.glob("other-cli*"))
     assert os.readlink(library / "sample.py") != initial_sample
-    assert os.readlink(scripts / "other-cli") == initial_other
+    assert os.readlink(scripts / other_launcher) == initial_other
     updated = os.readlink(library / "sample.py")
     assert invoke(wheels, "sample==2.0") == 0
     assert os.readlink(library / "sample.py") == updated
@@ -604,18 +605,19 @@ def test_shared_command_collision_and_unmanaged_bin(
     command_wheel(wheels)
     assert invoke(wheels, "sample") == 0
     library, scripts = root / "tools/lib/python", root / "tools/bin"
-    initial = (os.readlink(library / "sample.py"), os.readlink(scripts / "sample-cli"))
+    launcher = "sample-cli.exe" if os.name == "nt" else "sample-cli"
+    initial = (os.readlink(library / "sample.py"), os.readlink(scripts / launcher))
     command_wheel(wheels, "other", command="sample-cli")
     assert invoke(wheels, "other") == 1
-    assert (os.readlink(library / "sample.py"), os.readlink(scripts / "sample-cli")) == initial
+    assert (os.readlink(library / "sample.py"), os.readlink(scripts / launcher)) == initial
     unmanaged = root / "legacy-bin"
     unmanaged.mkdir()
     (unmanaged / "existing-tool").write_text("preserve")
     monkeypatch.setenv("DISTMAN_SHARED_BIN_PATH", str(unmanaged))
     assert invoke(wheels, "other") == 0
     assert (unmanaged / "existing-tool").read_text() == "preserve"
-    assert (unmanaged / "sample-cli").is_symlink()
-    assert (os.readlink(library / "sample.py"), os.readlink(scripts / "sample-cli")) == initial
+    assert (unmanaged / launcher).is_symlink()
+    assert (os.readlink(library / "sample.py"), os.readlink(scripts / launcher)) == initial
 
 
 def test_script_activation_failure_restores_libraries(
@@ -631,7 +633,8 @@ def test_script_activation_failure_restores_libraries(
     command_wheel(wheels)
     assert invoke(wheels, "sample") == 0
     library, scripts = root / "tools/lib/python", root / "tools/bin"
-    library_target, script_target = library / "sample.py", scripts / "sample-cli"
+    launcher = "sample-cli.exe" if os.name == "nt" else "sample-cli"
+    library_target, script_target = library / "sample.py", scripts / launcher
     initial = (os.readlink(library_target), os.readlink(script_target))
     command_wheel(wheels, version="2.0", entrypoint="sample:main2")
     replace = deployment.replace_link
@@ -760,7 +763,8 @@ def test_mismatched_shared_revisions_fail_before_publication(
     command_wheel(wheels)
     assert invoke(wheels, "sample==1.0") == 0
     library, scripts = root / "tools/lib/python", root / "tools/bin"
-    library_target, script_target = library / "sample.py", scripts / "sample-cli"
+    launcher = "sample-cli.exe" if os.name == "nt" else "sample-cli"
+    library_target, script_target = library / "sample.py", scripts / launcher
     old_bin = os.readlink(script_target)
     command_wheel(wheels, version="2.0", entrypoint="sample:main2")
     assert invoke(wheels, "sample==2.0") == 0
@@ -1540,10 +1544,11 @@ def test_reinstall_reuses_unlinked_payload_history(installation: Tuple[Path, Pat
     command_wheel(wheels)
     assert invoke(wheels, "sample") == 0
     library, scripts = root / "tools/lib/python", root / "tools/bin"
+    launcher = "sample-cli.exe" if os.name == "nt" else "sample-cli"
     targets = [
         library / "sample.py",
         library / "sample-1.0.dist-info",
-        scripts / "sample-cli",
+        scripts / launcher,
     ]
     payloads = [target.resolve() for target in targets]
     assert remove("sample") == 0
@@ -1567,10 +1572,11 @@ def test_uninstall_delete_removes_unlinked_payload_history(
     command_wheel(wheels)
     assert invoke(wheels, "sample") == 0
     library, scripts = root / "tools/lib/python", root / "tools/bin"
+    launcher = "sample-cli.exe" if os.name == "nt" else "sample-cli"
     payloads = [
         (library / "sample.py").resolve(),
         (library / "sample-1.0.dist-info").resolve(),
-        (scripts / "sample-cli").resolve(),
+        (scripts / launcher).resolve(),
     ]
     assert all(path.exists() for path in payloads)
     if previous_uninstall:
@@ -1580,7 +1586,7 @@ def test_uninstall_delete_removes_unlinked_payload_history(
     assert all(not path.exists() for path in payloads)
     assert not (library / "sample.py").exists()
     assert not (library / "sample-1.0.dist-info").exists()
-    assert not (scripts / "sample-cli").exists()
+    assert not (scripts / launcher).exists()
     assert remove("sample", "--delete") == 0
 
 

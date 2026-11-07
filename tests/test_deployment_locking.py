@@ -42,7 +42,7 @@ import pytest
 
 from distman import config
 from distman.dist.distribution import Distributor
-from distman.inventory import inventory
+from distman.inventory import file_mode, inventory
 from distman.locking import LockError, deployment_lock, lock_environment
 
 
@@ -177,6 +177,18 @@ def distributor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Distributor:
     monkeypatch.setattr(instance, "git_changed_files", lambda: [])
     monkeypatch.setattr(instance, "is_git_behind", lambda: False)
     return instance
+
+
+def test_windows_inventory_mode_ignores_synthetic_execute_bits(tmp_path: Path) -> None:
+    """Ignore execute bits that Windows derives from an active ``.exe`` suffix.
+
+    :param tmp_path: Isolated filesystem root.
+    :return: None.
+    """
+    launcher = tmp_path / "sample.exe"
+    launcher.write_bytes(b"launcher")
+    launcher.chmod(0o755)
+    assert file_mode(launcher, windows=True) == file_mode(launcher, windows=False) & 0o666
 
 
 def test_file_revisions_modes_rollback_and_delete(tmp_path: Path, distributor: Distributor) -> None:

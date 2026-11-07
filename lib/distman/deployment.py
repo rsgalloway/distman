@@ -50,7 +50,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 from distman import config, util
-from distman.inventory import inventory, sha256
+from distman.inventory import file_mode, inventory, sha256
 from distman.metadata import (
     RecoveryRequired,
     Store,
@@ -314,7 +314,7 @@ def _payload_inventory(path: Path) -> Dict[str, Any]:
     """
     if path.is_dir():
         return inventory(path)
-    return {".": {"sha256": sha256(path), "mode": stat.S_IMODE(path.stat().st_mode)}}
+    return {".": {"sha256": sha256(path), "mode": file_mode(path)}}
 
 
 def publish_targets(publications: Iterable[TargetPublication], deploy_root: Path) -> None:
