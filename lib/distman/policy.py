@@ -66,7 +66,7 @@ class Policy:
             values.setdefault(
                 "HOME", active.get("HOME") or active.get("USERPROFILE") or str(Path.home())
             )
-            for key in ("ROOT", "ENV", "DEPLOY_ROOT", "TOOLS_ROOT"):
+            for key in ("ROOT", "ENV", "DEPLOY_ROOT", "TOOLS_ROOT", "CACHE_ROOT"):
                 if active.get(key):
                     values[key] = active[key]
             for key, value in active.items():

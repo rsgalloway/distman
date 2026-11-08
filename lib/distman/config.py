@@ -64,15 +64,16 @@ ROOT = _POLICY_VALUES["ROOT"]
 DEPLOY_ROOT = _POLICY_VALUES["DEPLOY_ROOT"]
 
 # Cache paths retain platform-native defaults and are independent of deployment
-# target layout.
-CACHE_DIR = {
-    "darwin": f"{HOME}/Library/Caches/pipe",
-    "linux": f"{HOME}/.cache/pipe",
+# target layout. Supported installations resolve this from the packaged policy;
+# the local calculation is only the import-failure contingency used above.
+_cache_directory = {
+    "darwin": f"{HOME}/Library/Caches/distman",
+    "linux": f"{HOME}/.cache/distman",
     "windows": os.path.join(
-        os.environ.get("LOCALAPPDATA", os.path.join(HOME, "AppData", "Local")), "pipe"
+        os.environ.get("LOCALAPPDATA", os.path.join(HOME, "AppData", "Local")), "distman"
     ),
-}.get(PLATFORM)
-CACHE_ROOT = os.getenv("CACHE_ROOT", f"{CACHE_DIR}/{ENV}")
+}.get(PLATFORM, f"{HOME}/.cache/distman")
+CACHE_ROOT = os.getenv("CACHE_ROOT", _POLICY_VALUES.get("CACHE_ROOT", f"{_cache_directory}/{ENV}"))
 CACHE_TTL = int(os.getenv("CACHE_TTL", 600))
 DEFAULT_ENV = dict(_POLICY_VALUES)
 DEFAULT_ENV.update(

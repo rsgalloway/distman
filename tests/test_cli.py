@@ -108,7 +108,8 @@ def test_shared_deployment_policy_defaults_and_override(tmp_path: Path) -> None:
         "from pathlib import Path; from distman import config, util; "
         "from distman.policy import Policy; "
         "policy = Policy(); print(config.DEPLOY_ROOT); print(policy.deploy_root); "
-        "print(Path(util.resolve_vars_path('{DEPLOY_ROOT}/bin')))"
+        "print(Path(util.resolve_vars_path('{DEPLOY_ROOT}/bin'))); "
+        "print(Path(config.CACHE_ROOT))"
     )
     process = subprocess.run(
         [sys.executable, "-c", script],
@@ -119,7 +120,16 @@ def test_shared_deployment_policy_defaults_and_override(tmp_path: Path) -> None:
     )
     assert process.returncode == 0, process.stderr
     expected = str(tmp_path / ".local/distman/dev")
-    assert process.stdout.splitlines() == [expected, expected, str(Path(expected) / "bin")]
+    cache = {
+        "darwin": tmp_path / "Library/Caches/distman/dev",
+        "win32": tmp_path / "AppData/Local/distman/dev",
+    }.get(sys.platform, tmp_path / ".cache/distman/dev")
+    assert process.stdout.splitlines() == [
+        expected,
+        expected,
+        str(Path(expected) / "bin"),
+        str(cache),
+    ]
 
     policy_directory = tmp_path / "policy"
     policy_directory.mkdir()
@@ -137,7 +147,12 @@ def test_shared_deployment_policy_defaults_and_override(tmp_path: Path) -> None:
         text=True,
     )
     assert process.returncode == 0, process.stderr
-    assert process.stdout.splitlines() == [str(custom), str(custom), str(custom / "bin")]
+    assert process.stdout.splitlines() == [
+        str(custom),
+        str(custom),
+        str(custom / "bin"),
+        str(cache),
+    ]
 
     environment.pop("ENVPATH")
     for raw, expected_root in (
@@ -154,4 +169,20 @@ def test_shared_deployment_policy_defaults_and_override(tmp_path: Path) -> None:
         )
         assert process.returncode == 0, process.stderr
         expected = str(expected_root)
-        assert process.stdout.splitlines() == [expected, expected, str(expected_root / "bin")]
+        assert process.stdout.splitlines() == [
+            expected,
+            expected,
+            str(expected_root / "bin"),
+            str(cache),
+        ]
+
+    environment["CACHE_ROOT"] = str(tmp_path / "custom/cache")
+    process = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).parents[1],
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    assert process.returncode == 0, process.stderr
+    assert process.stdout.splitlines()[-1] == str(tmp_path / "custom/cache")

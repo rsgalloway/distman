@@ -7,7 +7,9 @@ filesystem.
 ## Refresh a Cache
 
 By default, the cache command reads from `DEPLOY_ROOT` and writes to
-`CACHE_ROOT`:
+`CACHE_ROOT`. The packaged policy uses `~/.cache/distman/<ENV>` on Linux,
+`~/Library/Caches/distman/<ENV>` on macOS, and
+`~/AppData/Local/distman/<ENV>` on Windows:
 
 ```bash
 distman cache
