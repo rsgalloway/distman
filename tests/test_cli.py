@@ -96,10 +96,11 @@ def test_shared_deployment_policy_defaults_and_override(tmp_path: Path) -> None:
     environment = os.environ.copy()
     for key in ("ROOT", "DEPLOY_ROOT", "TOOLS_ROOT", "ENVPATH"):
         environment.pop(key, None)
-    environment.update(HOME=str(tmp_path), ENV="dev", PYTHONPATH="lib")
+    environment.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path), ENV="dev", PYTHONPATH="lib")
     script = (
-        "from distman import config; from distman.policy import Policy; "
-        "policy = Policy(); print(config.DEPLOY_ROOT); print(policy.deploy_root)"
+        "from distman import config, util; from distman.policy import Policy; "
+        "policy = Policy(); print(config.DEPLOY_ROOT); print(policy.deploy_root); "
+        "print(util.resolve_vars_path('{DEPLOY_ROOT}/bin'))"
     )
     process = subprocess.run(
         [sys.executable, "-c", script],
@@ -110,7 +111,7 @@ def test_shared_deployment_policy_defaults_and_override(tmp_path: Path) -> None:
     )
     assert process.returncode == 0, process.stderr
     expected = str(tmp_path / ".local/distman/dev")
-    assert process.stdout.splitlines() == [expected, expected]
+    assert process.stdout.splitlines() == [expected, expected, str(Path(expected) / "bin")]
 
     policy_directory = tmp_path / "policy"
     policy_directory.mkdir()
@@ -128,4 +129,21 @@ def test_shared_deployment_policy_defaults_and_override(tmp_path: Path) -> None:
         text=True,
     )
     assert process.returncode == 0, process.stderr
-    assert process.stdout.splitlines() == [str(custom), str(custom)]
+    assert process.stdout.splitlines() == [str(custom), str(custom), str(custom / "bin")]
+
+    environment.pop("ENVPATH")
+    for raw, expected_root in (
+        ("~/home-relative", tmp_path / "home-relative"),
+        ("working-relative", Path(__file__).parents[1] / "working-relative"),
+    ):
+        environment["DEPLOY_ROOT"] = raw
+        process = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=Path(__file__).parents[1],
+            env=environment,
+            capture_output=True,
+            text=True,
+        )
+        assert process.returncode == 0, process.stderr
+        expected = str(expected_root)
+        assert process.stdout.splitlines() == [expected, expected, str(expected_root / "bin")]

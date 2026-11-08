@@ -868,12 +868,18 @@ def replace_vars(
 
 
 def resolve_vars_path(path: str) -> str:
-    """Resolve environment tokens in a path and normalize its separators.
+    """Resolve path tokens from the normalized deployment policy.
 
-    :param path: file system path with optional ``{VAR}`` tokens.
-    :return: resolved and sanitized path.
+    Policy values take precedence over their raw process-environment forms so
+    destinations use the same absolute deployment root as locking and metadata.
+    Unrelated environment variables remain available to custom manifests.
+
+    :param path: File system path with optional ``{VAR}`` tokens.
+    :return: Resolved and sanitized path.
     """
-    return sanitize_path(replace_vars(path))
+    environment = dict(os.environ)
+    environment.update(config.DEFAULT_ENV)
+    return sanitize_path(replace_vars(path, env=environment))
 
 
 def safe_copytree(src: str, dst: str) -> None:
