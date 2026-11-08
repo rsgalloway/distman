@@ -107,7 +107,7 @@ def confirm(prompt: str, yes: bool, dryrun: bool) -> bool:
     :param dryrun: If True, simulate the action without making changes.
     :return: True if confirmed, False otherwise.
     """
-    return dryrun or yes or util.yesNo(prompt)
+    return dryrun or yes or util.yesNo(prompt, default=True)
 
 
 def update_symlink(dest: str, target: str, dryrun: bool) -> bool:
@@ -514,7 +514,7 @@ class Distributor(GitRepo):
                     t.type = util.get_path_type(t.source)[0]
 
                 with locks([Path(t.dest)], dryrun or show):
-                    util.create_dest_folder(t.dest, dryrun, yes)
+                    util.create_dest_folder(t.dest, dryrun, yes, verbose)
 
                     # determine if the commit hash will be used for matching versions
                     match_option = t.options.get("match", "commit")
@@ -604,7 +604,10 @@ class Distributor(GitRepo):
                             dryrun,
                         ):
                             if update_symlink(t.dest, match_file, dryrun):
-                                log.info(f"Updated: {t.source} ={t.type}> {match_file}")
+                                log.info(
+                                    f"Updated: {t.source} ={t.type}> {match_file}",
+                                    extra={"status": "success"},
+                                )
                                 did_mutate = True
                             continue
 
@@ -619,7 +622,10 @@ class Distributor(GitRepo):
                             if not update_symlink(t.dest, version_dest, dryrun):
                                 continue
 
-                    log.info(f"Updated: {t.source} ={t.type}> {version_dest}")
+                    log.info(
+                        f"Updated: {t.source} ={t.type}> {version_dest}",
+                        extra={"status": "success"},
+                    )
 
         if did_mutate and not dryrun and not show:
             util.write_epoch_file(config.DEPLOY_ROOT)

@@ -1233,7 +1233,7 @@ def test_project_requires_confirmation(
     monkeypatch.setattr(util, "yesNo", decline)
     assert cli.main(["install", str(project), "--no-index", "--find-links", str(wheels)]) == 1
     assert str(root) in prompts[0]
-    assert "Effective deployment root:" in capsys.readouterr().out
+    assert "Deployment root:" in capsys.readouterr().out
     assert not (root / "lib/custom").exists()
 
 
@@ -1795,7 +1795,7 @@ def test_uninstall_scoped_roots_confirmation_and_integrity(
     other = tmp_path / "production"
     monkeypatch.setenv("DEPLOY_ROOT", str(other))
     assert invoke(wheels, "sample") == 0
-    monkeypatch.setattr(util, "yesNo", lambda prompt: False)
+    monkeypatch.setattr(util, "yesNo", lambda prompt, default=None: False)
     assert cli.main(["uninstall", "sample"]) == 1
     assert (other / "tools/lib/python/sample.py").exists()
     assert remove("sample") == 0
@@ -2075,7 +2075,7 @@ def test_uninstall_force_still_requires_confirmation_and_integrity(
     assert invoke(wheels, "sample") == 0
     library = root / "tools/lib/python"
     before = library.resolve()
-    monkeypatch.setattr(util, "yesNo", lambda prompt: False)
+    monkeypatch.setattr(util, "yesNo", lambda prompt, default=None: False)
     assert cli.main(["uninstall", "sample", "-f"]) == 1
     assert library.resolve() == before
     (library / "sample/__init__.py").write_text("modified")

@@ -87,6 +87,13 @@ def test_install_keeps_target_reserved_for_distribution() -> None:
     assert raised.value.code == 2
 
 
+def test_install_quiet_mode_disables_terminal_status() -> None:
+    """Expose short and long quiet options for interactive animation."""
+    for option in ("-q", "--quiet"):
+        args = cli.build_parser().parse_args(["install", "sample", option])
+        assert args.quiet is True
+
+
 def test_shared_deployment_policy_defaults_and_override(tmp_path: Path) -> None:
     """Resolve config and command policy from one packaged or user-authored environment.
 

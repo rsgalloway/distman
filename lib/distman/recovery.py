@@ -34,7 +34,7 @@
 import argparse
 from pathlib import Path
 
-from distman import util
+from distman import config, util
 from distman.deployment import recover_publication
 from distman.locking import deployment_lock
 from distman.logger import log
@@ -43,10 +43,10 @@ from distman.logger import log
 def recover(args: argparse.Namespace) -> int:
     """Inspect or restore pending publication under the deployment writer lock.
 
-    :param args: Explicit root, dry-run, and confirmation options.
+    :param args: Optional deployment path, dry-run, and confirmation options.
     :return: Zero on success, one on failure/decline, or 130 on cancellation.
     """
-    root = Path(args.root).expanduser().resolve()
+    root = Path(args.path or config.DEPLOY_ROOT).expanduser().resolve()
     try:
         if not root.is_dir():
             raise ValueError(f"Deployment root does not exist: {root}")
@@ -60,7 +60,7 @@ def recover(args: argparse.Namespace) -> int:
             if args.dryrun:
                 log.info("Dry run: deployment unchanged")
                 return 0
-            if not args.yes and not util.yesNo(f"Recover publication at {root}?"):
+            if not args.yes and not util.yesNo(f"Recover publication at {root}?", default=True):
                 return 1
             recover_publication(root)
             log.info("Recovered publication at %s", root)

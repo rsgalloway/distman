@@ -43,7 +43,18 @@ import zipfile
 from dataclasses import dataclass
 from email.message import Message
 from pathlib import Path, PurePosixPath
-from typing import BinaryIO, FrozenSet, Iterable, List, Optional, Sequence, Set, Tuple, Union
+from typing import (
+    BinaryIO,
+    Callable,
+    FrozenSet,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 from installer import install
@@ -168,6 +179,7 @@ def acquire(
     target: Target,
     directory: Path,
     project_wheel: Optional[Path] = None,
+    phase: Optional[Callable[[str], None]] = None,
 ) -> List[Artifact]:
     """Resolve with pip, fetch its exact selections, and verify reported hashes.
 
@@ -176,6 +188,7 @@ def acquire(
     :param target: Runtime whose compatibility flags constrain pip resolution.
     :param directory: New download directory; its parent must already exist.
     :param project_wheel: Optional locally built wheel to include in dependency resolution.
+    :param phase: Optional callback receiving acquisition phase descriptions.
     :return: Verified artifacts downloaded from the exact selections in pip's report.
     :raises InstallError: If resolution fails, selects non-wheel artifacts, or fails
         hash/compatibility checks.
@@ -207,6 +220,8 @@ def acquire(
     if project_wheel:
         command.append(str(project_wheel))
     try:
+        if phase:
+            phase(f"Resolving packages for {target.label}")
         pip(command, bool(args.verbose))
         resolved = json.loads(report.read_text())["install"]
         sources = {}
@@ -235,6 +250,8 @@ def acquire(
             fetch += ["--platform", platform_tag]
         if not urls:
             raise InstallError(f"No wheels selected for {target.label}")
+        if phase:
+            phase(f"Downloading {len(urls)} wheel(s) for {target.label}")
         pip(fetch + urls, bool(args.verbose))
     except InstallError as exc:
         raise InstallError(f"Wheel resolution failed for {target.label}: {exc}") from exc

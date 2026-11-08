@@ -10,7 +10,7 @@ distman undist [OPTIONS] [LOCATION]
 distman cache [OPTIONS]
 distman install [OPTIONS] [REQUIREMENTS...]
 distman uninstall [OPTIONS] PACKAGES...
-distman recover --root PATH [--dryrun] [--yes]
+distman recover [PATH] [--dryrun] [--yes]
 distman --version
 ```
 
@@ -27,10 +27,15 @@ Distributions](install.md#destinations) for the variables and a copyable policy.
 ## Logging
 
 Every subcommand sends its user-facing status and diagnostics through the shared
-logger. Console output is written to stdout and successful non-dry-run commands are
-also recorded in `${LOG_DIR}/distman.log`. `LOG_DIR` defaults to
-`~/log/distman`; `LOG_LEVEL` defaults to `INFO`. Dry runs do not create or append to
-the deployment log.
+logger. Interactive console output uses aligned status markers: green `+` for a new
+package, green `✓` for an existing managed package or completed action, and red `−`
+for planned removal. ANSI color is omitted when `NO_COLOR` is set, and redirected
+output remains plain. Console output is written to stdout. Successful non-dry-run
+commands are also recorded in
+`${LOG_DIR}/distman.log`. `LOG_DIR` defaults to `~/log/distman`;
+`LOG_LEVEL` defaults to `INFO`. Dry runs do not create or append to the deployment
+log. Interactive confirmation prompts display `[Y/n]`; press Enter to accept or enter
+`n` to decline. Use `--yes` where supported to skip the prompt.
 
 ## Distribution
 
@@ -87,7 +92,8 @@ configured target. When the selected source pattern contains wildcards,
 `--dest` is also treated as a destination template and must include the
 matching `%1`, `%2`, etc. placeholders.
 
-`--commit`, `--number`, and `--reset` are mutually exclusive.
+`--commit`, `--number`, and `--reset` are mutually exclusive. Routine destination initialization and
+directory-creation details are shown only with `-v`/`--verbose`.
 
 ## Removing distributed targets
 
@@ -151,6 +157,12 @@ distman install -r requirements.txt --dryrun
 distman install ./myapp --yes
 ```
 
+Interactive installs show a yellow spinner while resolving, downloading, staging, and
+publishing packages, followed by a green completion or red failure marker. Animation
+is disabled when stderr is not interactive, in CI, and for verbose pip output. Use
+`-q`/`--quiet` to disable it, or set `NO_COLOR` to retain status markers without ANSI
+colors.
+
 ## Python package removal
 
 ```bash
@@ -173,10 +185,11 @@ activation limits, and rollback history.
 Recover interrupted journaled install, uninstall, or undist publication:
 
 ```bash
-distman recover --root PATH [--dryrun] [--yes]
+distman recover [PATH] [--dryrun] [--yes]
 ```
 
-The root is explicit. Preview is read-only; recovery requires the writer lock and
-confirmation unless `--yes` is supplied. Unexpected links or missing prior revisions
+When omitted, `PATH` uses the configured deployment root. Preview is read-only.
+Recovery requires the writer lock and confirmation unless `--yes` is supplied;
+pressing Enter accepts the `[Y/n]` prompt. Unexpected links or missing prior revisions
 block restoration. This is not a general snapshot rollback command. A canceled
 command returns 130; failed or declined recovery returns 1.

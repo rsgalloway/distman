@@ -162,16 +162,18 @@ def test_confirm_dryrun():
 
 def test_confirm_no():
     """Test the confirm function with no prompt returning False."""
-    with patch("distman.util.yesNo", return_value=False):
+    with patch("distman.util.yesNo", return_value=False) as mock_yes_no:
         result = confirm("Proceed?", yes=False, dryrun=False)
         assert result is False
+        mock_yes_no.assert_called_once_with("Proceed?", default=True)
 
 
 def test_confirm_yesNo():
     """Test the confirm function with yesNo prompt returning True."""
-    with patch("distman.util.yesNo", return_value=True):
+    with patch("distman.util.yesNo", return_value=True) as mock_yes_no:
         result = confirm("Proceed?", yes=False, dryrun=False)
         assert result is True
+        mock_yes_no.assert_called_once_with("Proceed?", default=True)
 
 
 def test_update_symlink_dryrun():

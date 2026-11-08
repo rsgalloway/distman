@@ -45,9 +45,9 @@ Packaging metadata means a `pyproject.toml` project/build-system declaration or
 | `-f`, `--force` | Create a revision even when unchanged; also forward force to local `dist` targets |
 | `-v`, `--verbose` | Show pip output |
 
-When publication requires confirmation, the prompt displays `[Y/n]`; press Enter to
-publish or enter `n` to cancel. `--yes` remains useful for noninteractive commands.
-Uninstall and recovery continue to require an explicit answer.
+Interactive confirmation prompts display `[Y/n]`; press Enter to accept or enter `n`
+to cancel. This applies to `dist`, `undist`, install, uninstall, and recovery.
+`--yes` remains useful for noninteractive commands.
 
 Dry runs still resolve, download, and stage packages. Local builds run on a
 temporary source copy, excluding Git metadata, common virtualenv directories,
@@ -464,8 +464,8 @@ restoration on failure or Ctrl-C. If restoration cannot finish, further writes a
 blocked until recovery:
 
 ```bash
-distman recover --root /path/to/deployment --dryrun
-distman recover --root /path/to/deployment --yes
+distman recover /path/to/deployment --dryrun
+distman recover /path/to/deployment --yes
 ```
 
 Recovery refuses unexpected links and missing previous revisions. A dead writer may

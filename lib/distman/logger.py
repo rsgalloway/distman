@@ -40,6 +40,7 @@ from logging.handlers import RotatingFileHandler
 from typing import Optional
 
 from distman import config
+from distman.terminal import StatusFormatter
 
 log = logging.Logger(config.LOG_NAME)
 
@@ -150,7 +151,7 @@ def setup_stream_handler(level: int = LOG_LEVEL) -> logging.StreamHandler:
     handler = logging.StreamHandler(sys.stdout)
     handler.set_name(log.name)
     handler.setLevel(level)
-    handler.setFormatter(logging.Formatter("%(message)s"))
+    handler.setFormatter(StatusFormatter(handler.stream))
 
     log.addHandler(handler)
     return handler
