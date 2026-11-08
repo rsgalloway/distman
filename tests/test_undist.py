@@ -38,6 +38,7 @@ from pathlib import Path
 import pytest
 
 from distman import cli, config, util
+from distman.dist.distribution import Distributor
 from distman.dist.undist import _add_target, _same_origin, run
 
 
@@ -121,6 +122,49 @@ def test_direct_undist_retains_receipt_and_revision(deployment: Path, tmp_path: 
     assert source.read_text(encoding="utf-8") == "source payload\n"
     assert (deployment / ".distman/current.json").is_file()
     assert run(args) == 0
+
+
+def test_non_git_location_uses_stable_project_origin(
+    deployment: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Withdraw a non-Git project distributed from another working directory.
+
+    :param deployment: Temporary deployment root.
+    :param tmp_path: Pytest temporary directory.
+    :param monkeypatch: Fixture changing the caller's working directory.
+    :return: None.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+
+    distributor = Distributor()
+    distributor.directory = str(project)
+    distributor.read_git_info()
+    assert _same_origin(distributor.path, str(project))
+
+    source = project / "tool"
+    destination, _, _ = managed_target(deployment, source, origin=Path(distributor.path))
+    (project / "dist.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "targets": {
+                    "tool": {
+                        "source": "tool",
+                        "destination": str(destination),
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    args = cli.build_parser().parse_args(["undist", str(project), "--yes"])
+
+    assert run(args) == 0
+    assert not os.path.lexists(destination)
 
 
 def test_manifest_undist_does_not_require_source(deployment: Path, tmp_path: Path) -> None:
@@ -323,6 +367,39 @@ def test_manifest_selection_skips_absent_and_unselected_targets(
     assert not os.path.lexists(selected)
     assert other.is_symlink()
     assert not os.path.lexists(absent)
+
+
+def test_manifest_rejects_unresolved_wildcard_destination(deployment: Path, tmp_path: Path) -> None:
+    """Reject a wildcard destination with placeholders left after expansion.
+
+    :param deployment: Temporary deployment root.
+    :param tmp_path: Pytest temporary directory.
+    :return: None.
+    """
+    project = tmp_path / "project"
+    source = project / "plugins" / "example"
+    source.parent.mkdir(parents=True)
+    source.write_text("payload", encoding="utf-8")
+    destination = deployment / "bin" / "example" / "%2"
+    managed, _, _ = managed_target(deployment, source, "unrelated", origin=project)
+    (project / "dist.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "targets": {
+                    "plugins": {
+                        "source": "plugins/*",
+                        "destination": str(destination).replace("example", "%1"),
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    args = cli.build_parser().parse_args(["undist", str(project), "--yes"])
+
+    assert run(args) == 1
+    assert managed.is_symlink()
 
 
 def test_manifest_rejects_ambiguous_destination(deployment: Path, tmp_path: Path) -> None:

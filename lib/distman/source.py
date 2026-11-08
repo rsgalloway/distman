@@ -224,7 +224,7 @@ class GitRepo(Source):
         self.branch_name = ""
         self.head = ""
         self.short_head = ""
-        self.path = os.getcwd().replace("\\", "/")
+        self.path = str(Path(self.directory).resolve()).replace("\\", "/")
         self.name = os.path.basename(self.path)
         self.changed_files = []
 

@@ -44,6 +44,7 @@ from distman.dist.distribution import (
     apply_destination_template,
     match_source_pattern,
     should_skip_target,
+    validate_destination_template,
 )
 from distman.logger import log
 from distman.operations import operation
@@ -167,6 +168,7 @@ def _manifest_targets(
         for source_path, destination_path in util.expand_wildcard_entry(
             source_pattern, destination_template
         ):
+            validate_destination_template(destination_path)
             _add_target(resolved, Path(destination_path), source_path)
         if include_all:
             for candidate in _receipt_destinations(destination_template):
