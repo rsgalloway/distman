@@ -1626,6 +1626,31 @@ def test_uninstall_delete_removes_unlinked_payload_history(
     assert remove("sample", "--delete") == 0
 
 
+def test_uninstall_delete_rejects_payload_outside_versions(
+    installation: Tuple[Path, Path],
+) -> None:
+    """Do not let damaged history redirect deletion outside a target's revisions.
+
+    :param installation: Isolated deployment root and offline wheelhouse.
+    :return: None.
+    """
+    root, wheels = installation
+    command_wheel(wheels)
+    assert invoke(wheels, "sample") == 0
+    assert remove("sample") == 0
+    victim = root.parent / "unrelated"
+    victim.mkdir()
+    (victim / "keep.txt").write_text("keep")
+    records = sorted((root / ".distman/targets").glob("*/revisions/*.json"))
+    assert records
+    record = json.loads(records[0].read_text())
+    record["payload"] = str(victim)
+    records[0].write_text(json.dumps(record))
+
+    assert remove("sample", "--delete") == 1
+    assert (victim / "keep.txt").read_text() == "keep"
+
+
 def test_historical_delete_cannot_reuse_or_remove_a_newer_payload(
     installation: Tuple[Path, Path],
 ) -> None:

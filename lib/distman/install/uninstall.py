@@ -435,9 +435,7 @@ def _selected_payloads(
                 validate_files(artifact.get("files"))
             except (AttributeError, ValueError) as exc:
                 raise InstallError(f"Invalid historical ownership record: {exc}") from exc
-        payload = Path(record["payload"])
-        if not payload.is_absolute():
-            payload = store.root / payload
+        _, payload = store.target_paths(record, "historical target revision")
         histories.setdefault(payload, []).append(record)
 
     selected = set()
@@ -474,6 +472,10 @@ def _delete_history(payloads: Iterable[Path]) -> int:
     removed = 0
     parents = set()
     for payload in sorted(set(payloads)):
+        if payload.parent.is_symlink():
+            raise InstallError(
+                f"Refusing retained payload beneath linked versions directory: {payload}"
+            )
         if payload.is_dir() and not payload.is_symlink():
             shutil.rmtree(payload)
         elif payload.exists() or payload.is_symlink():

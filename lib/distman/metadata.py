@@ -38,7 +38,7 @@ import re
 import stat
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 from distman import config
 
@@ -144,6 +144,39 @@ class Store:
         :raises OSError: If the record cannot be durably replaced.
         """
         atomic_write(self.directory / relative, json.dumps(value, indent=2, sort_keys=True) + "\n")
+
+    def target_paths(self, record: dict, reference: str) -> Tuple[Path, Path]:
+        """Resolve and validate one target destination and retained payload path.
+
+        Retained payloads must use distman's sibling versions layout. This
+        validation is required before destructive history cleanup so damaged
+        metadata cannot redirect deletion to an unrelated filesystem path.
+
+        :param record: Target revision record containing destination and payload paths.
+        :param reference: Record identity used in validation errors.
+        :return: Absolute destination and payload paths.
+        :raises RecoveryRequired: If either path is unsafe or the payload is not a
+            versioned sibling of its destination.
+        """
+        destination_value = record.get("destination")
+        payload_value = record.get("payload")
+        if not isinstance(destination_value, str) or not isinstance(payload_value, str):
+            raise RecoveryRequired(f"Invalid target revision: {reference}")
+        destination = Path(destination_value)
+        payload = Path(payload_value)
+        if (not destination.is_absolute() and ".." in destination.parts) or (
+            not payload.is_absolute() and ".." in payload.parts
+        ):
+            raise RecoveryRequired(f"Invalid target revision: {reference}")
+        if not destination.is_absolute():
+            destination = self.root / destination
+        if not payload.is_absolute():
+            payload = self.root / payload
+        versions = destination.parent / config.DIR_VERSIONS
+        revision_pattern = re.compile(rf"{re.escape(destination.name)}\.[0-9]+(?:\..+)?")
+        if payload.parent != versions or revision_pattern.fullmatch(payload.name) is None:
+            raise RecoveryRequired(f"Target payload is outside its versions directory: {reference}")
+        return destination, payload
 
     def remove(self, relative: str) -> None:
         """Remove an optional record and flush the directory entry.
@@ -263,15 +296,7 @@ class Store:
             record = self.read(reference)
             if record is None:
                 raise RecoveryRequired(f"Missing target revision: {reference}")
-            destination = record.get("destination")
-            payload = record.get("payload")
-            if (
-                not isinstance(destination, str)
-                or not isinstance(payload, str)
-                or (not Path(destination).is_absolute() and ".." in Path(destination).parts)
-                or (not Path(payload).is_absolute() and ".." in Path(payload).parts)
-            ):
-                raise RecoveryRequired(f"Invalid target revision: {reference}")
+            self.target_paths(record, reference)
             records[reference] = record
         return records
 
@@ -296,14 +321,9 @@ class Store:
                 raise RecoveryRequired(f"Invalid target revision filename: {path}")
             relative = path.relative_to(self.directory).as_posix()
             record = self.read(relative)
-            payload = record.get("payload") if record is not None else None
-            if (
-                record is None
-                or record.get("destination") != target
-                or not isinstance(payload, str)
-                or (not Path(payload).is_absolute() and ".." in Path(payload).parts)
-            ):
+            if record is None or record.get("destination") != target:
                 raise RecoveryRequired(f"Invalid target revision: {relative}")
+            self.target_paths(record, relative)
             records[relative] = record
         return records
 
@@ -318,17 +338,9 @@ class Store:
             if reference is None:
                 continue
             record = self.read(reference)
-            payload = Path(record.get("payload", "")) if record is not None else None
-            if (
-                record is None
-                or record.get("destination") != target
-                or payload is None
-                or (not payload.is_absolute() and ".." in payload.parts)
-            ):
+            if record is None or record.get("destination") != target:
                 raise RecoveryRequired(f"Missing or mismatched target revision: {target}")
-            destination = Path(target)
-            if not destination.is_absolute():
-                destination = self.root / destination
+            destination, _ = self.target_paths(record, reference)
             records[destination] = record
         return records
 
