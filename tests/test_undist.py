@@ -39,7 +39,7 @@ import pytest
 
 from distman import cli, config, util
 from distman.dist.distribution import Distributor
-from distman.dist.undist import _add_target, _same_origin, run
+from distman.dist.undist import _add_target, _receipt_destinations, _same_origin, run
 
 
 def test_project_origins_accept_equivalent_path_separators() -> None:
@@ -56,6 +56,20 @@ def test_project_origins_accept_equivalent_path_separators() -> None:
     _add_target(resolved, destination, r"C:\work\sample")
     _add_target(resolved, destination, "C:/work/sample")
     assert resolved == {destination: "C:/work/sample"}
+
+
+def test_receipt_discovery_escapes_literal_glob_characters(tmp_path: Path) -> None:
+    """Find historical receipts beneath deployment roots containing glob syntax.
+
+    :param tmp_path: Temporary directory used for the deployment root.
+    :return: None.
+    """
+    root = tmp_path / "deploy[stable]"
+    source = tmp_path / "project" / "tool"
+    destination, _, _ = managed_target(root, source)
+    template = str(root / "bin" / "%1")
+
+    assert list(_receipt_destinations(template)) == [destination]
 
 
 def managed_target(root: Path, source: Path, name: str = "tool", origin: Path = None) -> tuple:

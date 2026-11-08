@@ -109,7 +109,7 @@ def _receipt_destinations(template: str) -> Iterable[Path]:
     :param template: Resolved destination template containing ``%N`` placeholders.
     :return: Managed destination candidates inferred from matching receipt paths.
     """
-    pattern = template
+    pattern = glob.escape(template)
     for index in range(1, 10):
         pattern = pattern.replace(f"%{index}", "*")
     receipt_pattern = util.get_dist_file(pattern)

@@ -113,6 +113,13 @@ def test_normalize_path():
     assert util.normalize_path("") == "."
 
 
+def test_normalize_path_preserves_hidden_and_parent_segments():
+    """Preserve meaningful leading dots while removing an explicit current-directory prefix."""
+    assert util.normalize_path("./artifact") == "artifact"
+    assert util.normalize_path(".artifact") == ".artifact"
+    assert util.normalize_path("../artifact") == os.path.normpath("../artifact")
+
+
 def test_resolve_relative_path_normalizes_absolute_paths(temp_dir):
     """Test resolving relative paths normalizes joined absolute paths."""
     result = util.resolve_relative_path(temp_dir, os.path.join(temp_dir, "..", "artifact"))

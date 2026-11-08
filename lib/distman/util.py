@@ -444,7 +444,9 @@ def normalize_path(path: str) -> str:
     :return: normalized path.
     """
     path = sanitize_path(path)
-    return os.path.normpath(path.lstrip("./")) if not os.path.isabs(path) else path
+    if not os.path.isabs(path) and path.startswith("./"):
+        path = path[2:]
+    return os.path.normpath(path)
 
 
 def resolve_relative_path(base_dir: str, path: str) -> str:
