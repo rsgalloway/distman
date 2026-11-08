@@ -63,7 +63,7 @@ def sync_directory(path: Path) -> None:
 
 
 def durable_directory(path: Path) -> None:
-    """Create missing directories and flush their parent entries.
+    """Create missing directories with their parent's shared access policy.
 
     :param path: Directory to create.
     :return: None.
@@ -72,7 +72,15 @@ def durable_directory(path: Path) -> None:
     if path.is_dir():
         return
     durable_directory(path.parent)
-    path.mkdir(exist_ok=True)
+    mode = stat.S_IMODE(path.parent.stat().st_mode) & 0o2777
+    try:
+        path.mkdir()
+    except FileExistsError:
+        if path.is_dir():
+            return
+        raise
+    if os.name != "nt":
+        path.chmod(mode)
     sync_directory(path.parent)
 
 

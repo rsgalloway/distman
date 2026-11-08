@@ -43,6 +43,7 @@ from typing import List, Optional, Tuple
 import pytest
 
 from distman import cli, deployment, recovery
+from distman.locking import LockError, locks
 from distman.metadata import RecoveryRequired, Store
 from distman.operations import operation
 
@@ -103,6 +104,45 @@ def test_metadata_writes_preserve_shared_record_permissions(tmp_path: Path) -> N
     store.write("current.json", {"schema": 1, "snapshot": "second"})
     assert stat.S_IMODE(current.stat().st_mode) == 0o640
     assert not list(metadata.glob(".record-*"))
+
+    metadata.chmod(0o2770)
+    nested = metadata / "targets/sample/revisions"
+    store.write("targets/sample/revisions/first.json", {"schema": 1})
+    assert all(
+        stat.S_IMODE(directory.stat().st_mode) == 0o2770
+        for directory in (metadata / "targets", metadata / "targets/sample", nested)
+    )
+    assert stat.S_IMODE((nested / "first.json").stat().st_mode) == 0o660
+
+
+def test_external_targets_coordinate_across_deployment_roots(tmp_path: Path) -> None:
+    """Reject cross-root target races and ownership replacement.
+
+    :param tmp_path: Isolated deployment roots, target, and staged payloads.
+    :return: None.
+    """
+    roots = (tmp_path / "first-root", tmp_path / "second-root")
+    target = tmp_path / "external/tools/sample"
+    sources = (tmp_path / "first", tmp_path / "second")
+    for source, content in zip(sources, ("first", "second")):
+        source.write_text(content)
+
+    with operation(roots[0]):
+        deployment.publish_targets([deployment.TargetPublication(target, sources[0])], roots[0])
+    first_link = os.readlink(target)
+
+    with operation(roots[1]):
+        with pytest.raises(RecoveryRequired, match="another deployment"):
+            deployment.publish_targets([deployment.TargetPublication(target, sources[1])], roots[1])
+    assert os.readlink(target) == first_link
+    assert target.read_text() == "first"
+
+    with locks([target]):
+        with operation(roots[1]):
+            with pytest.raises(LockError, match="Deployment lock exists"):
+                deployment.publish_targets(
+                    [deployment.TargetPublication(target, sources[1])], roots[1]
+                )
 
 
 @pytest.mark.parametrize("failure", [OSError, KeyboardInterrupt])

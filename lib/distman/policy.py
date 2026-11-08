@@ -72,6 +72,8 @@ class Policy:
             for key, value in active.items():
                 if key.startswith("DISTMAN_"):
                     values[key] = value
+            resolved = dict(resolve_environ(values))
+            values["DEPLOY_ROOT"] = str(Path(resolved["DEPLOY_ROOT"]).expanduser().absolute())
             self.values = dict(resolve_environ(values))
             self.template = Template
         finally:

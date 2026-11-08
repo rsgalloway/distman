@@ -51,6 +51,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 from distman import config, util
 from distman.inventory import file_mode, inventory, sha256
+from distman.locking import locks
 from distman.metadata import (
     RecoveryRequired,
     Store,
@@ -333,20 +334,34 @@ def _payload_inventory(path: Path) -> Dict[str, Any]:
 
 
 def publish_targets(publications: Iterable[TargetPublication], deploy_root: Path) -> None:
-    """Publish or unlink independent targets with one durable journal.
+    """Coordinate target-level writers before publishing one journaled operation.
 
-    Shared directories are containers only. Each publication versions the named file
-    or directory beside that container, matching the long-standing ``dist`` model.
+    The deployment-root lock coordinates commands using the same metadata store.
+    Target locks also serialize policies that intentionally place targets outside
+    that root, where another deployment policy could otherwise select the same path.
 
     :param publications: Prepared target changes and centralized ownership state.
     :param deploy_root: Deployment boundary owning publication records.
     :return: None.
-    :raises RecoveryRequired: If earlier work is pending or active state changed.
-    :raises OSError: If preparation, activation, or durable metadata writes fail.
-    :raises ValueError: If target paths overlap or a publication is inconsistent.
+    :raises OSError: If target coordination or publication fails.
+    :raises ValueError: If a publication target is invalid.
+    """
+    values = _validate_publications(publications, deploy_root)
+    with locks((value.destination for value in values)):
+        _publish_targets(values, deploy_root)
+
+
+def _validate_publications(
+    publications: Iterable[TargetPublication], deploy_root: Path
+) -> List[TargetPublication]:
+    """Normalize and reject invalid targets before creating coordination state.
+
+    :param publications: Requested target changes.
+    :param deploy_root: Deployment boundary owning publication metadata.
+    :return: Normalized publication values.
+    :raises ValueError: If targets are reserved, overlap, or have inconsistent options.
     """
     store = Store(deploy_root)
-    store.ensure_clean()
     values = [
         TargetPublication(
             Path(value.destination).absolute(),
@@ -376,6 +391,26 @@ def publish_targets(publications: Iterable[TargetPublication], deploy_root: Path
             for other in destinations[i + 1 :]
         ):
             raise ValueError(f"Overlapping publication destinations: {destination}")
+    return values
+
+
+def _publish_targets(publications: Iterable[TargetPublication], deploy_root: Path) -> None:
+    """Publish or unlink independent targets with one durable journal.
+
+    Shared directories are containers only. Each publication versions the named file
+    or directory beside that container, matching the long-standing ``dist`` model.
+
+    :param publications: Prepared target changes and centralized ownership state.
+    :param deploy_root: Deployment boundary owning publication records.
+    :return: None.
+    :raises RecoveryRequired: If earlier work is pending or active state changed.
+    :raises OSError: If preparation, activation, or durable metadata writes fail.
+    :raises ValueError: If target paths overlap or a publication is inconsistent.
+    """
+    store = Store(deploy_root)
+    store.ensure_clean()
+    active_targets = store.target_records()
+    values = list(publications)
     if not values:
         return
     identifier = uuid.uuid4().hex
@@ -386,6 +421,10 @@ def publish_targets(publications: Iterable[TargetPublication], deploy_root: Path
         destination = value.destination
         target_path = _record_path(destination, store.root)
         previous = observed_link(destination)
+        if previous is not None and not value.delete and destination not in active_targets:
+            raise RecoveryRequired(
+                f"Destination is managed by another deployment or is unrecorded: {destination}"
+            )
         if previous is not None and not (destination.parent / previous).exists():
             raise RecoveryRequired(f"Previous revision is missing: {destination}")
         if value.delete:

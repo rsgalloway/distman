@@ -101,7 +101,7 @@ def test_shared_deployment_policy_defaults_and_override(tmp_path: Path) -> None:
     :return: None.
     """
     environment = os.environ.copy()
-    for key in ("ROOT", "DEPLOY_ROOT", "TOOLS_ROOT", "ENVPATH"):
+    for key in ("ROOT", "DEPLOY_ROOT", "TOOLS_ROOT", "CACHE_ROOT", "ENVPATH"):
         environment.pop(key, None)
     environment.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path), ENV="dev", PYTHONPATH="lib")
     script = (
@@ -109,7 +109,7 @@ def test_shared_deployment_policy_defaults_and_override(tmp_path: Path) -> None:
         "from distman.policy import Policy; "
         "policy = Policy(); print(config.DEPLOY_ROOT); print(policy.deploy_root); "
         "print(Path(util.resolve_vars_path('{DEPLOY_ROOT}/bin'))); "
-        "print(Path(config.CACHE_ROOT))"
+        "print(Path(config.CACHE_ROOT)); print(Path(policy.values['TOOLS_ROOT']))"
     )
     process = subprocess.run(
         [sys.executable, "-c", script],
@@ -129,6 +129,7 @@ def test_shared_deployment_policy_defaults_and_override(tmp_path: Path) -> None:
         expected,
         str(Path(expected) / "bin"),
         str(cache),
+        str(Path(expected) / "tools"),
     ]
 
     policy_directory = tmp_path / "policy"
@@ -152,6 +153,7 @@ def test_shared_deployment_policy_defaults_and_override(tmp_path: Path) -> None:
         str(custom),
         str(custom / "bin"),
         str(cache),
+        str(custom / "tools"),
     ]
 
     environment.pop("ENVPATH")
@@ -174,6 +176,7 @@ def test_shared_deployment_policy_defaults_and_override(tmp_path: Path) -> None:
             expected,
             str(expected_root / "bin"),
             str(cache),
+            str(expected_root / "tools"),
         ]
 
     environment["CACHE_ROOT"] = str(tmp_path / "custom/cache")
@@ -185,4 +188,4 @@ def test_shared_deployment_policy_defaults_and_override(tmp_path: Path) -> None:
         text=True,
     )
     assert process.returncode == 0, process.stderr
-    assert process.stdout.splitlines()[-1] == str(tmp_path / "custom/cache")
+    assert process.stdout.splitlines()[-2] == str(tmp_path / "custom/cache")

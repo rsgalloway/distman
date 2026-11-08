@@ -136,8 +136,9 @@ Policy is resolved in this order, with later values taking precedence:
    `undist`, `install`, and `uninstall`, and includes `default` through envstack's
    normal lookup rules.
 2. Discoverable `distman.env`, if present, overlays those values.
-3. Nonempty active `ROOT`, `ENV`, `DEPLOY_ROOT`, and `TOOLS_ROOT` values override
-   file policy. All active `DISTMAN_*` values are also overlaid.
+3. Nonempty active `ROOT`, `ENV`, `DEPLOY_ROOT`, `TOOLS_ROOT`, and
+   `CACHE_ROOT` values override file policy. All active `DISTMAN_*` values are
+   also overlaid.
 4. Envstack expands the combined values; [pathbase](https://rsgalloway.github.io/pathbase/) formats the package templates.
 
 `DISTMAN_*` is the policy override namespace; arbitrary names in that namespace
@@ -145,9 +146,12 @@ do not automatically gain behavior. The five path variables above are the
 package installer's recognized layout controls. Other variables can be referenced by
 custom templates without becoming built-in settings.
 
-An active `DEPLOY_ROOT` wins even if `ROOT` or `ENV` changes. Likewise, custom
-`TOOLS_ROOT` or path templates can place packages outside `DEPLOY_ROOT`; that
-root is not a containment restriction. `ENVPATH` controls policy discovery,
+An active `DEPLOY_ROOT` wins even if `ROOT` or `ENV` changes. Distman
+normalizes it to an absolute path before expanding dependent package paths or
+passing policy to child commands. Likewise, custom `TOOLS_ROOT` or path templates
+can place packages outside `DEPLOY_ROOT`; that root is not a containment
+restriction. External targets use transient target locks and cannot replace
+targets recorded by another deployment root. `ENVPATH` controls policy discovery,
 while `PATH` and `PYTHONPATH` control runtime lookup, not deployment destinations.
 Resolving policy does not modify the caller's environment.
 
