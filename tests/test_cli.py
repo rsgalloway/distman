@@ -98,9 +98,10 @@ def test_shared_deployment_policy_defaults_and_override(tmp_path: Path) -> None:
         environment.pop(key, None)
     environment.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path), ENV="dev", PYTHONPATH="lib")
     script = (
-        "from distman import config, util; from distman.policy import Policy; "
+        "from pathlib import Path; from distman import config, util; "
+        "from distman.policy import Policy; "
         "policy = Policy(); print(config.DEPLOY_ROOT); print(policy.deploy_root); "
-        "print(util.resolve_vars_path('{DEPLOY_ROOT}/bin'))"
+        "print(Path(util.resolve_vars_path('{DEPLOY_ROOT}/bin')))"
     )
     process = subprocess.run(
         [sys.executable, "-c", script],
