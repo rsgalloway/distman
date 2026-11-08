@@ -37,7 +37,7 @@ import shutil
 import tempfile
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from packaging.utils import parse_wheel_filename
 
@@ -59,6 +59,7 @@ from distman.logger import log
 from distman.metadata import Store
 from distman.operations import operation
 from distman.policy import Policy
+from distman.terminal import Spinner
 
 
 def collect(
@@ -67,6 +68,7 @@ def collect(
     targets: Sequence[Target],
     temporary: Path,
     local_project: Optional[Project] = None,
+    phase: Optional[Callable[[str], None]] = None,
 ) -> Tuple[Groups, List[InstalledArtifact]]:
     """Acquire wheels and group staged payloads by configured deployment boundary.
 
@@ -76,11 +78,14 @@ def collect(
     :param temporary: Existing workspace for downloads, project builds, and staged wheel
         payloads.
     :param local_project: Optional project descriptor identifying custom dist.json ownership.
+    :param phase: Optional callback receiving acquisition and staging phase descriptions.
     :return: Grouped publication additions and validation-only receipts for dist-owned project
         wheels.
     :raises InstallError: If acquisition fails or configured paths/artifacts cannot coexist
         safely.
     """
+    if args.project and phase:
+        phase("Building local project wheel")
     project = build_project(args, temporary / "project") if args.project else None
     excluded_name = (
         parse_wheel_filename(project.name)[0]
@@ -92,7 +97,15 @@ def collect(
     _, installed_artifacts = _active_targets(Store(policy.deploy_root))
     payloads = {}
     for number, target in enumerate(targets):
-        for artifact in acquire(args, target, temporary / f"download-{number}", project):
+        for artifact in acquire(
+            args,
+            target,
+            temporary / f"download-{number}",
+            project,
+            phase,
+        ):
+            if phase:
+                phase(f"Staging {artifact.name} {artifact.version}")
             provenance = Selection(
                 **artifact.provenance,
                 pure=artifact.pure,
@@ -106,7 +119,6 @@ def collect(
                 separate_scripts=False,
             )
             if artifact.name == excluded_name:
-                log.info("Project %s: publication is owned by dist.json", artifact.name)
                 project_records.append(InstalledArtifact(**provenance, files={}))
                 continue
             # pip may combine config files, environment and requirement-file indexes.
@@ -477,17 +489,25 @@ def install(args: argparse.Namespace) -> int:
     args, project = prepare_arguments(args)
     targets = expand_targets(args.platform, args.arch, args.python)
     policy = Policy()
-    log.info("Effective deployment root: %s", policy.deploy_root)
+    log.info("Deployment root: %s", policy.deploy_root)
     if project:
         log.info("Local project: %s", project.path)
+    progress = Spinner(enabled=not (getattr(args, "quiet", False) or args.verbose))
     with operation(policy.deploy_root, read_only=args.dryrun):
         with tempfile.TemporaryDirectory(prefix="distman-install-") as work:
             temporary = Path(work)
-            groups, project_records = (
-                collect(args, policy, targets, temporary, project)
-                if args.packages or args.requirement or args.project
-                else ({}, [])
-            )
+            with progress.activity(
+                "Preparing package installation",
+                success="Prepared package installation",
+                failure="Package preparation failed",
+            ):
+                groups, project_records = (
+                    collect(args, policy, targets, temporary, project, progress.update)
+                    if args.packages or args.requirement or args.project
+                    else ({}, [])
+                )
+            for record in project_records:
+                log.info("Project %s: publication is owned by dist.json", record["name"])
             if project and project.distribution:
                 for custom in distribution_paths(project, policy.values):
                     for package_root in groups:
@@ -527,7 +547,12 @@ def install(args: argparse.Namespace) -> int:
             if (changes or project) and not args.yes:
                 if not util.yesNo(f"Publish installation to {policy.deploy_root}?", default=True):
                     return 1
-            publish_targets(changes, policy.deploy_root)
+            with progress.activity(
+                "Publishing package installation",
+                success="Published package installation",
+                failure="Package publication failed",
+            ):
+                publish_targets(changes, policy.deploy_root)
             log.info("Installed: %d target(s)", len(changes))
             if project and project.distribution:
                 return distribute_project(project, args, policy.values, dryrun=False)

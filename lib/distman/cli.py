@@ -393,6 +393,12 @@ def _add_install_options(parser: argparse.ArgumentParser) -> None:
         help="publish a new revision even when unchanged; never override ownership",
     )
     parser.add_argument("-v", "--verbose", action="count", default=0, help="show pip output")
+    parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="disable animated terminal status",
+    )
 
 
 def _add_uninstall_options(parser: argparse.ArgumentParser) -> None:

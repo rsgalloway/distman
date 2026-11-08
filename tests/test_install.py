@@ -1233,7 +1233,7 @@ def test_project_requires_confirmation(
     monkeypatch.setattr(util, "yesNo", decline)
     assert cli.main(["install", str(project), "--no-index", "--find-links", str(wheels)]) == 1
     assert str(root) in prompts[0]
-    assert "Effective deployment root:" in capsys.readouterr().out
+    assert "Deployment root:" in capsys.readouterr().out
     assert not (root / "lib/custom").exists()
 
 

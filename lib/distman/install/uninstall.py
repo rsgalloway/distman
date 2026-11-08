@@ -496,7 +496,7 @@ def uninstall(args: argparse.Namespace) -> int:
     """
     selectors = requests(args.packages)
     policy = Policy()
-    log.info("Effective deployment root: %s", policy.deploy_root)
+    log.info("Deployment root: %s", policy.deploy_root)
     with operation(policy.deploy_root, read_only=args.dryrun):
         store = Store(policy.deploy_root)
         targets, artifacts = _active_targets(store)

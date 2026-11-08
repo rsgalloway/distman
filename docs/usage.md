@@ -151,6 +151,11 @@ distman install -r requirements.txt --dryrun
 distman install ./myapp --yes
 ```
 
+Interactive installs show a yellow spinner while resolving, downloading, staging, and
+publishing packages, followed by a green completion or red failure marker. Animation
+is disabled for redirected output, CI, and verbose pip output. Use `-q`/`--quiet` to
+disable it, or set `NO_COLOR` to retain status markers without ANSI colors.
+
 ## Python package removal
 
 ```bash
