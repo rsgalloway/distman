@@ -27,12 +27,15 @@ Distributions](install.md#destinations) for the variables and a copyable policy.
 ## Logging
 
 Every subcommand sends its user-facing status and diagnostics through the shared
-logger. Interactive console output uses aligned status markers; ANSI color is omitted
-when `NO_COLOR` is set, and redirected output remains plain. Console output is
-written to stdout. Successful non-dry-run commands are also recorded in
+logger. Interactive console output uses aligned status markers: green `+` for a new
+package, green `✓` for an existing managed package or completed action, and red `−`
+for planned removal. ANSI color is omitted when `NO_COLOR` is set, and redirected
+output remains plain. Console output is written to stdout. Successful non-dry-run
+commands are also recorded in
 `${LOG_DIR}/distman.log`. `LOG_DIR` defaults to `~/log/distman`;
 `LOG_LEVEL` defaults to `INFO`. Dry runs do not create or append to the deployment
-log.
+log. Interactive confirmation prompts display `[Y/n]`; press Enter to accept or enter
+`n` to decline. Use `--yes` where supported to skip the prompt.
 
 ## Distribution
 
@@ -185,6 +188,7 @@ distman recover --root PATH [--dryrun] [--yes]
 ```
 
 The root is explicit. Preview is read-only; recovery requires the writer lock and
-confirmation unless `--yes` is supplied. Unexpected links or missing prior revisions
+confirmation unless `--yes` is supplied; pressing Enter accepts the `[Y/n]` prompt.
+Unexpected links or missing prior revisions
 block restoration. This is not a general snapshot rollback command. A canceled
 command returns 130; failed or declined recovery returns 1.

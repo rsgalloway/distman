@@ -100,8 +100,9 @@ after the unlink operation commits.
 
 `distman recover --root PATH --dryrun` previews recovery.
 `distman recover --root PATH --yes` performs it under the writer lock.
-Without `--yes`, recovery asks for confirmation. Recovery never automatically
-steals a stale lock; first establish that the recorded process has stopped.
+Without `--yes`, recovery asks for confirmation with `[Y/n]` and accepts an empty
+answer. Recovery never automatically steals a stale lock; first establish that the
+recorded process has stopped.
 
 For a prepared operation, validate every actual link against its recorded old and
 intended new values, and verify required previous revisions still exist. Then restore
