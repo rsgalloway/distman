@@ -47,12 +47,22 @@ RESET = "\033[0m"
 
 UNICODE_STATUS = {
     "info": "•",
+    "addition": "+",
     "success": "✓",
+    "removal": "−",
     "warning": "!",
     "error": "✗",
     "prompt": "?",
 }
-ASCII_STATUS = {"info": ">", "success": "+", "warning": "!", "error": "x", "prompt": "?"}
+ASCII_STATUS = {
+    "info": ">",
+    "addition": "+",
+    "success": "+",
+    "removal": "-",
+    "warning": "!",
+    "error": "x",
+    "prompt": "?",
+}
 
 
 def _environment_flag(name: str) -> bool:
@@ -100,17 +110,19 @@ def format_status(message: str, status: str, stream: TextIO) -> str:
     """Prefix one interactive terminal line with a semantic status marker.
 
     :param message: User-facing line to format.
-    :param status: Semantic marker name such as info, success, warning, error, or prompt.
+    :param status: Semantic marker name such as addition, success, removal, or error.
     :param stream: Output stream controlling terminal, encoding, and color behavior.
     :return: Terminal-formatted line, or unchanged text for noninteractive output.
     """
     if not terminal_enabled(stream):
         return message
-    symbols = UNICODE_STATUS if supports_text(stream, "•✓✗") else ASCII_STATUS
+    symbols = UNICODE_STATUS if supports_text(stream, "•✓✗−") else ASCII_STATUS
     selected = status if status in symbols else "info"
     symbol = symbols[selected]
     color = {
+        "addition": GREEN,
         "success": GREEN,
+        "removal": RED,
         "warning": YELLOW,
         "error": RED,
         "prompt": YELLOW,
@@ -134,7 +146,7 @@ class StatusFormatter(logging.Formatter):
         super().__init__("%(message)s")
         self.stream = stream
         self.enabled = terminal_enabled(stream)
-        self.symbols = UNICODE_STATUS if supports_text(stream, "•✓✗") else ASCII_STATUS
+        self.symbols = UNICODE_STATUS if supports_text(stream, "•✓✗−") else ASCII_STATUS
 
     def format(self, record: logging.LogRecord) -> str:
         """Format one record with a marker on every output line when interactive.

@@ -60,7 +60,7 @@ def recover(args: argparse.Namespace) -> int:
             if args.dryrun:
                 log.info("Dry run: deployment unchanged")
                 return 0
-            if not args.yes and not util.yesNo(f"Recover publication at {root}?"):
+            if not args.yes and not util.yesNo(f"Recover publication at {root}?", default=True):
                 return 1
             recover_publication(root)
             log.info("Recovered publication at %s", root)

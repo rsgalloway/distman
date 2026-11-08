@@ -83,10 +83,16 @@ def test_status_formatter_aligns_and_colors_console_lines(
 
     success = logging.LogRecord("distman", logging.INFO, "", 0, "Updated\nInstalled", (), None)
     success.status = "success"
+    addition = logging.LogRecord("distman", logging.INFO, "", 0, "New package", (), None)
+    addition.status = "addition"
+    removal = logging.LogRecord("distman", logging.INFO, "", 0, "Planned removal", (), None)
+    removal.status = "removal"
     warning = logging.LogRecord("distman", logging.WARNING, "", 0, "Not on main", (), None)
     error = logging.LogRecord("distman", logging.ERROR, "", 0, "Failed", (), None)
 
     assert formatter.format(success) == ("\033[32m✓\033[0m Updated\n\033[32m✓\033[0m Installed")
+    assert formatter.format(addition) == "\033[32m+\033[0m New package"
+    assert formatter.format(removal) == "\033[31m−\033[0m Planned removal"
     assert formatter.format(warning) == "\033[33m!\033[0m Not on main"
     assert formatter.format(error) == "\033[31m✗\033[0m Failed"
 
@@ -115,6 +121,21 @@ def test_status_formatter_preserves_redirected_output() -> None:
     record.status = "success"
 
     assert formatter.format(record) == "Updated"
+
+
+def test_status_formatter_uses_ascii_removal_marker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Use a portable removal marker when the terminal cannot encode Unicode.
+
+    :param monkeypatch: Fixture enabling terminal presentation outside CI.
+    :return: None.
+    """
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setenv("NO_COLOR", "1")
+    formatter = StatusFormatter(Terminal(encoding="ascii"))
+    record = logging.LogRecord("distman", logging.INFO, "", 0, "Planned removal", (), None)
+    record.status = "removal"
+
+    assert formatter.format(record) == "- Planned removal"
 
 
 def test_spinner_updates_and_clears_terminal(monkeypatch: pytest.MonkeyPatch) -> None:

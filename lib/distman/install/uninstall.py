@@ -280,6 +280,7 @@ def _selection_updates(
             record["name"],
             record["version"],
             ", ".join(sorted(removed)),
+            extra={"status": "removal"},
         )
     return updates, launcher_removals
 
@@ -526,7 +527,9 @@ def uninstall(args: argparse.Namespace) -> int:
             if not publications and not payloads:
                 log.info("Unchanged: selected packages/runtimes are not installed")
                 return 0
-            if not args.yes and not util.yesNo(f"Remove packages from {policy.deploy_root}?"):
+            if not args.yes and not util.yesNo(
+                f"Remove packages from {policy.deploy_root}?", default=True
+            ):
                 return 1
             if publications:
                 publish_targets(publications, policy.deploy_root)

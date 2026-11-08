@@ -107,7 +107,7 @@ def confirm(prompt: str, yes: bool, dryrun: bool) -> bool:
     :param dryrun: If True, simulate the action without making changes.
     :return: True if confirmed, False otherwise.
     """
-    return dryrun or yes or util.yesNo(prompt)
+    return dryrun or yes or util.yesNo(prompt, default=True)
 
 
 def update_symlink(dest: str, target: str, dryrun: bool) -> bool:

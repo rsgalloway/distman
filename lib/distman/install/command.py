@@ -427,7 +427,14 @@ def plan(
                 )
             proposed_artifacts[owner] = record
             before = old["version"] if old else "absent"
-            log.info("%s: %s -> %s at %s", key, before, record["version"], boundary)
+            log.info(
+                "%s: %s -> %s at %s",
+                key,
+                before,
+                record["version"],
+                boundary,
+                extra={"status": "addition" if old is None else "success"},
+            )
 
     by_boundary = defaultdict(list)
     for item in binary_groups:
@@ -460,7 +467,12 @@ def plan(
             proposed_artifacts[owner] = record
             before = previous["version"] if previous else "absent"
             log.info(
-                "%s: %s -> %s at %s", owner.split(":", 2)[1], before, record["version"], boundary
+                "%s: %s -> %s at %s",
+                owner.split(":", 2)[1],
+                before,
+                record["version"],
+                boundary,
+                extra={"status": "addition" if previous is None else "success"},
             )
         target_state = {"artifacts": state}
         if (

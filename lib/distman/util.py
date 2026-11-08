@@ -633,7 +633,7 @@ def create_dest_folder(
                 dest,
                 "dir" if os.path.isdir(dest) else "file",
             )
-            if not yes and not yesNo(question):
+            if not yes and not yesNo(question, default=True):
                 return False
         if verbose:
             log.info("Initializing: %s" % dest)
