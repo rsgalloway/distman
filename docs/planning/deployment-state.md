@@ -36,7 +36,8 @@ metadata referenced by retained snapshots; ordinary pruning must not invalidate
 history silently.
 
 A future whole-root rollback should create a new history entry selecting an older
-snapshot. It is distinct from recovering an interrupted publication. Multiple link
+snapshot. It is distinct from recovering an interrupted publication and is specified
+in the [deployment restoration plan](restore.md). Multiple link
 switches are not globally atomic to readers; atomic application-wide visibility
 would require another activation layout. POSIX replaces each link atomically.
 Windows directory links require unlinking the old link before renaming the new
@@ -98,8 +99,8 @@ after the unlink operation commits.
 
 ## Recovery behavior
 
-`distman recover --root PATH --dryrun` previews recovery.
-`distman recover --root PATH --yes` performs it under the writer lock.
+`distman recover PATH --dryrun` previews recovery.
+`distman recover PATH --yes` performs it under the writer lock.
 Without `--yes`, recovery asks for confirmation with `[Y/n]` and accepts an empty
 answer. Recovery never automatically steals a stale lock; first establish that the
 recorded process has stopped.

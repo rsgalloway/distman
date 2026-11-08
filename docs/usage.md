@@ -10,7 +10,7 @@ distman undist [OPTIONS] [LOCATION]
 distman cache [OPTIONS]
 distman install [OPTIONS] [REQUIREMENTS...]
 distman uninstall [OPTIONS] PACKAGES...
-distman recover --root PATH [--dryrun] [--yes]
+distman recover [PATH] [--dryrun] [--yes]
 distman --version
 ```
 
@@ -184,11 +184,11 @@ activation limits, and rollback history.
 Recover interrupted journaled install, uninstall, or undist publication:
 
 ```bash
-distman recover --root PATH [--dryrun] [--yes]
+distman recover [PATH] [--dryrun] [--yes]
 ```
 
-The root is explicit. Preview is read-only; recovery requires the writer lock and
-confirmation unless `--yes` is supplied; pressing Enter accepts the `[Y/n]` prompt.
-Unexpected links or missing prior revisions
+When omitted, `PATH` uses the configured deployment root. Preview is read-only.
+Recovery requires the writer lock and confirmation unless `--yes` is supplied;
+pressing Enter accepts the `[Y/n]` prompt. Unexpected links or missing prior revisions
 block restoration. This is not a general snapshot rollback command. A canceled
 command returns 130; failed or declined recovery returns 1.

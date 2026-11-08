@@ -401,5 +401,5 @@ class Store:
         if pending is not None:
             raise RecoveryRequired(
                 f"Publication {pending['id']} needs recovery at {self.root}; "
-                "run distman recover --root with this deployment path."
+                f"run distman recover {self.root}."
             )

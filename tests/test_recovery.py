@@ -42,9 +42,25 @@ from typing import List, Optional, Tuple
 
 import pytest
 
-from distman import cli, deployment
+from distman import cli, deployment, recovery
 from distman.metadata import RecoveryRequired, Store
 from distman.operations import operation
+
+
+def test_recover_defaults_to_configured_deployment_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Use deployment policy when the optional recovery path is omitted.
+
+    :param tmp_path: Isolated configured deployment root.
+    :param monkeypatch: Fixture overriding the resolved deployment policy.
+    :return: None.
+    """
+    root = tmp_path / "deployment"
+    root.mkdir()
+    monkeypatch.setattr(recovery.config, "DEPLOY_ROOT", str(root))
+
+    assert cli.main(["recover", "--dryrun"]) == 0
 
 
 def initial_deployment(tmp_path: Path) -> Tuple[Path, List[Tuple[Path, Path]]]:
@@ -169,10 +185,10 @@ def test_failed_restoration_blocks_writers_and_refuses_conflicts(
         deployment.recover_publication(root)
     assert (changes[0][1] / "payload").read_text() == "updated"
     replace(changes[1][1], original)
-    assert cli.main(["recover", "--root", str(root), "--dryrun"]) == 0
+    assert cli.main(["recover", str(root), "--dryrun"]) == 0
     assert Store(root).pending() == journal
     assert (changes[0][1] / "payload").read_text() == "updated"
-    assert cli.main(["recover", "--root", str(root), "--yes"]) == 0
+    assert cli.main(["recover", str(root), "--yes"]) == 0
     assert Store(root).pending() is None
     assert all((destination / "payload").read_text() == "original" for _, destination in changes)
 
@@ -245,7 +261,7 @@ with operation(root):
     assert (changes[1][1] / "payload").read_text() == "original"
     # The process is known to have exited; stale-lock removal is deliberately explicit.
     shutil.rmtree(root / ".distman/locks/write")
-    assert cli.main(["recover", "--root", str(root), "--yes"]) == 0
+    assert cli.main(["recover", str(root), "--yes"]) == 0
     assert Store(root).current() == before
     assert all((destination / "payload").read_text() == "original" for _, destination in changes)
 

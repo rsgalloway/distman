@@ -464,8 +464,8 @@ restoration on failure or Ctrl-C. If restoration cannot finish, further writes a
 blocked until recovery:
 
 ```bash
-distman recover --root /path/to/deployment --dryrun
-distman recover --root /path/to/deployment --yes
+distman recover /path/to/deployment --dryrun
+distman recover /path/to/deployment --yes
 ```
 
 Recovery refuses unexpected links and missing previous revisions. A dead writer may

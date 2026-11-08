@@ -111,7 +111,9 @@ def build_parser() -> argparse.ArgumentParser:
         add_help=False,
     )
     recovery = sub.add_parser("recover", help="Recover an interrupted journaled publication")
-    recovery.add_argument("--root", required=True, help="deployment root to inspect or recover")
+    recovery.add_argument(
+        "path", nargs="?", help="deployment root; defaults to the configured deployment root"
+    )
     recovery.add_argument("-d", "--dryrun", action="store_true", help="preview recovery only")
     recovery.add_argument("-y", "--yes", action="store_true", help="confirm recovery")
     return parser
