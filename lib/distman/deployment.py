@@ -231,13 +231,36 @@ def observed_link(destination: Path) -> Optional[str]:
 def recover_publication(deploy_root: Path, dryrun: bool = False) -> List[str]:
     """Restore a pending publication, or finalize an already committed operation.
 
-    The command orchestrator must hold the deployment writer lock. Validate all
-    destinations before changing any; do not overwrite unexpected external changes.
+    The command orchestrator must hold the deployment writer lock. Recovery also
+    acquires the pending operation's target locks because configured destinations
+    may be shared by otherwise independent deployment roots.
 
     :param deploy_root: Deployment boundary owning the pending operation.
     :param dryrun: Report recovery actions without changing links or metadata.
     :return: Human-readable actions, or an empty list if no operation is pending.
     :raises RecoveryRequired: If state conflicts or required previous revisions are missing.
+    :raises OSError: If restoration or durable metadata updates fail.
+    """
+    store = Store(deploy_root)
+    record = store.pending()
+    if record is None:
+        return []
+    destinations = [Path(change["destination"]) for change in record["changes"]]
+    with locks(destinations, dryrun=dryrun):
+        return _recover_publication(deploy_root, dryrun)
+
+
+def _recover_publication(deploy_root: Path, dryrun: bool = False) -> List[str]:
+    """Recover while the caller owns deployment and destination coordination.
+
+    Publication failure handling calls this helper while its original target locks
+    are still held. Explicit recovery enters through :func:`recover_publication`,
+    which acquires those locks before reaching this implementation.
+
+    :param deploy_root: Deployment boundary owning the pending operation.
+    :param dryrun: Report recovery actions without changing links or metadata.
+    :return: Human-readable actions, or an empty list if no operation is pending.
+    :raises RecoveryRequired: If state conflicts or required revisions are missing.
     :raises OSError: If restoration or durable metadata updates fail.
     """
     store = Store(deploy_root)
@@ -509,7 +532,7 @@ def _publish_targets(publications: Iterable[TargetPublication], deploy_root: Pat
         store.write(f"operations/{identifier}.json", journal)
     except BaseException:
         try:
-            recover_publication(deploy_root)
+            _recover_publication(deploy_root)
         except BaseException as recovery_error:
             raise RecoveryRequired(
                 f"Publication interrupted; recovery is required at {deploy_root}: "

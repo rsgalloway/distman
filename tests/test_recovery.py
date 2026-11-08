@@ -145,6 +145,55 @@ def test_external_targets_coordinate_across_deployment_roots(tmp_path: Path) -> 
                 )
 
 
+def test_recovery_honors_destination_locks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Do not restore a target while another deployment writer owns its lock.
+
+    :param tmp_path: Isolated deployment root, external target, and staged payloads.
+    :param monkeypatch: Fixture injecting an activation and rollback failure.
+    :return: None.
+    """
+    root = tmp_path / "deployment"
+    target = tmp_path / "external/tools/sample"
+    sources = (tmp_path / "first", tmp_path / "second")
+    for source, content in zip(sources, ("first", "second")):
+        source.write_text(content)
+
+    with operation(root):
+        deployment.publish_targets([deployment.TargetPublication(target, sources[0])], root)
+    original = os.readlink(target)
+    replace = deployment.replace_link
+
+    def interrupt(destination: Path, selected: str) -> None:
+        """Switch to the update, then prevent both publication and rollback.
+
+        :param destination: Active deployment link.
+        :param selected: Relative retained revision selected for activation.
+        :return: None.
+        :raises OSError: After activation and again before restoration.
+        """
+        if selected == original:
+            raise OSError("rollback unavailable")
+        replace(destination, selected)
+        raise OSError("publication interrupted")
+
+    monkeypatch.setattr(deployment, "replace_link", interrupt)
+    with pytest.raises(RecoveryRequired, match="recovery is required"):
+        with operation(root):
+            deployment.publish_targets([deployment.TargetPublication(target, sources[1])], root)
+    monkeypatch.setattr(deployment, "replace_link", replace)
+
+    with locks([target]):
+        with pytest.raises(LockError, match="Deployment lock exists"):
+            deployment.recover_publication(root)
+    assert target.read_text() == "second"
+    assert Store(root).pending() is not None
+
+    deployment.recover_publication(root)
+    assert os.readlink(target) == original
+    assert target.read_text() == "first"
+    assert Store(root).pending() is None
+
+
 @pytest.mark.parametrize("failure", [OSError, KeyboardInterrupt])
 def test_failure_after_link_switch_restores_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: type
@@ -301,6 +350,8 @@ with operation(root):
     assert (changes[1][1] / "payload").read_text() == "original"
     # The process is known to have exited; stale-lock removal is deliberately explicit.
     shutil.rmtree(root / ".distman/locks/write")
+    for _, destination in changes:
+        shutil.rmtree(destination.with_name(f".{destination.name}.install-lock"))
     assert cli.main(["recover", str(root), "--yes"]) == 0
     assert Store(root).current() == before
     assert all((destination / "payload").read_text() == "original" for _, destination in changes)
@@ -482,7 +533,7 @@ def test_missing_baseline_payload_blocks_restoration(
 
     with monkeypatch.context() as patch:
         patch.setattr(deployment, "replace_link", fail_second)
-        patch.setattr(deployment, "recover_publication", interrupted_recovery)
+        patch.setattr(deployment, "_recover_publication", interrupted_recovery)
         with pytest.raises(RecoveryRequired):
             deployment.publish_directories(changes, root)
     shutil.rmtree(old)
