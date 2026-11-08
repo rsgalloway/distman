@@ -37,6 +37,7 @@ from typing import Optional
 
 import pytest
 
+import distman.terminal as terminal_module
 from distman.terminal import ASCII_FRAMES, BRAILLE_FRAMES, Spinner, StatusFormatter, format_status
 
 
@@ -79,6 +80,7 @@ def test_status_formatter_aligns_and_colors_console_lines(
     """
     monkeypatch.delenv("CI", raising=False)
     monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr(terminal_module, "color_enabled", lambda stream: True)
     formatter = StatusFormatter(Terminal())
 
     success = logging.LogRecord("distman", logging.INFO, "", 0, "Updated\nInstalled", (), None)
@@ -105,10 +107,35 @@ def test_format_status_marks_interactive_prompt(monkeypatch: pytest.MonkeyPatch)
     """
     monkeypatch.delenv("CI", raising=False)
     monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr(terminal_module, "color_enabled", lambda stream: True)
 
     assert format_status("Continue? [Y/n]:", "prompt", Terminal()) == (
         "[33m?[0m Continue? [Y/n]:"
     )
+
+
+@pytest.mark.parametrize("supported", [False, True])
+def test_windows_color_requires_virtual_terminal_support(
+    monkeypatch: pytest.MonkeyPatch, supported: bool
+) -> None:
+    """Emit ANSI color on Windows only when virtual-terminal processing is available.
+
+    :param monkeypatch: Fixture simulating Windows console capability.
+    :param supported: Whether virtual-terminal processing can be enabled.
+    :return: None.
+    """
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr(terminal_module, "WINDOWS", True)
+    monkeypatch.setattr(
+        terminal_module,
+        "_enable_windows_virtual_terminal",
+        lambda stream: supported,
+    )
+
+    formatted = format_status("Updated", "success", Terminal())
+
+    assert formatted == ("\033[32m✓\033[0m Updated" if supported else "✓ Updated")
 
 
 def test_status_formatter_preserves_redirected_output() -> None:
@@ -169,6 +196,7 @@ def test_spinner_colors_active_and_success_markers(monkeypatch: pytest.MonkeyPat
     """
     monkeypatch.delenv("CI", raising=False)
     monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr(terminal_module, "color_enabled", lambda stream: True)
     stream = Terminal()
 
     with Spinner(stream=stream, interval=60).activity("Resolving", success="Resolved"):
@@ -228,6 +256,7 @@ def test_spinner_cleans_up_after_exception(monkeypatch: pytest.MonkeyPatch) -> N
     """
     monkeypatch.delenv("CI", raising=False)
     monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr(terminal_module, "color_enabled", lambda stream: True)
     stream = Terminal()
     spinner = Spinner(stream=stream, interval=60)
 
@@ -238,3 +267,51 @@ def test_spinner_cleans_up_after_exception(monkeypatch: pytest.MonkeyPatch) -> N
     assert spinner._thread is None
     assert "\033[33m⠋\033[0m Publishing" in stream.getvalue()
     assert stream.getvalue().endswith("\033[31m✗\033[0m Publishing failed\n")
+
+
+def test_spinner_ignores_closed_stream(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Disable optional presentation when its output stream is unavailable.
+
+    :param monkeypatch: Fixture enabling terminal presentation outside CI.
+    :return: None.
+    """
+    monkeypatch.delenv("CI", raising=False)
+    stream = Terminal()
+    stream.close()
+    spinner = Spinner(stream=stream)
+
+    with spinner.activity("Preparing packages"):
+        pass
+
+    assert spinner.enabled is False
+    assert spinner._thread is None
+
+
+def test_spinner_ignores_thread_start_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Continue the operation when the optional animation thread cannot start.
+
+    :param monkeypatch: Fixture injecting a thread startup failure.
+    :return: None.
+    """
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setenv("NO_COLOR", "1")
+    stream = Terminal()
+    spinner = Spinner(stream=stream)
+
+    def fail_start(thread: object) -> None:
+        """Raise the simulated thread startup failure.
+
+        :param thread: Animation thread that cannot be started.
+        :return: None.
+        :raises RuntimeError: Always.
+        """
+        raise RuntimeError("thread unavailable")
+
+    monkeypatch.setattr(terminal_module.threading.Thread, "start", fail_start)
+
+    with spinner.activity("Preparing packages"):
+        pass
+
+    assert spinner.enabled is False
+    assert spinner._thread is None
+    assert stream.getvalue() == ""

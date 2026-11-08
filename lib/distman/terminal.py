@@ -44,6 +44,8 @@ YELLOW = "\033[33m"
 GREEN = "\033[32m"
 RED = "\033[31m"
 RESET = "\033[0m"
+ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
+WINDOWS = os.name == "nt"
 
 UNICODE_STATUS = {
     "info": "•",
@@ -82,13 +84,52 @@ def terminal_enabled(stream: TextIO, enabled: bool = True) -> bool:
     :param enabled: Caller-controlled presentation switch.
     :return: True for an enabled interactive terminal outside CI and dumb terminals.
     """
-    return (
-        enabled
-        and callable(getattr(stream, "isatty", None))
-        and stream.isatty()
-        and os.environ.get("TERM", "").lower() != "dumb"
-        and not _environment_flag("CI")
-    )
+    try:
+        return (
+            enabled
+            and callable(getattr(stream, "isatty", None))
+            and stream.isatty()
+            and os.environ.get("TERM", "").lower() != "dumb"
+            and not _environment_flag("CI")
+        )
+    except Exception:
+        # Capability probing is optional and must fail closed.
+        return False
+
+
+def _enable_windows_virtual_terminal(stream: TextIO) -> bool:
+    """Enable ANSI processing for one Windows console stream when available.
+
+    :param stream: Console stream whose operating-system handle should be configured.
+    :return: True when the console accepts ANSI terminal sequences.
+    """
+    try:
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+
+        handle = wintypes.HANDLE(msvcrt.get_osfhandle(stream.fileno()))
+        mode = wintypes.DWORD()
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        if not kernel.GetConsoleMode(handle, ctypes.byref(mode)):
+            return False
+        if mode.value & ENABLE_VIRTUAL_TERMINAL_PROCESSING:
+            return True
+        return bool(kernel.SetConsoleMode(handle, mode.value | ENABLE_VIRTUAL_TERMINAL_PROCESSING))
+    except Exception:
+        # Terminal presentation is optional and must not break command execution.
+        return False
+
+
+def color_enabled(stream: TextIO) -> bool:
+    """Return whether ANSI color can safely be written to an interactive stream.
+
+    :param stream: Output stream to inspect and, on Windows, configure.
+    :return: True when color is enabled and supported by the terminal.
+    """
+    if "NO_COLOR" in os.environ or not terminal_enabled(stream):
+        return False
+    return not WINDOWS or _enable_windows_virtual_terminal(stream)
 
 
 def supports_text(stream: TextIO, value: str) -> bool:
@@ -127,7 +168,7 @@ def format_status(message: str, status: str, stream: TextIO) -> str:
         "error": RED,
         "prompt": YELLOW,
     }.get(selected, "")
-    if "NO_COLOR" not in os.environ and color:
+    if color and color_enabled(stream):
         symbol = f"{color}{symbol}{RESET}"
     return f"{symbol} {message}"
 
@@ -192,7 +233,7 @@ class Spinner:
         self.stream = stream or sys.stderr
         self.interval = interval
         self.enabled = terminal_enabled(self.stream, enabled)
-        self.color = self.enabled and "NO_COLOR" not in os.environ
+        self.color = self.enabled and color_enabled(self.stream)
         self.frames = self._frames()
         self._frame = 0
         self._last_width = 0
@@ -219,7 +260,8 @@ class Spinner:
         try:
             self.stream.write(value)
             self.stream.flush()
-        except (OSError, UnicodeError):
+        except Exception:
+            # Presentation failures must never change the underlying operation result.
             self.enabled = False
 
     def _render(self) -> None:
@@ -269,10 +311,15 @@ class Spinner:
         self._message = message
         self._frame = 0
         self._stop.clear()
+        thread = threading.Thread(target=self._animate, name="distman-spinner", daemon=True)
+        try:
+            thread.start()
+        except Exception:
+            self.enabled = False
+            return
+        self._thread = thread
         with self._lock:
             self._render()
-        self._thread = threading.Thread(target=self._animate, name="distman-spinner", daemon=True)
-        self._thread.start()
 
     def update(self, message: str) -> None:
         """Replace the active phase description and refresh it immediately.
@@ -294,8 +341,16 @@ class Spinner:
         if self._thread is None:
             return
         self._stop.set()
-        self._thread.join()
+        thread = self._thread
         self._thread = None
+        try:
+            thread.join(timeout=max(1.0, self.interval * 2))
+        except Exception:
+            self.enabled = False
+            return
+        if thread.is_alive():
+            self.enabled = False
+            return
         with self._lock:
             self._write("\r" + (" " * self._last_width) + "\r")
             self._last_width = 0
@@ -309,7 +364,7 @@ class Spinner:
         """
         active = self._thread is not None
         self.stop()
-        if active:
+        if active and self.enabled:
             unicode_output = self.frames == BRAILLE_FRAMES
             marker_text = ("✓" if success else "✗") if unicode_output else ("+" if success else "x")
             marker = self._style(marker_text, GREEN if success else RED)
