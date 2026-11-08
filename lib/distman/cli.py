@@ -34,6 +34,7 @@ distman: suite entrypoint
 
 Usage:
     distman dist  [DIST OPTIONS...]
+    distman undist [UNDIST OPTIONS...]
     distman cache [CACHE OPTIONS...]
     distman install [INSTALL OPTIONS...]
 
@@ -81,6 +82,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_dist.set_defaults(_handler="dist")
 
+    sub.add_parser(
+        "undist",
+        help="Withdraw active dist targets while preserving retained versions",
+        parents=[build_command_parser("undist", prog="distman undist")],
+        add_help=False,
+    )
+
     p_cache = sub.add_parser(
         "cache",
         help="Cache management",
@@ -112,7 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
 def build_command_parser(command: str, prog: Optional[str] = None) -> argparse.ArgumentParser:
     """Build one command parser while retaining legacy standalone program names.
 
-    :param command: Command name: dist, cache, install, or uninstall.
+    :param command: Command name: dist, undist, cache, install, or uninstall.
     :param prog: Optional executable name displayed in usage and error messages.
     :return: Parser configured with the selected command's options.
     :raises ValueError: If the command name is unknown.
@@ -121,6 +129,10 @@ def build_command_parser(command: str, prog: Optional[str] = None) -> argparse.A
         "dist": (
             "dist: distribute files and directories to versioned destinations",
             _add_dist_options,
+        ),
+        "undist": (
+            "Withdraw active dist targets while preserving retained versions",
+            _add_undist_options,
         ),
         "cache": ("Cross-platform caching with optional diff.", _add_cache_options),
         "install": ("Resolve wheels and publish versioned installations", _add_install_options),
@@ -243,6 +255,47 @@ def _add_dist_options(parser: argparse.ArgumentParser) -> None:
         "--version",
         action="version",
         version=f"distman {__version__}",
+    )
+
+
+def _add_undist_options(parser: argparse.ArgumentParser) -> None:
+    """Add options for withdrawing configured or ad hoc dist targets.
+
+    :param parser: Parser receiving undist options.
+    :return: None; the parser is updated in place.
+    """
+    parser.add_argument(
+        "location",
+        metavar="LOCATION",
+        nargs="?",
+        default=".",
+        help="directory containing dist.json (default is cwd)",
+    )
+    parser.add_argument(
+        "-t",
+        "--target",
+        nargs="+",
+        metavar="TARGET",
+        help="target name in dist.json (supports wildcards)",
+    )
+    parser.add_argument(
+        "--source",
+        metavar="PATH",
+        help="verify the recorded source for a direct --dest target",
+    )
+    parser.add_argument(
+        "--dest",
+        metavar="PATH",
+        help="withdraw this managed destination directly",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="also withdraw same-project wildcard targets recorded by earlier dists",
+    )
+    parser.add_argument("-y", "--yes", action="store_true", help="confirm withdrawal")
+    parser.add_argument(
+        "-d", "--dryrun", action="store_true", help="preview without deployment writes"
     )
 
 
@@ -438,6 +491,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.command == "dist":
         return dist.run(args)
+
+    if args.command == "undist":
+        from distman.dist.undist import run
+
+        return run(args)
 
     if args.command == "cache":
         return cache.run(args)

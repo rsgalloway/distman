@@ -6,6 +6,7 @@ Use the `distman` suite for these operations:
 
 ```bash
 distman dist [OPTIONS] [LOCATION]
+distman undist [OPTIONS] [LOCATION]
 distman cache [OPTIONS]
 distman install [OPTIONS] [REQUIREMENTS...]
 distman uninstall [OPTIONS] PACKAGES...
@@ -14,6 +15,14 @@ distman --version
 ```
 
 The `dist` command is a shorthand for `distman dist`.
+
+## Deployment policy
+
+`dist`, `undist`, `install`, and `uninstall` resolve deployment paths from the same
+policy. The packaged `distman/resources/distman.env` defaults to
+`${HOME}/.local/distman/${ENV}`. A `distman.env` on `ENVPATH` and active path variables
+override that baseline for every command. See [Installing Python
+Distributions](install.md#destinations) for the variables and a copyable policy.
 
 ## Logging
 
@@ -80,6 +89,29 @@ matching `%1`, `%2`, etc. placeholders.
 
 `--commit`, `--number`, and `--reset` are mutually exclusive.
 
+## Removing distributed targets
+
+`undist` withdraws active targets published by `dist` while preserving their
+ownership receipts and retained revisions:
+
+```bash
+distman undist . --target tool
+distman undist ./myapp --target 'plugin-*' --dryrun
+distman undist . --target 'plugin-*' --all
+distman undist --dest /deploy/bin/tool
+distman undist --source build/tool --dest /deploy/bin/tool
+```
+
+`LOCATION` selects a `dist.json`; without `--target`, every configured target is
+selected. Wildcard targets follow the current source tree, matching `dist`.
+`--all` additionally selects active, same-project targets found through receipts from
+earlier dists. `--dest` withdraws an ad hoc managed destination directly, and optional
+`--source` verifies its recorded source identity. Missing sources for exact manifest
+destinations do not block removal. Unmanaged destinations and links that do not select
+a retained Distman revision are rejected. Repeating an undist operation succeeds without changing the
+deployment. Running `dist` again can reactivate a matching retained revision. Use
+`dist --delete` when retained revisions must be permanently removed.
+
 ## Cache Management
 
 ```bash
@@ -138,7 +170,7 @@ activation limits, and rollback history.
 
 ## recover
 
-Recover interrupted journaled install/uninstall publication:
+Recover interrupted journaled install, uninstall, or undist publication:
 
 ```bash
 distman recover --root PATH [--dryrun] [--yes]

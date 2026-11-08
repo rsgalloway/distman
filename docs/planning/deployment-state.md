@@ -77,8 +77,8 @@ target containing their runtime layouts.
 A snapshot contains schema version, ID, UTC creation time, parent ID, coverage, and
 changed destination-to-revision-record selections. Newer changes override parent
 selections; null selections prevent an unlinked target from reappearing while
-traversing history. Coverage remains `recorded-targets`: journaled install/uninstall
-targets only. Legacy dist publication does not yet participate, so these are not
+traversing history. Coverage remains `recorded-targets`: targets journaled by install,
+uninstall, or undist only. Legacy dist publication does not yet participate, so these are not
 complete whole-deployment snapshots.
 
 Successful publication proceeds as follows:

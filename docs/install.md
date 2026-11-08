@@ -91,8 +91,8 @@ cross-platform installs. `--env` selection is not yet supported.
 
 ## Zero-configuration layout
 
-Without `ENVPATH`, a discoverable `distman.env`, or active path overrides, distman
-uses its packaged policy and reports this deployment root before resolving packages:
+Without `ENVPATH`, a discoverable `distman.env`, or active path overrides, every
+deployment command uses the packaged policy and resolves this root:
 
 ```text
 ~/.local/distman/prod
@@ -114,11 +114,11 @@ root is not the intended destination. Always preview a new policy with `--dryrun
 
 ## Destinations
 
-Distman defines an opinionated environment-variable contract for installation.
+Distman defines an opinionated environment-variable contract for deployment.
 These names and their meanings belong to distman; envstack supplies loading and
 variable expansion without assigning them package or deployment semantics.
 
-| Variable | Installer meaning | Packaged default |
+| Variable | Meaning | Packaged default |
 |---|---|---|
 | `ROOT` | Base directory used to derive the deployment root | `${HOME}/.local/distman` |
 | `ENV` | Deployment tier used in the default root | `prod` |
@@ -132,8 +132,9 @@ variable expansion without assigning them package or deployment semantics.
 
 Policy is resolved in this order, with later values taking precedence:
 
-1. Packaged `distman/resources/install.env` supplies baseline defaults and includes
-   `default` through envstack's normal lookup rules.
+1. Packaged `distman/resources/distman.env` supplies baseline defaults for `dist`,
+   `undist`, `install`, and `uninstall`, and includes `default` through envstack's
+   normal lookup rules.
 2. Discoverable `distman.env`, if present, overlays those values.
 3. Nonempty active `ROOT`, `ENV`, `DEPLOY_ROOT`, and `TOOLS_ROOT` values override
    file policy. All active `DISTMAN_*` values are also overlaid.
@@ -141,7 +142,7 @@ Policy is resolved in this order, with later values taking precedence:
 
 `DISTMAN_*` is the policy override namespace; arbitrary names in that namespace
 do not automatically gain behavior. The five path variables above are the
-installer's recognized layout controls. Other variables can be referenced by
+package installer's recognized layout controls. Other variables can be referenced by
 custom templates without becoming built-in settings.
 
 An active `DEPLOY_ROOT` wins even if `ROOT` or `ENV` changes. Likewise, custom
@@ -149,6 +150,20 @@ An active `DEPLOY_ROOT` wins even if `ROOT` or `ENV` changes. Likewise, custom
 root is not a containment restriction. `ENVPATH` controls policy discovery,
 while `PATH` and `PYTHONPATH` control runtime lookup, not deployment destinations.
 Resolving policy does not modify the caller's environment.
+
+The packaged file is an immutable application default. To customize it, copy
+[the default environment example](examples.md) into a directory on
+`ENVPATH`, or author a smaller `distman.env` containing only overrides. For example:
+
+```yaml
+all:
+  ROOT: ${HOME}/deployments
+  ENV: ${ENV:-dev}
+  DEPLOY_ROOT: ${DEPLOY_ROOT:-${ROOT}/${ENV}}
+```
+
+All deployment commands then resolve the same root and manifest tokens from that
+file. Editing the copy does not modify the installed distman package.
 
 For example, select a deployment root for one invocation:
 

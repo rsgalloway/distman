@@ -91,7 +91,9 @@ dist --target tools --dest /deploy/tools --yes
 ```
 
 The namespaced `distman dist` command provides the same distribution
-interface. Cache a shared deployment locally with:
+interface. Withdraw active targets while preserving their retained versions with
+`distman undist`; see the [usage guide](docs/usage.md#removing-distributed-targets).
+Cache a shared deployment locally with:
 
 ```bash
 distman cache

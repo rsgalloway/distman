@@ -1,7 +1,7 @@
 # Installation and activation examples
 
-These configurations keep installation policy and runtime paths together, with
-TOOLS_ROOT defined once per layout. They use the current installer, without
+These configurations keep deployment policy and runtime paths together, with
+TOOLS_ROOT defined once per layout. They use the current deployment commands, without
 requiring the proposed recipe catalog.
 
 | Example | Files | Layout |
@@ -28,7 +28,7 @@ distman checkout, save the absolute examples location:
 DISTMAN_EXAMPLES="$PWD/examples"
 ```
 
-Use one base layout at a time and select the same files for installation and
+Use one base layout at a time and select the same files for deployment and
 activation through ENVPATH. Exported ROOT, ENV, DEPLOY_ROOT, TOOLS_ROOT, and
 DISTMAN_* values still override file policy. Default deployments go beneath
 `~/.local/distman-examples`. Commands below use a POSIX shell; envstack normalizes
@@ -65,7 +65,7 @@ The layered configuration separates responsibilities without duplicating roots:
 ```text
 default.env
   tools.env       shared PATH and PYTHONPATH
-    distman.env   roots and installer policy
+    distman.env   roots and deployment policy
 ```
 
 ```bash

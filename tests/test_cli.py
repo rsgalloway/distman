@@ -32,6 +32,10 @@
 """Compatibility tests for centralized suite and standalone argument definitions."""
 
 import argparse
+import os
+import subprocess
+import sys
+from pathlib import Path
 from typing import List
 
 import pytest
@@ -81,3 +85,66 @@ def test_install_keeps_target_reserved_for_distribution() -> None:
     with pytest.raises(SystemExit) as raised:
         cli.build_parser().parse_args(["install", "sample", "--target", "linux"])
     assert raised.value.code == 2
+
+
+def test_shared_deployment_policy_defaults_and_override(tmp_path: Path) -> None:
+    """Resolve config and command policy from one packaged or user-authored environment.
+
+    :param tmp_path: Temporary home and ENVPATH directory.
+    :return: None.
+    """
+    environment = os.environ.copy()
+    for key in ("ROOT", "DEPLOY_ROOT", "TOOLS_ROOT", "ENVPATH"):
+        environment.pop(key, None)
+    environment.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path), ENV="dev", PYTHONPATH="lib")
+    script = (
+        "from pathlib import Path; from distman import config, util; "
+        "from distman.policy import Policy; "
+        "policy = Policy(); print(config.DEPLOY_ROOT); print(policy.deploy_root); "
+        "print(Path(util.resolve_vars_path('{DEPLOY_ROOT}/bin')))"
+    )
+    process = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).parents[1],
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    assert process.returncode == 0, process.stderr
+    expected = str(tmp_path / ".local/distman/dev")
+    assert process.stdout.splitlines() == [expected, expected, str(Path(expected) / "bin")]
+
+    policy_directory = tmp_path / "policy"
+    policy_directory.mkdir()
+    custom = tmp_path / "custom/deployment"
+    (policy_directory / "distman.env").write_text(
+        f"all:\n  DEPLOY_ROOT: {custom.as_posix()}\n",
+        encoding="utf-8",
+    )
+    environment["ENVPATH"] = str(policy_directory)
+    process = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).parents[1],
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    assert process.returncode == 0, process.stderr
+    assert process.stdout.splitlines() == [str(custom), str(custom), str(custom / "bin")]
+
+    environment.pop("ENVPATH")
+    for raw, expected_root in (
+        ("~/home-relative", tmp_path / "home-relative"),
+        ("working-relative", Path(__file__).parents[1] / "working-relative"),
+    ):
+        environment["DEPLOY_ROOT"] = raw
+        process = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=Path(__file__).parents[1],
+            env=environment,
+            capture_output=True,
+            text=True,
+        )
+        assert process.returncode == 0, process.stderr
+        expected = str(expected_root)
+        assert process.stdout.splitlines() == [expected, expected, str(expected_root / "bin")]
