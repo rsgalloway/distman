@@ -32,11 +32,12 @@
 """Tests for transient terminal activity rendering."""
 
 import io
+import logging
 from typing import Optional
 
 import pytest
 
-from distman.terminal import ASCII_FRAMES, BRAILLE_FRAMES, Spinner
+from distman.terminal import ASCII_FRAMES, BRAILLE_FRAMES, Spinner, StatusFormatter, format_status
 
 
 class Terminal(io.StringIO):
@@ -66,6 +67,54 @@ class Terminal(io.StringIO):
         :return: Configured terminal capability.
         """
         return self.terminal
+
+
+def test_status_formatter_aligns_and_colors_console_lines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prefix interactive log lines with semantic colored markers.
+
+    :param monkeypatch: Fixture enabling terminal presentation outside CI.
+    :return: None.
+    """
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    formatter = StatusFormatter(Terminal())
+
+    success = logging.LogRecord("distman", logging.INFO, "", 0, "Updated\nInstalled", (), None)
+    success.status = "success"
+    warning = logging.LogRecord("distman", logging.WARNING, "", 0, "Not on main", (), None)
+    error = logging.LogRecord("distman", logging.ERROR, "", 0, "Failed", (), None)
+
+    assert formatter.format(success) == ("\033[32m✓\033[0m Updated\n\033[32m✓\033[0m Installed")
+    assert formatter.format(warning) == "\033[33m!\033[0m Not on main"
+    assert formatter.format(error) == "\033[31m✗\033[0m Failed"
+
+
+def test_format_status_marks_interactive_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Use a yellow question marker for an interactive confirmation prompt.
+
+    :param monkeypatch: Fixture enabling terminal presentation outside CI.
+    :return: None.
+    """
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+    assert format_status("Continue? [Y/n]:", "prompt", Terminal()) == (
+        "[33m?[0m Continue? [Y/n]:"
+    )
+
+
+def test_status_formatter_preserves_redirected_output() -> None:
+    """Keep redirected output free of terminal markers and ANSI sequences.
+
+    :return: None.
+    """
+    formatter = StatusFormatter(Terminal(terminal=False))
+    record = logging.LogRecord("distman", logging.INFO, "", 0, "Updated", (), None)
+    record.status = "success"
+
+    assert formatter.format(record) == "Updated"
 
 
 def test_spinner_updates_and_clears_terminal(monkeypatch: pytest.MonkeyPatch) -> None:

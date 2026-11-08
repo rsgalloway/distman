@@ -584,3 +584,36 @@ def test_safe_copytree_valueerror(temp_dir):
 
     with pytest.raises(ValueError):
         util.safe_copytree(src_dir, src_dir)
+
+
+def test_create_dest_folder_hides_initialization_until_verbose(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep routine destination setup quiet unless verbose output is requested.
+
+    :param tmp_path: Temporary deployment directory parent.
+    :param monkeypatch: Fixture recording informational log calls.
+    :return: None.
+    """
+    messages = []
+
+    def record(message: str, *args: object) -> None:
+        """Record one formatted informational message.
+
+        :param message: Logging format string.
+        :param args: Values interpolated into the format string.
+        :return: None.
+        """
+        messages.append(message % args if args else message)
+
+    monkeypatch.setattr(util.log, "info", record)
+    destination = tmp_path / "deploy" / "tool"
+
+    util.create_dest_folder(str(destination), dryrun=True)
+    assert messages == []
+
+    util.create_dest_folder(str(destination), dryrun=True, verbose=1)
+    assert messages == [
+        f"Creating destination directory '{destination.parent}'",
+        f"Initializing: {destination}",
+    ]

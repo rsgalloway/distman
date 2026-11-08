@@ -27,10 +27,12 @@ Distributions](install.md#destinations) for the variables and a copyable policy.
 ## Logging
 
 Every subcommand sends its user-facing status and diagnostics through the shared
-logger. Console output is written to stdout and successful non-dry-run commands are
-also recorded in `${LOG_DIR}/distman.log`. `LOG_DIR` defaults to
-`~/log/distman`; `LOG_LEVEL` defaults to `INFO`. Dry runs do not create or append to
-the deployment log.
+logger. Interactive console output uses aligned status markers; ANSI color is omitted
+when `NO_COLOR` is set, and redirected output remains plain. Console output is
+written to stdout. Successful non-dry-run commands are also recorded in
+`${LOG_DIR}/distman.log`. `LOG_DIR` defaults to `~/log/distman`;
+`LOG_LEVEL` defaults to `INFO`. Dry runs do not create or append to the deployment
+log.
 
 ## Distribution
 
@@ -87,7 +89,8 @@ configured target. When the selected source pattern contains wildcards,
 `--dest` is also treated as a destination template and must include the
 matching `%1`, `%2`, etc. placeholders.
 
-`--commit`, `--number`, and `--reset` are mutually exclusive.
+`--commit`, `--number`, and `--reset` are mutually exclusive. Routine destination initialization and
+directory-creation details are shown only with `-v`/`--verbose`.
 
 ## Removing distributed targets
 

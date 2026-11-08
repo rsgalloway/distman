@@ -31,6 +31,7 @@
 
 """Render transient command activity without changing stable command output."""
 
+import logging
 import os
 import sys
 import threading
@@ -44,6 +45,15 @@ GREEN = "\033[32m"
 RED = "\033[31m"
 RESET = "\033[0m"
 
+UNICODE_STATUS = {
+    "info": "•",
+    "success": "✓",
+    "warning": "!",
+    "error": "✗",
+    "prompt": "?",
+}
+ASCII_STATUS = {"info": ">", "success": "+", "warning": "!", "error": "x", "prompt": "?"}
+
 
 def _environment_flag(name: str) -> bool:
     """Return whether an environment flag contains a conventional true value.
@@ -53,6 +63,98 @@ def _environment_flag(name: str) -> bool:
     """
     value = os.environ.get(name)
     return value is not None and value.strip().lower() not in ("", "0", "false", "no")
+
+
+def terminal_enabled(stream: TextIO, enabled: bool = True) -> bool:
+    """Return whether a stream supports transient interactive presentation.
+
+    :param stream: Output stream whose terminal capability should be inspected.
+    :param enabled: Caller-controlled presentation switch.
+    :return: True for an enabled interactive terminal outside CI and dumb terminals.
+    """
+    return (
+        enabled
+        and callable(getattr(stream, "isatty", None))
+        and stream.isatty()
+        and os.environ.get("TERM", "").lower() != "dumb"
+        and not _environment_flag("CI")
+    )
+
+
+def supports_text(stream: TextIO, value: str) -> bool:
+    """Return whether a stream encoding can represent text without replacement.
+
+    :param stream: Output stream advertising an optional encoding.
+    :param value: Text whose encoding support should be tested.
+    :return: True when the configured encoding accepts the text.
+    """
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    try:
+        value.encode(encoding)
+    except (LookupError, UnicodeEncodeError):
+        return False
+    return True
+
+
+def format_status(message: str, status: str, stream: TextIO) -> str:
+    """Prefix one interactive terminal line with a semantic status marker.
+
+    :param message: User-facing line to format.
+    :param status: Semantic marker name such as info, success, warning, error, or prompt.
+    :param stream: Output stream controlling terminal, encoding, and color behavior.
+    :return: Terminal-formatted line, or unchanged text for noninteractive output.
+    """
+    if not terminal_enabled(stream):
+        return message
+    symbols = UNICODE_STATUS if supports_text(stream, "•✓✗") else ASCII_STATUS
+    selected = status if status in symbols else "info"
+    symbol = symbols[selected]
+    color = {
+        "success": GREEN,
+        "warning": YELLOW,
+        "error": RED,
+        "prompt": YELLOW,
+    }.get(selected, "")
+    if "NO_COLOR" not in os.environ and color:
+        symbol = f"{color}{symbol}{RESET}"
+    return f"{symbol} {message}"
+
+
+class StatusFormatter(logging.Formatter):
+    """Prefix interactive console records with aligned semantic status markers.
+
+    :param stream: Console stream used to determine terminal and encoding support.
+    """
+
+    def __init__(self, stream: TextIO) -> None:
+        """Initialize terminal, color, and marker capabilities.
+
+        :param stream: Console stream used to determine terminal and encoding support.
+        """
+        super().__init__("%(message)s")
+        self.stream = stream
+        self.enabled = terminal_enabled(stream)
+        self.symbols = UNICODE_STATUS if supports_text(stream, "•✓✗") else ASCII_STATUS
+
+    def format(self, record: logging.LogRecord) -> str:
+        """Format one record with a marker on every output line when interactive.
+
+        :param record: Log record containing an optional semantic status value.
+        :return: Plain or terminal-formatted message.
+        """
+        message = super().format(record)
+        if not self.enabled:
+            return message
+        status = getattr(record, "status", None)
+        if status not in self.symbols:
+            status = (
+                "error"
+                if record.levelno >= logging.ERROR
+                else "warning" if record.levelno >= logging.WARNING else "info"
+            )
+        return "\n".join(
+            format_status(line, status, self.stream) for line in message.splitlines() or [""]
+        )
 
 
 class Spinner:
@@ -77,13 +179,7 @@ class Spinner:
         """
         self.stream = stream or sys.stderr
         self.interval = interval
-        self.enabled = (
-            enabled
-            and callable(getattr(self.stream, "isatty", None))
-            and self.stream.isatty()
-            and os.environ.get("TERM", "").lower() != "dumb"
-            and not _environment_flag("CI")
-        )
+        self.enabled = terminal_enabled(self.stream, enabled)
         self.color = self.enabled and "NO_COLOR" not in os.environ
         self.frames = self._frames()
         self._frame = 0
@@ -98,12 +194,9 @@ class Spinner:
 
         :return: Braille animation frames, or an ASCII fallback.
         """
-        encoding = getattr(self.stream, "encoding", None) or "utf-8"
-        try:
-            "".join(BRAILLE_FRAMES).encode(encoding)
-        except (LookupError, UnicodeEncodeError):
-            return ASCII_FRAMES
-        return BRAILLE_FRAMES
+        return (
+            BRAILLE_FRAMES if supports_text(self.stream, "".join(BRAILLE_FRAMES)) else ASCII_FRAMES
+        )
 
     def _write(self, value: str) -> None:
         """Write and flush one transient terminal update.

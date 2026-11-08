@@ -40,6 +40,7 @@ import glob
 import os
 import re
 import shutil
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -47,6 +48,7 @@ from typing import Generator, List, Optional, Tuple
 
 from distman import config
 from distman.logger import log
+from distman.terminal import format_status
 
 # Precompiled regex for ignorable paths
 IGNORABLE_PATHS = re.compile(
@@ -596,19 +598,23 @@ def read_epoch_file(deploy_root: str = None) -> Optional[str]:
         return None
 
 
-def create_dest_folder(dest: str, dryrun: bool = False, yes: bool = False) -> bool:
+def create_dest_folder(
+    dest: str, dryrun: bool = False, yes: bool = False, verbose: int = 0
+) -> bool:
     """Creates destination folder if it does not exist. Prompts user to
     confirm if the folder does not exist yet.
 
     :param dest: destination file path.
     :param dryrun: dry run flag.
     :param yes: yes flag (skips user confirmation).
+    :param verbose: Verbosity level controlling initialization diagnostics.
     :return: True if destination folder was created.
     """
     dest_dir = os.path.dirname(dest)
 
     if not os.path.exists(dest_dir):
-        log.info("Creating destination directory '%s'", dest_dir)
+        if verbose:
+            log.info("Creating destination directory '%s'", dest_dir)
         if not dryrun:
             try:
                 os.makedirs(dest_dir)
@@ -629,7 +635,8 @@ def create_dest_folder(dest: str, dryrun: bool = False, yes: bool = False) -> bo
             )
             if not yes and not yesNo(question):
                 return False
-        log.info("Initializing: %s" % dest)
+        if verbose:
+            log.info("Initializing: %s" % dest)
 
 
 def expand_wildcard_entry(source_pattern: str, destination_template: str) -> List[Tuple[str, str]]:
@@ -913,14 +920,15 @@ def yesNo(question: str, default: Optional[bool] = None) -> bool:
     """
     choice = "[Y/n]" if default is True else "[y/N]" if default is False else "[y/n]"
     while True:
-        answer = input(f"{question} {choice}: ").strip().lower()
+        prompt = format_status(f"{question} {choice}:", "prompt", sys.stdout)
+        answer = input(f"{prompt} ").strip().lower()
         if not answer and default is not None:
             return default
         if answer in {"y", "yes"}:
             return True
         if answer in {"n", "no"}:
             return False
-        print("Please answer 'y' or 'n'.")
+        print(format_status("Please answer 'y' or 'n'.", "warning", sys.stdout))
 
 
 def get_files(start: str, all_files: bool = False) -> List[str]:
