@@ -38,13 +38,18 @@ Destination paths use brace-delimited variables:
 }
 ```
 
+The settings below are distman conventions, not requirements imposed by envstack.
+Deployment settings apply to `dist`, `undist`, `install`, and `uninstall` through
+the [shared policy loading order](install.md#destinations). Cache and logging settings
+remain command-specific.
+
 Common settings are:
 
 | Variable | Purpose | Default behavior |
 |---|---|---|
 | `ENV` | Deployment environment | `prod` |
-| `DEPLOY_ROOT` | Shared deployment root | Platform-specific `pipe/<ENV>` location |
-| `CACHE_ROOT` | Local cache root | Platform-specific cache under `<ENV>` |
+| `DEPLOY_ROOT` | Shared deployment root | `${HOME}/.local/distman/${ENV}` |
+| `CACHE_ROOT` | Local cache root | Platform-specific `distman/<ENV>` cache directory |
 | `CACHE_TTL` | Seconds between remote epoch checks | `600` |
 | `IGNORE_MISSING` | Skip missing sources | `false` |
 | `BUILD_DIR` | Pipeline working directory | `build` |

@@ -6,7 +6,7 @@ Contains a distable executable for the distman dist.py module.
 
 import re
 import sys
-from distman.dist import main
+from distman.dist.command import main
 
 if __name__ == "__main__":
     sys.argv[0] = re.sub(r"(-script\.pyw|\.exe)?$", "", sys.argv[0])

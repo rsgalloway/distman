@@ -36,33 +36,56 @@ Contains default config and settings.
 import os
 import platform
 
-# default environment settings
-ENV = os.getenv("ENV", "prod")
-HOME = os.getenv("HOME", os.path.expanduser("~"))
+from distman.policy import Policy
+
+# Shared deployment policy. The packaged distman.env is the single baseline for
+# dist, undist, install, and uninstall; active variables and an ENVPATH override
+# are applied by Policy before these compatibility constants are exposed. The
+# import-failure contingency keeps core help available in a broken/minimal
+# installation; supported installations resolve the packaged resource.
+try:
+    _policy = Policy()
+    _POLICY_VALUES = _policy.values
+    _POLICY_VALUES["DEPLOY_ROOT"] = str(_policy.deploy_root)
+except ImportError:
+    _home = os.getenv("HOME", os.path.expanduser("~"))
+    _environment = os.getenv("ENV", "prod")
+    _root = os.getenv("ROOT", f"{_home}/.local/distman")
+    _POLICY_VALUES = {
+        "HOME": _home,
+        "ENV": _environment,
+        "ROOT": _root,
+        "DEPLOY_ROOT": os.getenv("DEPLOY_ROOT", f"{_root}/{_environment}"),
+    }
+ENV = _POLICY_VALUES["ENV"]
+HOME = _POLICY_VALUES["HOME"]
 PLATFORM = platform.system().lower()
-ROOT = {
-    "darwin": f"{HOME}/Library/Application Support/pipe",
-    "linux": f"{HOME}/.local/pipe",
-    "windows": "C:\\ProgramData\\pipe",
-}.get(PLATFORM, f"./pipe/{ENV}")
-CACHE_DIR = {
-    "darwin": f"{HOME}/Library/Caches/pipe",
-    "linux": f"{HOME}/.cache/pipe",
+ROOT = _POLICY_VALUES["ROOT"]
+DEPLOY_ROOT = _POLICY_VALUES["DEPLOY_ROOT"]
+
+# Cache paths retain platform-native defaults and are independent of deployment
+# target layout. Supported installations resolve this from the packaged policy;
+# the local calculation is only the import-failure contingency used above.
+_cache_directory = {
+    "darwin": f"{HOME}/Library/Caches/distman",
+    "linux": f"{HOME}/.cache/distman",
     "windows": os.path.join(
-        os.environ.get("LOCALAPPDATA", os.path.join(HOME, "AppData", "Local")), "pipe"
+        os.environ.get("LOCALAPPDATA", os.path.join(HOME, "AppData", "Local")), "distman"
     ),
-}.get(PLATFORM)
-CACHE_ROOT = os.getenv("CACHE_ROOT", f"{CACHE_DIR}/{ENV}")
+}.get(PLATFORM, f"{HOME}/.cache/distman")
+CACHE_ROOT = os.getenv("CACHE_ROOT", _POLICY_VALUES.get("CACHE_ROOT", f"{_cache_directory}/{ENV}"))
 CACHE_TTL = int(os.getenv("CACHE_TTL", 600))
-DEPLOY_ROOT = os.getenv("DEPLOY_ROOT", f"{ROOT}/{ENV}")
-DEFAULT_ENV = {
-    "CACHE_ROOT": CACHE_ROOT,
-    "DEPLOY_ROOT": DEPLOY_ROOT,
-    "ENV": ENV,
-    "HOME": HOME,
-    "PLATFORM": PLATFORM,
-    "ROOT": ROOT,
-}
+DEFAULT_ENV = dict(_POLICY_VALUES)
+DEFAULT_ENV.update(
+    {
+        "CACHE_ROOT": CACHE_ROOT,
+        "DEPLOY_ROOT": DEPLOY_ROOT,
+        "ENV": ENV,
+        "HOME": HOME,
+        "PLATFORM": PLATFORM,
+        "ROOT": ROOT,
+    }
+)
 
 # dist file settings
 DIST_FILE = "dist.json"

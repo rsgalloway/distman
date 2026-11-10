@@ -33,19 +33,22 @@ __doc__ = """
 Core deployment logic for creating versioned filesystem distributions.
 """
 
-import argparse
 import fnmatch
 import os
 import re
 import time
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple, Union
+from pathlib import Path
+from typing import List, Optional, Tuple, Union
 
 from distman import config, util
-from distman.logger import log, setup_logging
+from distman.deployment import get_version_dest
+from distman.locking import locks
+from distman.logger import log
 from distman.pipeline import (
     ValidationError,
     get_pipeline_for_target,
+    pipeline_workspace,
     run_pipeline,
     validate_pipeline_spec,
 )
@@ -60,6 +63,13 @@ class Target:
     ``source`` is the repository path to distribute, ``dest`` is the resolved
     deployment path, and ``pipeline`` / ``options`` contain the effective
     target-specific settings.
+
+    :param name: Configured target name used for selection and logging.
+    :param source: Source path interpreted relative to the distributor directory.
+    :param dest: Resolved active deployment destination.
+    :param type: Filesystem object type used for logging.
+    :param pipeline: Optional effective transform pipeline specification.
+    :param options: Optional effective target settings, including version-matching policy.
     """
 
     name: str
@@ -97,7 +107,7 @@ def confirm(prompt: str, yes: bool, dryrun: bool) -> bool:
     :param dryrun: If True, simulate the action without making changes.
     :return: True if confirmed, False otherwise.
     """
-    return dryrun or yes or util.yesNo(prompt)
+    return dryrun or yes or util.yesNo(prompt, default=True)
 
 
 def update_symlink(dest: str, target: str, dryrun: bool) -> bool:
@@ -114,21 +124,6 @@ def update_symlink(dest: str, target: str, dryrun: bool) -> bool:
         return True
     version_dest = os.path.join(config.DIR_VERSIONS, os.path.basename(target))
     return util.link_object(version_dest, dest, target)
-
-
-def get_version_dest(dest: str, version_num: int, short_head: Optional[str]) -> str:
-    """Generate the destination path for a versioned file.
-
-    :param dest: The original destination path.
-    :param version_num: The version number to append.
-    :param short_head: Optional short hash of the latest commit.
-    :return: The versioned destination path.
-    """
-    versions_dir = os.path.join(os.path.dirname(dest), config.DIR_VERSIONS)
-    version_dest = os.path.join(versions_dir, os.path.basename(dest) + f".{version_num}")
-    if short_head:
-        version_dest += f".{short_head}"
-    return util.sanitize_path(version_dest)
 
 
 def should_skip_target(target_name: str, patterns: Optional[Union[str, List[str]]]) -> bool:
@@ -196,22 +191,30 @@ def validate_destination_template(destination: str) -> None:
 
     :param destination: Destination path or template to validate.
     :raises ValueError: If unresolved ``%N`` placeholders remain.
+
+    :return: None.
     """
     if re.search(r"%\d+", destination):
         raise ValueError(f"Unresolved wildcard placeholders: {destination}")
 
 
 class Distributor(GitRepo):
-    """Deploy targets from a loaded ``dist.json`` file."""
+    """Execute distribution operations within a caller-owned deployment operation.
 
-    def __init__(self):
+    The command layer owns the deployment-root lock and recovery preflight.
+    """
+
+    def __init__(self) -> None:
         """Initialize the distributor and ensure symlink support is available."""
         super().__init__()
         if not callable(getattr(os, "symlink", None)):
             util.add_symlink_support()
 
     def close(self) -> None:
-        """Release repository resources held by the distributor."""
+        """Release repository resources held by the distributor.
+
+        :return: None.
+        """
         try:
             if self.repo:
                 self.repo.close()
@@ -472,143 +475,157 @@ class Distributor(GitRepo):
             log.info(config.DRYRUN_MESSAGE)
 
         for t in target_list:
-            if not os.path.exists(t.source):
-                if t.options.get("ignore_missing", ignore_missing):
-                    log.info(f"Target {t.name}: Source '{t.source}' not found, skipping")
-                    continue
-                log.error(f"Target {t.name}: Source '{t.source}' does not exist")
-                return False
-
-            if not show and not force and (t.source in changed_files or t.source in changed_dirs):
-                log.info(
-                    f"Target {t.name}: Source '{t.source}' has uncommitted changes. "
-                    "Commit or use --force."
-                )
-                return False
-
-            destination_dir = os.path.dirname(t.dest)
-            if not show and not dryrun and not os.path.exists(destination_dir):
-                question = (
-                    f"Target {t.name}: Destination dir '{destination_dir}' "
-                    "doesn't exist. Create?"
-                )
-                if not confirm(question, yes, dryrun):
-                    return False
-                try:
-                    os.makedirs(os.path.dirname(t.dest), exist_ok=True)
-                except Exception as err:
-                    log.error(str(err))
-                    return False
-
-            if t.type == "?":
-                t.type = util.get_path_type(t.source)[0]
-
-            util.create_dest_folder(t.dest, dryrun, yes)
-
-            # determine if the commit hash will be used for matching versions
-            match_option = t.options.get("match", "commit")
-
-            # FIXME: fallback shim until match option is fully implemented
-            if match_option not in ["commit", "content"]:
-                raise ValueError(f"Unsupported version match option '{match_option}'")
-
-            if match_option == "commit":
-                commit_hash = self.short_head
-            else:
-                commit_hash = None  # don't use commit_hash in version matching
-
-            if not dryrun and not show:
-                util.write_dist_file(
-                    t.dest,
-                    {
-                        "name": self.name,
-                        "origin": self.path,
-                        "branch": self.branch_name,
-                        "commit": self.short_head,
-                        "source": t.source,
-                        "author": self.author,
-                    },
-                )
-                did_mutate = True
-
-            source_path = t.source
-
-            # run the pipeline if defined
-            if not dryrun and not show and t.pipeline:
-                try:
-                    source_path = run_pipeline(
-                        target=t,
-                        pipeline=t.pipeline,
-                        input_path=t.source,
-                        build_dir=config.BUILD_DIR,
-                    )
-                except ValidationError as e:
-                    log.error(f"Pipeline validation error: {e}")
-                    raise
-                except TransformError as e:
-                    log.error(f"Pipeline transform error: {e}")
-                    raise
-                except Exception as e:
-                    log.error(f"Pipeline unhandled error: {e}")
-                    raise
-
-            # get existing versions for the target
-            if show:
-                if verbose >= 1:
-                    version_list = util.get_file_versions(t.dest)
-                else:
-                    version_list = []
-                self.show_distribution_info(t.source, t.dest, version_list, verbose)
-                continue
-            else:
-                version_list = util.get_file_versions(t.dest, limit=config.MAX_VERSIONS)
-
-            # determine the next version number
-            version_num = version_list[-1][1] + 1 if version_list else 0
-
-            # look for matches in existing versions unless forced
-            matches = []
-            if not force:
-                matches = util.find_matching_versions(
-                    source_path=source_path,
-                    dest=t.dest,
-                    commit_hash=commit_hash,
-                    version_list=version_list,
-                )
-
-            # if a match is found, update the symlink if needed
-            if matches:
-                match_file, _, _ = matches[-1]
-                if os.path.islink(t.dest) and os.readlink(t.dest).endswith(
-                    os.path.basename(match_file)
-                ):
-                    log.info(f"Unchanged: {t.source} ={t.type}> {match_file}")
-                    continue
-                if versiononly and not force:
-                    log.info(f"Match: {t.source} ={t.type}> {match_file}")
-                    continue
-                if confirm(
-                    f"Match: {t.source} ={t.type}> {match_file}. Update link?",
-                    yes,
-                    dryrun,
-                ):
-                    if update_symlink(t.dest, match_file, dryrun):
-                        log.info(f"Updated: {t.source} ={t.type}> {match_file}")
-                        did_mutate = True
-                    continue
-
-            # get the destination path for the versioned file
-            version_dest = get_version_dest(t.dest, version_num, self.short_head)
-
-            # copy the source file to the versioned destination
-            if not dryrun:
-                util.copy_object(source_path, version_dest, all_files=all)
-                did_mutate = True
-                if not versiononly:
-                    if not update_symlink(t.dest, version_dest, dryrun):
+            with pipeline_workspace(
+                config.BUILD_DIR, enabled=bool(t.pipeline) and not (dryrun or show)
+            ) as build_dir:
+                if not os.path.exists(t.source):
+                    if t.options.get("ignore_missing", ignore_missing):
+                        log.info(f"Target {t.name}: Source '{t.source}' not found, skipping")
                         continue
+                    log.error(f"Target {t.name}: Source '{t.source}' does not exist")
+                    return False
 
-            log.info(f"Updated: {t.source} ={t.type}> {version_dest}")
+                if (
+                    not show
+                    and not force
+                    and (t.source in changed_files or t.source in changed_dirs)
+                ):
+                    log.info(
+                        f"Target {t.name}: Source '{t.source}' has uncommitted changes. "
+                        "Commit or use --force."
+                    )
+                    return False
+
+                destination_dir = os.path.dirname(t.dest)
+                if not show and not dryrun and not os.path.exists(destination_dir):
+                    question = (
+                        f"Target {t.name}: Destination dir '{destination_dir}' "
+                        "doesn't exist. Create?"
+                    )
+                    if not confirm(question, yes, dryrun):
+                        return False
+                    try:
+                        os.makedirs(os.path.dirname(t.dest), exist_ok=True)
+                    except Exception as err:
+                        log.error(str(err))
+                        return False
+
+                if t.type == "?":
+                    t.type = util.get_path_type(t.source)[0]
+
+                with locks([Path(t.dest)], dryrun or show):
+                    util.create_dest_folder(t.dest, dryrun, yes, verbose)
+
+                    # determine if the commit hash will be used for matching versions
+                    match_option = t.options.get("match", "commit")
+
+                    # FIXME: fallback shim until match option is fully implemented
+                    if match_option not in ["commit", "content"]:
+                        raise ValueError(f"Unsupported version match option '{match_option}'")
+
+                    if match_option == "commit":
+                        commit_hash = self.short_head
+                    else:
+                        commit_hash = None  # don't use commit_hash in version matching
+
+                    if not dryrun and not show:
+                        util.write_dist_file(
+                            t.dest,
+                            {
+                                "name": self.name,
+                                "origin": self.path,
+                                "branch": self.branch_name,
+                                "commit": self.short_head,
+                                "source": t.source,
+                                "author": self.author,
+                            },
+                        )
+                        did_mutate = True
+
+                    source_path = t.source
+
+                    # run the pipeline if defined
+                    if not dryrun and not show and t.pipeline:
+                        try:
+                            source_path = run_pipeline(
+                                target=t,
+                                pipeline=t.pipeline,
+                                input_path=t.source,
+                                build_dir=build_dir,
+                            )
+                        except ValidationError as e:
+                            log.error(f"Pipeline validation error: {e}")
+                            raise
+                        except TransformError as e:
+                            log.error(f"Pipeline transform error: {e}")
+                            raise
+                        except Exception as e:
+                            log.error(f"Pipeline unhandled error: {e}")
+                            raise
+
+                    # get existing versions for the target
+                    if show:
+                        if verbose >= 1:
+                            version_list = util.get_file_versions(t.dest)
+                        else:
+                            version_list = []
+                        self.show_distribution_info(t.source, t.dest, version_list, verbose)
+                        continue
+                    else:
+                        version_list = util.get_file_versions(t.dest, limit=config.MAX_VERSIONS)
+
+                    # determine the next version number
+                    version_num = version_list[-1][1] + 1 if version_list else 0
+
+                    # look for matches in existing versions unless forced
+                    matches = []
+                    if not force:
+                        matches = util.find_matching_versions(
+                            source_path=source_path,
+                            dest=t.dest,
+                            commit_hash=commit_hash,
+                            version_list=version_list,
+                        )
+
+                    # if a match is found, update the symlink if needed
+                    if matches:
+                        match_file, _, _ = matches[-1]
+                        if os.path.islink(t.dest) and os.readlink(t.dest).endswith(
+                            os.path.basename(match_file)
+                        ):
+                            log.info(f"Unchanged: {t.source} ={t.type}> {match_file}")
+                            continue
+                        if versiononly and not force:
+                            log.info(f"Match: {t.source} ={t.type}> {match_file}")
+                            continue
+                        if confirm(
+                            f"Match: {t.source} ={t.type}> {match_file}. Update link?",
+                            yes,
+                            dryrun,
+                        ):
+                            if update_symlink(t.dest, match_file, dryrun):
+                                log.info(
+                                    f"Updated: {t.source} ={t.type}> {match_file}",
+                                    extra={"status": "success"},
+                                )
+                                did_mutate = True
+                            continue
+
+                    # get the destination path for the versioned file
+                    version_dest = get_version_dest(t.dest, version_num, self.short_head)
+
+                    # copy the source file to the versioned destination
+                    if not dryrun:
+                        util.copy_object(source_path, version_dest, all_files=all)
+                        did_mutate = True
+                        if not versiononly:
+                            if not update_symlink(t.dest, version_dest, dryrun):
+                                continue
+
+                    log.info(
+                        f"Updated: {t.source} ={t.type}> {version_dest}",
+                        extra={"status": "success"},
+                    )
 
         if did_mutate and not dryrun and not show:
             util.write_epoch_file(config.DEPLOY_ROOT)
@@ -660,17 +677,18 @@ class Distributor(GitRepo):
                 target_list.append((source, dest))
 
         for source, dest in target_list:
-            version_list = util.get_file_versions(dest)
-            if not version_list:
-                log.info(f"Target {target_name}: No versioned files found for '{source}'")
-                continue
-            latest_ver = version_list[-1][0]
-            target_type = util.get_path_type(latest_ver)[0]
-            if dryrun:
-                log.info(f"{source} ={target_type}> {latest_ver}")
-            else:
-                if update_symlink(dest, latest_ver, dryrun):
+            with locks([Path(dest)], dryrun):
+                version_list = util.get_file_versions(dest)
+                if not version_list:
+                    log.info(f"Target {target_name}: No versioned files found for '{source}'")
+                    continue
+                latest_ver = version_list[-1][0]
+                target_type = util.get_path_type(latest_ver)[0]
+                if dryrun:
                     log.info(f"{source} ={target_type}> {latest_ver}")
+                else:
+                    if update_symlink(dest, latest_ver, dryrun):
+                        log.info(f"{source} ={target_type}> {latest_ver}")
 
         if not any_found:
             log.info("No targets found to reset")
@@ -760,42 +778,43 @@ class Distributor(GitRepo):
                 target_list.append((source, dest))
 
         for source, dest in target_list:
-            version_list = util.get_file_versions(dest)
-            if not version_list:
-                log.info(f"Target {target_name}: No versioned files found for {source}")
-                continue
-
-            dest_target_version = target_version
-            if isinstance(target_version, int) and target_version < 0:
-                if abs(target_version) > len(version_list) - 1:
-                    log.warning(
-                        "Requested to roll back %d versions but only %d exist for %s",
-                        abs(target_version),
-                        len(version_list) - 1,
-                        source,
-                    )
+            with locks([Path(dest)], dryrun):
+                version_list = util.get_file_versions(dest)
+                if not version_list:
+                    log.info(f"Target {target_name}: No versioned files found for {source}")
                     continue
-                # get the version number to roll back to for this source
-                dest_target_version = version_list[target_version - 1][1]
 
-            matched = False
-            for verfile, vernum, vercommit in version_list:
-                if (target_commit and util.hashes_equal(target_commit, vercommit)) or (
-                    target_version is not None and vernum == dest_target_version
-                ):
-                    any_found = True
-                    matched = True
-                    target_type = util.get_path_type(verfile)[0]
-                    log.info(f"{source} ={target_type}> {verfile}")
-                    if not dryrun:
-                        update_symlink(dest, verfile, dryrun)
-                    break
+                dest_target_version = target_version
+                if isinstance(target_version, int) and target_version < 0:
+                    if abs(target_version) > len(version_list) - 1:
+                        log.warning(
+                            "Requested to roll back %d versions but only %d exist for %s",
+                            abs(target_version),
+                            len(version_list) - 1,
+                            source,
+                        )
+                        continue
+                    # get the version number to roll back to for this source
+                    dest_target_version = version_list[target_version - 1][1]
 
-            if not matched:
-                if target_commit:
-                    log.info(f"Target commit {target_commit} not found for {source}")
-                else:
-                    log.info(f"Target version {target_version} not found for {source}")
+                matched = False
+                for verfile, vernum, vercommit in version_list:
+                    if (target_commit and util.hashes_equal(target_commit, vercommit)) or (
+                        target_version is not None and vernum == dest_target_version
+                    ):
+                        any_found = True
+                        matched = True
+                        target_type = util.get_path_type(verfile)[0]
+                        log.info(f"{source} ={target_type}> {verfile}")
+                        if not dryrun:
+                            update_symlink(dest, verfile, dryrun)
+                        break
+
+                if not matched:
+                    if target_commit:
+                        log.info(f"Target commit {target_commit} not found for {source}")
+                    else:
+                        log.info(f"Target version {target_version} not found for {source}")
 
         if not any_found:
             log.info("No targets found to change version")
@@ -851,297 +870,64 @@ class Distributor(GitRepo):
                 target_list.append((source, dest))
 
             for source, dest in target_list:
-                version_list = util.get_file_versions(dest)
-                if version_list:
-                    if target_version is not None:
-                        version_list = [v for v in version_list if int(v[1]) == int(target_version)]
-                    elif target_commit:
-                        version_list = [
-                            v for v in version_list if util.hashes_equal(target_commit, v[2])
-                        ]
+                with locks([Path(dest)], dryrun):
+                    version_list = util.get_file_versions(dest)
+                    if version_list:
+                        if target_version is not None:
+                            version_list = [
+                                v for v in version_list if int(v[1]) == int(target_version)
+                            ]
+                        elif target_commit:
+                            version_list = [
+                                v for v in version_list if util.hashes_equal(target_commit, v[2])
+                            ]
 
-                if version_list:
-                    if len(version_list) == 1:
-                        question = f"Delete {version_list[0][0]}?"
+                    if version_list:
+                        if len(version_list) == 1:
+                            question = f"Delete {version_list[0][0]}?"
+                        else:
+                            question = (
+                                f"Delete {len(version_list)} versions "
+                                f"for target '{target_name}'?"
+                            )
+                        if not confirm(question, yes, dryrun):
+                            continue
                     else:
-                        question = (
-                            f"Delete {len(version_list)} versions for target '{target_name}'?"
-                        )
-                    if not confirm(question, yes, dryrun):
                         continue
-                else:
-                    continue
 
-                any_found = True
-                dist_file = util.get_dist_file(dest=dest)
-                link_path = util.get_link_full_path(dest)
+                    any_found = True
+                    dist_file = util.get_dist_file(dest=dest)
+                    link_path = util.get_link_full_path(dest)
 
-                linked_to_version = link_path in [v[0] for v in version_list]
-                if (target_commit or target_version) and linked_to_version:
-                    log.warning(
-                        "Cannot delete target '%s' because it is linked to the "
-                        "version being deleted",
-                        target_name,
-                    )
-                    continue
+                    linked_to_version = link_path in [v[0] for v in version_list]
+                    if (target_commit or target_version) and linked_to_version:
+                        log.warning(
+                            "Cannot delete target '%s' because it is linked to the "
+                            "version being deleted",
+                            target_name,
+                        )
+                        continue
 
-                if target_commit is None and target_version is None:
-                    if os.path.lexists(dest):
-                        log.info(f"Delete: {dest}")
+                    if target_commit is None and target_version is None:
+                        if os.path.lexists(dest):
+                            log.info(f"Delete: {dest}")
+                            if not dryrun:
+                                util.remove_object(dest)
+                        else:
+                            log.info(f"Missing: {dest}")
+                        if os.path.lexists(dist_file):
+                            log.info(f"Delete: {dist_file}")
+                            if not dryrun:
+                                os.remove(dist_file)
+                        else:
+                            log.info(f"Missing: {dist_file}")
+
+                    for verfile, _, _ in version_list:
+                        log.info(f"Delete: {verfile}")
                         if not dryrun:
-                            util.remove_object(dest)
-                    else:
-                        log.info(f"Missing: {dest}")
-                    if os.path.lexists(dist_file):
-                        log.info(f"Delete: {dist_file}")
-                        if not dryrun:
-                            os.remove(dist_file)
-                    else:
-                        log.info(f"Missing: {dist_file}")
-
-                for verfile, _, _ in version_list:
-                    log.info(f"Delete: {verfile}")
-                    if not dryrun:
-                        util.remove_object(verfile, recurse=True)
+                            util.remove_object(verfile, recurse=True)
 
         if not any_found:
             log.info("No targets found to delete")
 
         return any_found
-
-
-def build_parser(prog: str = "dist") -> argparse.ArgumentParser:
-    """Build the argument parser for the deploy/version-management CLI.
-
-    :param prog: Program name to display in parser help.
-    :return: Configured argument parser.
-    """
-    from distman import __version__
-
-    parser = argparse.ArgumentParser(
-        prog=prog,
-        description="dist: distribute files and directories to versioned destinations",
-        formatter_class=argparse.RawTextHelpFormatter,
-    )
-    parser.add_argument(
-        "location",
-        metavar="LOCATION",
-        nargs="?",
-        default=".",
-        help="source directory and optional dist file location (default is cwd)",
-    )
-    parser.add_argument(
-        "-t",
-        "--target",
-        nargs="+",
-        metavar="TARGET",
-        help="target name in the dist file (supports wildcards)",
-    )
-    parser.add_argument(
-        "--source",
-        metavar="PATH",
-        help="source file or directory; matches dist.json source patterns when present",
-    )
-    parser.add_argument(
-        "--dest",
-        metavar="PATH",
-        help="deployment destination override; requires --source or --target",
-    )
-    parser.add_argument(
-        "-s",
-        "--show",
-        action="store_true",
-        help="show current distributed versions only",
-    )
-    parser.add_argument(
-        "-c",
-        "--commit",
-        metavar="HASH",
-        help="change TARGET version number to point to commit HASH",
-    )
-    parser.add_argument(
-        "-n",
-        "--number",
-        metavar="NUMBER",
-        help="change TARGET version number to point to NUMBER",
-    )
-    parser.add_argument(
-        "--reset",
-        action="store_true",
-        help="reset version for TARGET to point to latest version",
-    )
-    parser.add_argument(
-        "--delete",
-        action="store_true",
-        help="delete dist TARGET from deployment folder",
-    )
-    parser.add_argument(
-        "-y",
-        "--yes",
-        action="store_true",
-        help="answer yes to all questions, skipping user interaction",
-    )
-    parser.add_argument(
-        "--all",
-        action="store_true",
-        help="dist all files, including ignorable files",
-    )
-    parser.add_argument(
-        "--ignore-missing",
-        action="store_true",
-        default=config.IGNORE_MISSING,
-        help="ignore missing files in dist file",
-    )
-    parser.add_argument(
-        "-f",
-        "--force",
-        action="store_true",
-        help="force action, e.g. disting uncommitted file changes",
-    )
-    parser.add_argument(
-        "--version-only",
-        action="store_true",
-        help="distribute files only, do not create links",
-    )
-    parser.add_argument(
-        "-d",
-        "--dryrun",
-        action="store_true",
-        help="do a dry run, no actions will be performed",
-    )
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="count",
-        default=0,
-        help="output verbosity (-v for INFO, -vv for DEBUG)",
-    )
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=f"distman {__version__}",
-    )
-
-    return parser
-
-
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
-    """Parse command-line arguments for the dist utility.
-
-    :param argv: Optional argument sequence, excluding the executable name.
-    :return: Parsed command-line arguments.
-    """
-    parser = build_parser()
-    return parser.parse_args(list(argv) if argv is not None else None)
-
-
-def run(args: argparse.Namespace) -> int:
-    """Run the dist utility with parsed command-line arguments.
-
-    :param args: Parsed command-line arguments from ``parse_args``.
-    :return: Process exit code.
-    """
-
-    # validate
-    if not os.path.isdir(args.location):
-        print(f"{args.location} is not a directory")
-        return 1
-
-    if sum([bool(args.commit), bool(args.number), bool(args.reset)]) > 1:
-        print("--commit,--number and --reset are mutually exclusive")
-        return 1
-
-    try:
-        distributor = Distributor()
-
-        dist_file = os.path.join(args.location, config.DIST_FILE)
-        has_direct_target = bool(args.source and args.dest)
-        if has_direct_target and not os.path.exists(dist_file):
-            # An explicit source and destination is a complete ad-hoc deployment.
-            distributor.directory = args.location
-        elif not distributor.read_dist_file(args.location):
-            distributor.directory = args.location
-            return 1
-        else:
-            distributor.directory = args.location
-
-        # delete target(s)
-        if args.delete:
-            ok = distributor.delete_target(
-                target=args.target,
-                target_version=args.number,
-                target_commit=args.commit,
-                yes=args.yes,
-                dryrun=args.dryrun,
-            )
-            return 0 if ok else 1
-
-        # windows: ensure symlink privilege
-        if os.name == "nt":
-            if not util.check_symlinks():
-                return 1
-
-        # change/reset versions
-        if args.number or args.commit or args.reset:
-            if args.reset:
-                ok = distributor.reset_file_version(args.target, dryrun=args.dryrun)
-                return 0 if ok else 1
-
-            if args.number:
-                try:
-                    target_version = int(args.number)
-                except Exception:
-                    print(f"Invalid version number: {args.number}")
-                    return 2
-                target_commit = ""
-            else:
-                target_version = args.number
-                target_commit = args.commit
-                if len(target_commit) < config.LEN_MINHASH:
-                    print(f"Hashes must be at least {config.LEN_MINHASH} characters")
-                    return 2
-
-            ok = distributor.change_file_version(
-                target=args.target,
-                target_commit=target_commit,
-                target_version=target_version,
-                dryrun=args.dryrun,
-            )
-            return 0 if ok else 1
-
-        # run dist
-        try:
-            ok = distributor.dist(
-                target=args.target,
-                source=args.source,
-                dest=args.dest,
-                show=args.show,
-                force=args.force,
-                all=args.all,
-                yes=args.yes,
-                ignore_missing=args.ignore_missing,
-                dryrun=args.dryrun,
-                versiononly=args.version_only,
-                verbose=args.verbose,
-            )
-            return 0 if ok else 1
-        except KeyboardInterrupt:
-            print("Stopping dist...")
-            return 2
-
-    finally:
-        distributor.close()
-
-
-def main(argv: Optional[Sequence[str]] = None) -> int:
-    """Main entry point for the dist utility.
-
-    :param argv: Optional argument sequence, excluding the executable name.
-    :return: Process exit code.
-    """
-
-    args = parse_args(argv)
-
-    setup_logging(dryrun=args.dryrun)
-
-    return run(args)

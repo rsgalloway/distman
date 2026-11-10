@@ -11,11 +11,22 @@ to a destination. For one-off deployments, `dist` can also take an explicit
 pip install -U distman
 ```
 
-This installs three commands:
+This installs two commands:
 
-- `distman`: suite command with `dist` and `cache` subcommands
+- `distman`: suite command for distribution, caching, installation, removal, and recovery
 - `dist`: direct distribution and version-management command
-- `distcache`: direct cache-management command
+
+For an editable source checkout, first use a pip version that supports PEP 660
+and a setuptools backend that implements editable builds:
+
+```bash
+python -m pip install --upgrade "pip>=21.3" "setuptools>=64" wheel
+python -m pip install -e .
+```
+
+This bootstrap installs Distman's runtime dependencies. A command such as
+`distman install .` can deploy Distman after that bootstrap, but cannot run
+from a raw checkout before its own execution dependencies are available.
 
 ## Create a Distribution File
 

@@ -7,16 +7,18 @@ filesystem.
 ## Refresh a Cache
 
 By default, the cache command reads from `DEPLOY_ROOT` and writes to
-`CACHE_ROOT`:
+`CACHE_ROOT`. The packaged policy uses `~/.cache/distman/<ENV>` on Linux,
+`~/Library/Caches/distman/<ENV>` on macOS, and
+`~/AppData/Local/distman/<ENV>` on Windows:
 
 ```bash
-distcache
+distman cache
 ```
 
 Use explicit roots when needed:
 
 ```bash
-distcache --src /studio/apps/prod --dst /var/tmp/studio-apps
+distman cache --src /studio/apps/prod --dst /var/tmp/studio-apps
 ```
 
 Copies run in parallel. Symlinks are preserved when the destination supports
@@ -40,9 +42,9 @@ deploy/
 This makes routine shell startup checks inexpensive:
 
 ```bash
-distcache
-distcache --ttl 0
-distcache --force
+distman cache
+distman cache --ttl 0
+distman cache --force
 ```
 
 - `--ttl 0` always performs the epoch check.
@@ -52,7 +54,7 @@ distcache --force
 ## Inspect Differences
 
 ```bash
-distcache --diff
+distman cache --diff
 ```
 
 Diff mode compares the deployment and cache without copying data.
@@ -63,8 +65,8 @@ The cache may retain version objects that are no longer referenced by an
 active symlink. Preview and remove them with:
 
 ```bash
-distcache --prune --dryrun
-distcache --prune
+distman cache --prune --dryrun
+distman cache --prune
 ```
 
 Pruning keeps referenced versions and removes only unreferenced objects from
@@ -73,8 +75,8 @@ cache `versions` directories.
 ## Delete a Cache
 
 ```bash
-distcache --delete --dryrun
-distcache --delete
+distman cache --delete --dryrun
+distman cache --delete
 ```
 
 Cache deletion includes safety checks that reject dangerous destination roots.

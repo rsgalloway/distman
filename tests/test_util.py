@@ -38,6 +38,7 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
@@ -65,10 +66,58 @@ def temp_dir():
     shutil.rmtree(path)
 
 
+@pytest.mark.parametrize(
+    "default,answer,expected,indicator",
+    [
+        (True, "", True, "[Y/n]"),
+        (True, "n", False, "[Y/n]"),
+        (False, "", False, "[y/N]"),
+        (None, "yes", True, "[y/n]"),
+    ],
+)
+def test_yes_no_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+    default: Optional[bool],
+    answer: str,
+    expected: bool,
+    indicator: str,
+) -> None:
+    """Honor empty-input defaults and keep explicit answers authoritative.
+
+    :param monkeypatch: Fixture replacing interactive input.
+    :param default: Suggested response supplied to the helper.
+    :param answer: Simulated user response.
+    :param expected: Expected Boolean result.
+    :param indicator: Choice indicator expected in the prompt.
+    :return: None.
+    """
+    prompts = []
+
+    def respond(prompt: str) -> str:
+        """Capture the prompt and return one simulated response.
+
+        :param prompt: Complete input prompt.
+        :return: Test response.
+        """
+        prompts.append(prompt)
+        return answer
+
+    monkeypatch.setattr("builtins.input", respond)
+    assert util.yesNo("Continue?", default=default) is expected
+    assert indicator in prompts[0]
+
+
 def test_normalize_path():
     """Test the normalize_path function to ensure it correctly normalizes paths."""
     assert util.normalize_path("./foo/bar/") == os.path.normpath("foo/bar")
     assert util.normalize_path("") == "."
+
+
+def test_normalize_path_preserves_hidden_and_parent_segments():
+    """Preserve meaningful leading dots while removing an explicit current-directory prefix."""
+    assert util.normalize_path("./artifact") == "artifact"
+    assert util.normalize_path(".artifact") == ".artifact"
+    assert util.normalize_path("../artifact") == os.path.normpath("../artifact")
 
 
 def test_resolve_relative_path_normalizes_absolute_paths(temp_dir):
@@ -535,3 +584,36 @@ def test_safe_copytree_valueerror(temp_dir):
 
     with pytest.raises(ValueError):
         util.safe_copytree(src_dir, src_dir)
+
+
+def test_create_dest_folder_hides_initialization_until_verbose(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep routine destination setup quiet unless verbose output is requested.
+
+    :param tmp_path: Temporary deployment directory parent.
+    :param monkeypatch: Fixture recording informational log calls.
+    :return: None.
+    """
+    messages = []
+
+    def record(message: str, *args: object) -> None:
+        """Record one formatted informational message.
+
+        :param message: Logging format string.
+        :param args: Values interpolated into the format string.
+        :return: None.
+        """
+        messages.append(message % args if args else message)
+
+    monkeypatch.setattr(util.log, "info", record)
+    destination = tmp_path / "deploy" / "tool"
+
+    util.create_dest_folder(str(destination), dryrun=True)
+    assert messages == []
+
+    util.create_dest_folder(str(destination), dryrun=True, verbose=1)
+    assert messages == [
+        f"Creating destination directory '{destination.parent}'",
+        f"Initializing: {destination}",
+    ]

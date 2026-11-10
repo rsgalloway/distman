@@ -40,6 +40,7 @@ import glob
 import os
 import re
 import shutil
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -47,6 +48,7 @@ from typing import Generator, List, Optional, Tuple
 
 from distman import config
 from distman.logger import log
+from distman.terminal import format_status
 
 # Precompiled regex for ignorable paths
 IGNORABLE_PATHS = re.compile(
@@ -55,9 +57,19 @@ IGNORABLE_PATHS = re.compile(
 
 
 def add_symlink_support() -> None:
-    """Adds symlink support on Windows by monkeypatching os.symlink."""
+    """Adds symlink support on Windows by monkeypatching os.symlink.
 
-    def symlink_ms(source, link_name, target_is_directory=False):
+    :return: None.
+    """
+
+    def symlink_ms(source: str, link_name: str, target_is_directory: bool = False) -> None:
+        """Adapt the Windows symlink API to the os.symlink calling convention.
+
+        :param source: Target path to pass to the Windows symbolic-link API.
+        :param link_name: Path of the symbolic link to create.
+        :param target_is_directory: Whether the target is a directory rather than a file.
+        :return: None.
+        """
         csl = ctypes.windll.kernel32.CreateSymbolicLinkW
         csl.argtypes = (ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32)
         csl.restype = ctypes.c_ubyte
@@ -105,6 +117,8 @@ def copy_file(source: str, dest: str) -> None:
 
     :param source: Path to source file.
     :param dest: Path to destination file.
+
+    :return: None.
     """
     try:
         destdir = os.path.dirname(dest)
@@ -157,6 +171,8 @@ def copy_directory(source: str, dest: str, all_files: bool = False) -> None:
     :param source: Path to source directory.
     :param dest: Path to destination directory.
     :param all_files: Copy all files, including hidden and ignorable files.
+
+    :return: None.
     """
     source = os.path.abspath(source)
 
@@ -173,6 +189,8 @@ def copy_object(source: str, dest: str, all_files: bool = False) -> None:
     :param dest: Path to destination file or directory.
     :param all_files: Copy all files in a directory, including hidden and
         ignorable files.
+
+    :return: None.
     """
     if os.path.islink(source):
         link_target = os.readlink(source)
@@ -250,7 +268,12 @@ def compare_objects(path1: str, path2: str) -> bool:
 
 
 def parse_versioned_filename(name: str, prefix: str) -> Optional[Tuple[str, int, str]]:
-    """Parse ``<prefix>.<version>.<commit>[.*]`` style version filenames."""
+    """Parse ``<prefix>.<version>.<commit>[.*]`` style version filenames.
+
+    :param name: Filename to parse, without its parent directory.
+    :param prefix: Expected unversioned target basename.
+    :return: Target prefix, integer revision, and optional commit suffix; None if parsing fails.
+    """
     if not name.startswith(prefix + "."):
         return None
 
@@ -372,7 +395,7 @@ def is_file_hidden(filepath: str) -> bool:
 def is_ignorable(filepath: str, include_hidden: bool = False) -> bool:
     """Return ``True`` when a path should be skipped during distribution.
 
-    :param path: a file system path.
+    :param filepath: a file system path.
     :param include_hidden: include hidden files flag.
     :return: True if filepath is ignorable.
     """
@@ -382,7 +405,11 @@ def is_ignorable(filepath: str, include_hidden: bool = False) -> bool:
 
 
 def get_root_dir(path: str) -> str:
-    """Returns the root directory of a path."""
+    """Returns the root directory of a path.
+
+    :param path: Filesystem path whose parent is split using the host path separator.
+    :return: First component of the parent path; may be empty for an absolute POSIX path.
+    """
     return os.path.dirname(path).split(os.path.sep)[0]
 
 
@@ -419,7 +446,9 @@ def normalize_path(path: str) -> str:
     :return: normalized path.
     """
     path = sanitize_path(path)
-    return os.path.normpath(path.lstrip("./")) if not os.path.isabs(path) else path
+    if not os.path.isabs(path) and path.startswith("./"):
+        path = path[2:]
+    return os.path.normpath(path)
 
 
 def resolve_relative_path(base_dir: str, path: str) -> str:
@@ -443,6 +472,8 @@ def sanitize_path(path: str) -> str:
 
     :param path: file system path.
     :returns: sanitized path.
+
+    :return: Normalized path with Windows extended-path handling where applicable.
     """
     path = path.replace("\\", "/")
     if path[:2] != "//":  # unc paths
@@ -567,19 +598,23 @@ def read_epoch_file(deploy_root: str = None) -> Optional[str]:
         return None
 
 
-def create_dest_folder(dest: str, dryrun: bool = False, yes: bool = False) -> bool:
+def create_dest_folder(
+    dest: str, dryrun: bool = False, yes: bool = False, verbose: int = 0
+) -> bool:
     """Creates destination folder if it does not exist. Prompts user to
     confirm if the folder does not exist yet.
 
     :param dest: destination file path.
     :param dryrun: dry run flag.
     :param yes: yes flag (skips user confirmation).
+    :param verbose: Verbosity level controlling initialization diagnostics.
     :return: True if destination folder was created.
     """
     dest_dir = os.path.dirname(dest)
 
     if not os.path.exists(dest_dir):
-        log.info("Creating destination directory '%s'", dest_dir)
+        if verbose:
+            log.info("Creating destination directory '%s'", dest_dir)
         if not dryrun:
             try:
                 os.makedirs(dest_dir)
@@ -598,9 +633,10 @@ def create_dest_folder(dest: str, dryrun: bool = False, yes: bool = False) -> bo
                 dest,
                 "dir" if os.path.isdir(dest) else "file",
             )
-            if not yes and not yesNo(question):
+            if not yes and not yesNo(question, default=True):
                 return False
-        log.info("Initializing: %s" % dest)
+        if verbose:
+            log.info("Initializing: %s" % dest)
 
 
 def expand_wildcard_entry(source_pattern: str, destination_template: str) -> List[Tuple[str, str]]:
@@ -841,20 +877,28 @@ def replace_vars(
 
 
 def resolve_vars_path(path: str) -> str:
-    """Resolve environment tokens in a path and normalize its separators.
+    """Resolve path tokens from the normalized deployment policy.
 
-    :param path: file system path with optional ``{VAR}`` tokens.
-    :return: resolved and sanitized path.
+    Policy values take precedence over their raw process-environment forms so
+    destinations use the same absolute deployment root as locking and metadata.
+    Unrelated environment variables remain available to custom manifests.
+
+    :param path: File system path with optional ``{VAR}`` tokens.
+    :return: Resolved and sanitized path.
     """
-    return sanitize_path(replace_vars(path))
+    environment = dict(os.environ)
+    environment.update(config.DEFAULT_ENV)
+    return sanitize_path(replace_vars(path, env=environment))
 
 
-def safe_copytree(src: str, dst: str):
+def safe_copytree(src: str, dst: str) -> None:
     """Safely copies a directory tree, avoiding infinite recursion, and skipping
     ignorable file patterns defined in config.IGNORABLE.
 
     :param src: Source directory path.
     :param dst: Destination directory path.
+
+    :return: None.
     """
 
     if os.path.abspath(src) == os.path.abspath(dst):
@@ -867,20 +911,24 @@ def safe_copytree(src: str, dst: str):
         shutil.copy2(file, target_path)
 
 
-def yesNo(question: str) -> bool:
-    """Displays question text to user and reads yes/no input.
+def yesNo(question: str, default: Optional[bool] = None) -> bool:
+    """Display a yes/no question and honor an optional empty-input default.
 
-    :param question: question text.
-    :return: True if user answers yes.
+    :param question: Question text shown before the choice indicator.
+    :param default: Value returned for Enter alone; None requires an explicit answer.
+    :return: True for yes and False for no.
     """
+    choice = "[Y/n]" if default is True else "[y/N]" if default is False else "[y/n]"
     while True:
-        answer = input(f"{question} (y/n): ").strip().lower()
+        prompt = format_status(f"{question} {choice}:", "prompt", sys.stdout)
+        answer = input(f"{prompt} ").strip().lower()
+        if not answer and default is not None:
+            return default
         if answer in {"y", "yes"}:
             return True
-        elif answer in {"n", "no"}:
+        if answer in {"n", "no"}:
             return False
-        else:
-            print("Please answer 'y' or 'n'.")
+        print(format_status("Please answer 'y' or 'n'.", "warning", sys.stdout))
 
 
 def get_files(start: str, all_files: bool = False) -> List[str]:
